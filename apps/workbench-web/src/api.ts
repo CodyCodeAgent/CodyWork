@@ -64,4 +64,6 @@ export const api = {
   listDocs: (wsId: string) => request<{ files: string[] }>('GET', `/api/workspaces/${wsId}/docs`),
   readDoc: (wsId: string, path: string) => request<{ path: string; content: string }>('GET', `/api/workspaces/${wsId}/docs/${path}`),
   writeDoc: (wsId: string, path: string, content: string) => request<{ ok: boolean }>('PUT', `/api/workspaces/${wsId}/docs/${path}`, { content }),
+  search: (wsId: string, q: string) => request<{ query: string; hits: { path: string; snippet: string }[]; total: number }>('GET', `/api/workspaces/${wsId}/search?q=${encodeURIComponent(q)}`),
+  rebuildSearch: (wsId: string) => request<{ indexed: number }>('POST', `/api/workspaces/${wsId}/search/rebuild`),
 }

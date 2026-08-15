@@ -11,6 +11,7 @@ import {
 } from '../db/index.js'
 import * as csr from '../services/csr.js'
 import { generateSddStep, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
+import { KnowledgeIndex } from '../services/knowledge.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
@@ -53,6 +54,7 @@ export interface AppContext {
   db: WorkbenchDb
   root: string
   ai?: AiConfig | undefined
+  search?: KnowledgeIndex | undefined
 }
 
 /** 路由表：method + 路径模式（:param）。 */
@@ -190,6 +192,20 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     const ws = getWs(ctx, param(c, 'id'))
     csr.writeFile(ws.path, param(c, 'path'), String(c.body?.content ?? ''))
     return { ok: true }
+  })
+
+  // ── 知识/排障检索 ──
+  r('GET', '/api/workspaces/:id/search', (c) => {
+    getWs(ctx, param(c, 'id'))
+    const q = c.query.get('q') ?? ''
+    if (!ctx.search) throw new Error('检索未配置')
+    const hits = ctx.search.search(q)
+    return { query: q, hits, total: hits.length }
+  })
+  r('POST', '/api/workspaces/:id/search/rebuild', (c) => {
+    const ws = getWs(ctx, param(c, 'id'))
+    if (!ctx.search) throw new Error('检索未配置')
+    return ctx.search.rebuild(ws.path)
   })
 
   // ── 健康检查 ──

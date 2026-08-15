@@ -6,6 +6,7 @@ import { ReposPage } from './pages/ReposPage'
 import { DocsPage } from './pages/DocsPage'
 import { DemandsPage } from './pages/DemandsPage'
 import { DemandDetail } from './pages/DemandDetail'
+import { SearchPage } from './pages/SearchPage'
 
 export type Page =
   | { kind: 'workspaces' }
@@ -14,6 +15,7 @@ export type Page =
   | { kind: 'docs'; ws: Workspace }
   | { kind: 'demands'; ws: Workspace }
   | { kind: 'demand'; ws: Workspace; demandId: string }
+  | { kind: 'search'; ws: Workspace }
 
 const STEP_LABELS: Record<string, string> = {
   draft: '起草',
@@ -84,6 +86,10 @@ function App() {
               <div className={`nav-item ${page.kind === 'demands' || page.kind === 'demand' ? 'active' : ''}`} onClick={() => nav({ kind: 'demands', ws })}>
                 <span className="icon">📋</span> 需求看板
               </div>
+              <div className="nav-label">沉淀</div>
+              <div className={`nav-item ${page.kind === 'search' ? 'active' : ''}`} onClick={() => nav({ kind: 'search', ws })}>
+                <span className="icon">🔍</span> 排障检索
+              </div>
             </>
           )}
         </nav>
@@ -116,6 +122,7 @@ function App() {
         {page.kind === 'docs' && <DocsPage ws={page.ws} showToast={showToast} />}
         {page.kind === 'demands' && <DemandsPage ws={page.ws} onOpenDemand={demandId => nav({ kind: 'demand', ws: page.ws, demandId })} showToast={showToast} />}
         {page.kind === 'demand' && <DemandDetail ws={page.ws} demandId={page.demandId} showToast={showToast} />}
+        {page.kind === 'search' && <SearchPage ws={page.ws} showToast={showToast} />}
       </main>
       <div className={`toast ${toast ? 'show' : ''}`}>{toast}</div>
     </div>
