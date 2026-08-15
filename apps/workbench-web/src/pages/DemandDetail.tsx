@@ -14,6 +14,8 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
   const [demand, setDemand] = useState<(Demand & { worktrees: Worktree[] }) | null>(null)
   const [repos, setRepos] = useState<Repo[]>([])
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
+  const [generating, setGenerating] = useState(false)
+  const [generated, setGenerated] = useState('')
 
   const refresh = () => {
     api.getDemand(demandId).then(setDemand).catch(e => showToast(e.message))
@@ -26,6 +28,18 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
       showToast(`状态 → ${statusLabel(status)}`)
       refresh()
     }).catch(e => showToast(e.message))
+  }
+
+  const generate = (step: string) => {
+    setGenerating(true)
+    setGenerated('')
+    api.generateSdd(demandId, step)
+      .then((r) => {
+        setGenerated(r.content)
+        showToast(`AI 已生成 ${step} 内容`)
+      })
+      .catch(e => showToast(e.message))
+      .finally(() => setGenerating(false))
   }
 
   const createWorktrees = () => {
@@ -118,8 +132,24 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
           </div>
 
           <div className="card card-pad">
-            <div className="section-title mb12">需求信息</div>
-            <table>
+            <div className="section-title mb12">AI 生成层（SDD 文档）</div>
+            <div className="muted mb12" style={{ fontSize: 12.5 }}>
+              由 dsh agent 生成对应文档，写入 specs/ 目录。需要服务端配置 DEEPSEEK_API_KEY。
+            </div>
+            <div className="flex" style={{ flexWrap: 'wrap' }}>
+              {(['spec', 'plan', 'tasks', 'review', 'test-report'] as const).map(s => (
+                <button key={s} className="btn small" disabled={generating} onClick={() => generate(s)}>
+                  {generating ? '生成中…' : `生成 ${s}`}
+                </button>
+              ))}
+            </div>
+            {generated && (
+              <div className="mt20">
+                <div className="section-title mb12" style={{ fontSize: 13 }}>生成结果</div>
+                <pre className="mono" style={{ fontSize: 12, whiteSpace: 'pre-wrap', background: '#fafbfc', padding: 12, borderRadius: 8, maxHeight: 300, overflowY: 'auto' }}>{generated}</pre>
+              </div>
+            )}
+            <table className="mt20">
               <tbody>
                 <tr><th>字段</th><th>值</th></tr>
                 <tr><td>slug</td><td className="mono">{demand.slug}</td></tr>
@@ -127,10 +157,6 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
                 <tr><td>创建时间</td><td className="mono">{new Date(demand.created_at).toLocaleString()}</td></tr>
               </tbody>
             </table>
-            <div className="muted mt20" style={{ fontSize: 12 }}>
-              specs/ 目录已包含 spec.md / plan.md / tasks.md / review.md / test-report.md 模板，
-              可在知识库中查看该需求目录下的文档（后续接入 AI 生成层）。
-            </div>
           </div>
         </div>
       </div>

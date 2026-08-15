@@ -10,6 +10,7 @@ import {
   DemandRow,
 } from '../db/index.js'
 import * as csr from '../services/csr.js'
+import { generateSddStep, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
@@ -51,6 +52,7 @@ function json(res: ServerResponse, code: number, payload: unknown) {
 export interface AppContext {
   db: WorkbenchDb
   root: string
+  ai?: AiConfig | undefined
 }
 
 /** 路由表：method + 路径模式（:param）。 */
@@ -64,58 +66,64 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     return ctx.db.db.prepare('SELECT * FROM workspaces ORDER BY created_at DESC').all()
   })
   r('POST', '/api/workspaces', (c) => {
-    const { name, path, repos = [] } = c.body ?? {}
+    const body = c.body ?? {}
+    const name = body['name']
+    const path = body['path']
+    const repos = Array.isArray(body['repos']) ? (body['repos'] as unknown[]) : []
     if (!name || !path) throw new Error('name 和 path 必填')
+    const nameStr = String(name)
+    const pathStr = String(path)
     const id = makeId('ws')
-    csr.initCsrSkeleton(path, name)
+    csr.initCsrSkeleton(pathStr, nameStr)
     ctx.db.db
       .prepare('INSERT INTO workspaces (id, name, path, created_at) VALUES (?, ?, ?, ?)')
-      .run(id, name, path, nowIso())
+      .run(id, nameStr, pathStr, nowIso())
     for (const url of repos) {
-      const added = csr.addRepo(path, String(url))
+      const added = csr.addRepo(pathStr, String(url))
       if (added.ok && added.name) {
         ctx.db.db
           .prepare('INSERT INTO repos (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)')
           .run(makeId('repo'), id, added.name, nowIso())
       }
     }
-    return { id, name, path }
+    return { id, name: nameStr, path: pathStr }
   })
   r('DELETE', '/api/workspaces/:id', (c) => {
-    const ws = ctx.db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(c.params.id)
+    const ws = ctx.db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(param(c, 'id'))
     if (!ws) return { ok: false, error: 'not found' }
-    ctx.db.db.prepare('DELETE FROM workspaces WHERE id = ?').run(c.params.id)
+    ctx.db.db.prepare('DELETE FROM workspaces WHERE id = ?').run(param(c, 'id'))
     return { ok: true }
   })
 
   // ── 仓库 ──
   r('GET', '/api/workspaces/:id/repos', (c) => {
-    const ws = getWs(ctx, c.params.id)
-    const repos = ctx.db.db.prepare('SELECT * FROM repos WHERE workspace_id = ? ORDER BY name').all(c.params.id)
+    const ws = getWs(ctx, param(c, 'id'))
+    const repos = ctx.db.db.prepare('SELECT * FROM repos WHERE workspace_id = ? ORDER BY name').all(param(c, 'id'))
     return repos.map(row => ({ ...(row as object), status: csr.repoStatus(ws.path, String((row as { name: string }).name)) }))
   })
   r('POST', '/api/workspaces/:id/repos', (c) => {
-    const ws = getWs(ctx, c.params.id)
+    const ws = getWs(ctx, param(c, 'id'))
     const { url } = c.body ?? {}
     if (!url) throw new Error('url 必填')
     const added = csr.addRepo(ws.path, String(url))
-    if (!added.ok) return { ok: false, error: added.error }
+    if (!added.ok || !added.name) return { ok: false, error: added.error ?? '添加失败' }
+    const repoName = added.name
     ctx.db.db
       .prepare('INSERT INTO repos (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)')
-      .run(makeId('repo'), c.params.id, added.name, nowIso())
-    return { ok: true, name: added.name }
+      .run(makeId('repo'), param(c, 'id'), repoName, nowIso())
+    return { ok: true, name: repoName }
   })
   r('DELETE', '/api/workspaces/:id/repos/:name', (c) => {
-    ctx.db.db.prepare('DELETE FROM repos WHERE workspace_id = ? AND name = ?').run(c.params.id, c.params.name)
+    ctx.db.db.prepare('DELETE FROM repos WHERE workspace_id = ? AND name = ?').run(param(c, 'id'), param(c, 'name'))
     return { ok: true }
   })
 
   // ── 需求 ──
   r('GET', '/api/workspaces/:id/demands', (c) => {
-    return ctx.db.db.prepare('SELECT * FROM demands WHERE workspace_id = ? ORDER BY created_at DESC').all(c.params.id)
+    return ctx.db.db.prepare('SELECT * FROM demands WHERE workspace_id = ? ORDER BY created_at DESC').all(param(c, 'id'))
   })
   r('POST', '/api/workspaces/:id/demands', (c) => {
-    const ws = getWs(ctx, c.params.id)
+    const ws = getWs(ctx, param(c, 'id'))
     const { name } = c.body ?? {}
     if (!name) throw new Error('name 必填')
     const slug = slugify(String(name))
@@ -123,27 +131,39 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     csr.createDemandSpecs(ws.path, slug)
     ctx.db.db
       .prepare('INSERT INTO demands (id, workspace_id, name, slug, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, c.params.id, String(name), slug, 'draft', nowIso())
+      .run(id, param(c, 'id'), String(name), slug, 'draft', nowIso())
     return { id, slug, status: 'draft' }
   })
   r('GET', '/api/demands/:id', (c) => {
-    const d = getDemand(ctx, c.params.id)
+    const d = getDemand(ctx, param(c, 'id'))
     const ws = getWs(ctx, d.workspace_id)
     return { ...d, worktrees: csr.listWorktrees(ws.path, d.slug) }
   })
   r('PUT', '/api/demands/:id/status', (c) => {
-    getDemand(ctx, c.params.id)
-    const { status } = c.body ?? {}
-    if (!SDD_STEPS.includes(status as DemandStatus)) throw new Error(`非法状态: ${status}`)
-    ctx.db.db.prepare('UPDATE demands SET status = ? WHERE id = ?').run(status, c.params.id)
-    return { ok: true, status }
+    getDemand(ctx, param(c, 'id'))
+    const status = c.body?.['status']
+    if (!SDD_STEPS.includes(status as DemandStatus)) throw new Error(`非法状态: ${String(status)}`)
+    ctx.db.db.prepare('UPDATE demands SET status = ? WHERE id = ?').run(String(status), param(c, 'id'))
+    return { ok: true, status: String(status) }
+  })
+
+  // ── AI 生成层（生成性操作）──
+  r('POST', '/api/demands/:id/sdd/:step', async (c) => {
+    const d = getDemand(ctx, param(c, 'id'))
+    const ws = getWs(ctx, d.workspace_id)
+    if (!ctx.ai) throw new Error('AI 生成层未配置（缺少 DEEPSEEK_API_KEY 或 dsh 运行时）')
+    const step = AI_STEPS.find(s => s.step === param(c, 'step'))
+    if (!step) throw new Error(`非法步骤: ${param(c, 'step')}`)
+    const content = await generateSddStep({ ...ctx.ai, cwd: ws.path }, d.slug, step)
+    return { step: step.step, content }
   })
 
   // ── worktree ──
   r('POST', '/api/demands/:id/worktrees', (c) => {
-    const d = getDemand(ctx, c.params.id)
+    const d = getDemand(ctx, param(c, 'id'))
     const ws = getWs(ctx, d.workspace_id)
-    const { repos = [] } = c.body ?? {}
+    const reposRaw = c.body?.['repos']
+    const repos = Array.isArray(reposRaw) ? (reposRaw as unknown[]) : []
     const results: { ok: boolean; path?: string; error?: string }[] = []
     for (const repoName of repos) {
       results.push(csr.createWorktree(ws.path, d.slug, String(repoName)))
@@ -151,24 +171,24 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     return { results }
   })
   r('DELETE', '/api/demands/:id/worktrees/:repo', (c) => {
-    const d = getDemand(ctx, c.params.id)
+    const d = getDemand(ctx, param(c, 'id'))
     const ws = getWs(ctx, d.workspace_id)
-    return csr.removeWorktree(ws.path, d.slug, c.params.repo)
+    return csr.removeWorktree(ws.path, d.slug, param(c, 'repo'))
   })
 
   // ── 知识库 ──
   r('GET', '/api/workspaces/:id/docs', (c) => {
-    const ws = getWs(ctx, c.params.id)
+    const ws = getWs(ctx, param(c, 'id'))
     return { files: csr.listDocs(ws.path) }
   })
   r('GET', '/api/workspaces/:id/docs/*path', (c) => {
-    const ws = getWs(ctx, c.params.id)
-    const rel = c.params.path
+    const ws = getWs(ctx, param(c, 'id'))
+    const rel = param(c, 'path')
     return { path: rel, content: csr.readFile(ws.path, rel) }
   })
   r('PUT', '/api/workspaces/:id/docs/*path', (c) => {
-    const ws = getWs(ctx, c.params.id)
-    csr.writeFile(ws.path, c.params.path, String(c.body?.content ?? ''))
+    const ws = getWs(ctx, param(c, 'id'))
+    csr.writeFile(ws.path, param(c, 'path'), String(c.body?.content ?? ''))
     return { ok: true }
   })
 
@@ -196,17 +216,25 @@ function match(pattern: string, pathname: string): Record<string, string> | null
   if (pp.length > sp.length) return null
   const params: Record<string, string> = {}
   for (let i = 0; i < pp.length; i++) {
-    if (pp[i].startsWith(':')) {
-      params[pp[i].slice(1)] = sp[i]
-    } else if (pp[i] === '*') {
+    const pseg = pp[i]
+    const sseg = sp[i]
+    if (pseg === undefined || sseg === undefined) return null
+    if (pseg.startsWith(':')) {
+      params[pseg.slice(1)] = sseg
+    } else if (pseg === '*') {
       params['path'] = sp.slice(i).join('/')
       return params
-    } else if (pp[i] !== sp[i]) {
+    } else if (pseg !== sseg) {
       return null
     }
   }
   if (pp.length !== sp.length) return null
   return params
+}
+
+/** 取路径参数，缺省为空串（路由已保证存在）。 */
+function param(c: Ctx, key: string): string {
+  return c.params[key] ?? ''
 }
 
 export function startServer(ctx: AppContext, port: number) {

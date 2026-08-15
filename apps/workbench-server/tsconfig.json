@@ -4,7 +4,11 @@
     "rootDir": "src",
     "outDir": "lib/types",
     "lib": ["ES2024"],
-    "types": ["node"]
+    "types": ["node"],
+    "composite": false,
+    "incremental": false,
+    "noEmit": true,
+    "paths": {}
   },
   "include": ["src"]
 }

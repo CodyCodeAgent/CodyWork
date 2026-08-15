@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { WorkbenchDb } from './db/index.js'
 import { startServer } from './routes/index.js'
+import type { AiConfig } from './services/ai.js'
 
 const PORT = Number(process.env.CODY_WORKBENCH_PORT ?? 3210)
 const DB_PATH = process.env.CODY_WORKBENCH_DB ?? join(homedir(), '.cody-workbench', 'workbench.db')
@@ -9,7 +10,19 @@ const DB_PATH = process.env.CODY_WORKBENCH_DB ?? join(homedir(), '.cody-workbenc
 const db = new WorkbenchDb(DB_PATH)
 const root = process.env.CODY_WORKBENCH_ROOT ?? join(homedir(), 'cody-workbench-workspaces')
 
-const server = startServer({ db, root }, PORT)
+// AI 生成层：需要 DEEPSEEK_API_KEY + dsh 运行时才启用。
+let ai: AiConfig | undefined
+if (process.env.DEEPSEEK_API_KEY) {
+  ai = {
+    command: 'node',
+    cordisConfig: process.env.CODY_WORKBENCH_CORDIS ?? join(process.cwd(), 'examples/jsonrpc-agent/cordis.yml'),
+    cwd: process.env.CODY_WORKBENCH_ROOT ?? root,
+    model: process.env.CODY_WORKBENCH_MODEL ?? 'deepseek-v4-flash',
+    provider: process.env.CODY_WORKBENCH_PROVIDER ?? 'deepseek-official',
+  }
+}
+
+const server = startServer({ db, root, ai }, PORT)
 
 process.on('SIGINT', () => {
   server.close(() => {

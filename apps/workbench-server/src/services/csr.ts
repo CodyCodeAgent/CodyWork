@@ -124,7 +124,7 @@ export function addRepo(root: string, url: string): { ok: boolean; name?: string
   if (existsSync(dest)) return { ok: false, error: `仓库 ${name} 已存在` }
   mkdirSync(join(root, 'services'), { recursive: true })
   const r = runGit(root, ['clone', url, `services/${name}`])
-  if (!r.ok) return { ok: false, error: r.stderr ?? r.error }
+  if (!r.ok) return { ok: false, error: r.stderr ?? r.error ?? 'clone 失败' }
   return { ok: true, name }
 }
 
@@ -159,7 +159,7 @@ export function createWorktree(
   if (existsSync(dest)) return { ok: false, error: `worktree 已存在: ${dest}` }
   mkdirSync(join(root, 'worktrees', demandSlug, 'services'), { recursive: true })
   const r = runGit(src, ['worktree', 'add', '-b', branch, dest, 'HEAD'])
-  if (!r.ok) return { ok: false, error: r.stderr ?? r.error }
+  if (!r.ok) return { ok: false, error: r.stderr ?? r.error ?? 'worktree 创建失败' }
   return { ok: true, path: dest }
 }
 
