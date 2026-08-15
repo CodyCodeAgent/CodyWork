@@ -244,8 +244,8 @@ function match(pattern: string, pathname: string): Record<string, string> | null
     if (pseg === undefined || sseg === undefined) return null
     if (pseg.startsWith(':')) {
       params[pseg.slice(1)] = sseg
-    } else if (pseg === '*') {
-      params['path'] = sp.slice(i).join('/')
+    } else if (pseg.startsWith('*')) {
+      params[pseg.slice(1)] = sp.slice(i).join('/')
       return params
     } else if (pseg !== sseg) {
       return null
