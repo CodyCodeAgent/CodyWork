@@ -7,6 +7,7 @@ import { DocsPage } from './pages/DocsPage'
 import { DemandsPage } from './pages/DemandsPage'
 import { DemandDetail } from './pages/DemandDetail'
 import { SearchPage } from './pages/SearchPage'
+import { ChatPage } from './pages/ChatPage'
 
 export type Page =
   | { kind: 'workspaces' }
@@ -16,6 +17,7 @@ export type Page =
   | { kind: 'demands'; ws: Workspace }
   | { kind: 'demand'; ws: Workspace; demandId: string }
   | { kind: 'search'; ws: Workspace }
+  | { kind: 'chat'; ws: Workspace; demandId: string; demandName: string }
 
 const STEP_LABELS: Record<string, string> = {
   draft: '起草',
@@ -121,8 +123,9 @@ function App() {
         {page.kind === 'repos' && <ReposPage ws={page.ws} showToast={showToast} />}
         {page.kind === 'docs' && <DocsPage ws={page.ws} showToast={showToast} />}
         {page.kind === 'demands' && <DemandsPage ws={page.ws} onOpenDemand={demandId => nav({ kind: 'demand', ws: page.ws, demandId })} showToast={showToast} />}
-        {page.kind === 'demand' && <DemandDetail ws={page.ws} demandId={page.demandId} showToast={showToast} />}
+        {page.kind === 'demand' && <DemandDetail ws={page.ws} demandId={page.demandId} showToast={showToast} onNav={nav} />}
         {page.kind === 'search' && <SearchPage ws={page.ws} showToast={showToast} />}
+        {page.kind === 'chat' && <ChatPage demandId={page.demandId} demandName={page.demandName} showToast={showToast} />}
       </main>
       <div className={`toast ${toast ? 'show' : ''}`}>{toast}</div>
     </div>

@@ -12,6 +12,7 @@ import {
 import * as csr from '../services/csr.js'
 import { generateSddStep, runCompound, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
 import { KnowledgeIndex } from '../services/knowledge.js'
+import { ChatManager } from '../services/chat.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
@@ -55,6 +56,7 @@ export interface AppContext {
   root: string
   ai?: AiConfig | undefined
   search?: KnowledgeIndex | undefined
+  chat?: ChatManager | undefined
 }
 
 /** 路由表：method + 路径模式（:param）。 */
@@ -165,6 +167,21 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     if (!ctx.ai) throw new Error('AI 生成层未配置（缺少 DEEPSEEK_API_KEY 或 dsh 运行时）')
     const report = await runCompound({ ...ctx.ai, cwd: ws.path }, d.slug)
     return { report }
+  })
+
+  // ── AI 会话（交互式多轮对话）──
+  r('GET', '/api/demands/:id/chat', (c) => {
+    const d = getDemand(ctx, param(c, 'id'))
+    if (!ctx.chat) throw new Error('AI 会话未配置')
+    return { messages: ctx.chat.history(d.slug) }
+  })
+  r('POST', '/api/demands/:id/chat', async (c) => {
+    const d = getDemand(ctx, param(c, 'id'))
+    if (!ctx.chat) throw new Error('AI 会话未配置（缺少 DEEPSEEK_API_KEY 或 dsh 运行时）')
+    const msg = c.body?.['message']
+    if (!msg) throw new Error('message 必填')
+    const messages = await ctx.chat.chat(d.slug, String(msg))
+    return { messages }
   })
 
   // ── worktree ──

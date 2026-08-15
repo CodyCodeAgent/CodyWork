@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 import { api, Workspace, Demand, Worktree, Repo } from '../api'
-import { statusLabel } from '../App'
+import { statusLabel, Page } from '../App'
 
 interface Props {
   ws: Workspace
   demandId: string
   showToast: (msg: string) => void
+  onNav: (p: Page) => void
 }
 
 const STEPS = ['draft', 'spec', 'plan', 'tasks', 'implement', 'review', 'test-report', 'done', 'compound']
 
-export function DemandDetail({ ws, demandId, showToast }: Props) {
+export function DemandDetail({ ws, demandId, showToast, onNav }: Props) {
   const [demand, setDemand] = useState<(Demand & { worktrees: Worktree[] }) | null>(null)
   const [repos, setRepos] = useState<Repo[]>([])
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set())
@@ -78,6 +79,8 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
       <div className="topbar">
         <h1>{demand.name}</h1>
         <span className="crumb">specs/{demand.slug}</span>
+        <div className="spacer"></div>
+        <button className="btn" onClick={() => onNav({ kind: 'chat', ws, demandId, demandName: demand.name })}>💬 打开 AI 会话</button>
       </div>
       <div className="content">
         <div className="card card-pad mb20">
