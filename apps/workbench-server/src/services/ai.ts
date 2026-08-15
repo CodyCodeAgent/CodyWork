@@ -146,3 +146,41 @@ export async function runCompound(cfg: AiConfig, demandSlug: string): Promise<st
     await harness.close().catch(() => {})
   }
 }
+
+const TROUBLESHOOT_PERSONA = [
+  '你是一个业务排障 Agent。你的职责是：',
+  '1. 根据问题描述，结合业务代码、领域知识、现场日志、存储数据，梳理证据链；',
+  '2. 定位接口、日志、DB、配置和任务；',
+  '3. 输出结论和排障方案。',
+  '排障三要素：业务逻辑（代码+领域知识）、现场日志（Argos）、存储数据（DB/TCC/Redis/配置）。',
+  '工作区是 CSR 项目：services/（代码）、docs/（知识库）、specs/（需求）。',
+  '先读 docs/ 里的排障手册和历史经验（docs/references/），再读 services/ 里的相关代码。',
+].join('\n')
+
+/**
+ * 排障：用排障 persona 分析问题，结合 CSR 工作区代码和知识库。
+ * @returns AI 的排障结论（证据链 + 结论）。
+ */
+export async function runTroubleshoot(cfg: AiConfig, question: string): Promise<string> {
+  const harness = new DeepSeekHarness({
+    launch: {
+      command: cfg.command,
+      args: [cfg.cordisConfig],
+      env: {
+        ...process.env,
+        DSH_SYSTEM_PROMPT: TROUBLESHOOT_PERSONA,
+      },
+    },
+    cwd: cfg.cwd,
+    provider: cfg.provider ?? 'deepseek-official',
+    model: cfg.model ?? 'deepseek-v4-flash',
+  })
+
+  try {
+    const prompt = `排障问题：${question}\n\n请按证据链方式排查：① 理解问题 → ② 读相关代码/知识 → ③ 查日志/数据（如果有工具） → ④ 给出结论和方案。用中文。`
+    const result = await harness.run(prompt)
+    return result.finalResponse
+  } finally {
+    await harness.close().catch(() => {})
+  }
+}

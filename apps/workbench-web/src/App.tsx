@@ -90,7 +90,7 @@ function App() {
               </div>
               <div className="nav-label">沉淀</div>
               <div className={`nav-item ${page.kind === 'search' ? 'active' : ''}`} onClick={() => nav({ kind: 'search', ws })}>
-                <span className="icon">🔍</span> 排障检索
+                <span className="icon">🔍</span> 排障
               </div>
             </>
           )}

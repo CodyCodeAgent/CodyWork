@@ -16,6 +16,9 @@ export function SearchPage({ ws, showToast }: Props) {
   const [hits, setHits] = useState<Hit[]>([])
   const [total, setTotal] = useState(0)
   const [searching, setSearching] = useState(false)
+  const [troubleQ, setTroubleQ] = useState('')
+  const [troubleA, setTroubleA] = useState('')
+  const [troubling, setTroubling] = useState(false)
 
   const doSearch = (query: string) => {
     if (!query.trim()) {
@@ -39,6 +42,16 @@ export function SearchPage({ ws, showToast }: Props) {
       .catch(e => showToast(e.message))
   }
 
+  const doTroubleshoot = () => {
+    if (!troubleQ.trim() || troubling) return
+    setTroubling(true)
+    setTroubleA('')
+    api.troubleshoot(ws.id, troubleQ.trim())
+      .then(r => setTroubleA(r.answer))
+      .catch(e => showToast(e.message))
+      .finally(() => setTroubling(false))
+  }
+
   // 首次进入自动重建索引
   useEffect(() => {
     rebuild()
@@ -47,13 +60,37 @@ export function SearchPage({ ws, showToast }: Props) {
   return (
     <>
       <div className="topbar">
-        <h1>排障检索</h1>
-        <span className="crumb">SQLite FTS5（trigram）+ LIKE 兜底</span>
+        <h1>排障</h1>
+        <span className="crumb">检索 + 排障 Agent</span>
         <div className="spacer"></div>
         <button className="btn" onClick={rebuild}>🔄 重建索引</button>
       </div>
       <div className="content">
         <div className="card card-pad mb20">
+          <div className="section-title mb12">🤖 排障 Agent</div>
+          <div className="muted mb12" style={{ fontSize: 12.5 }}>
+            描述问题，AI 会读取代码/知识库，按证据链方式排查（需要 DEEPSEEK_API_KEY）。
+          </div>
+          <div className="flex">
+            <input
+              className="input"
+              style={{ marginBottom: 0, flex: 1 }}
+              placeholder="如：为什么这笔预算没有返还？"
+              value={troubleQ}
+              onChange={e => setTroubleQ(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && doTroubleshoot()}
+            />
+            <button className="btn primary" onClick={doTroubleshoot} disabled={troubling}>
+              {troubling ? '排查中…' : '排查'}
+            </button>
+          </div>
+          {troubleA && (
+            <pre className="mono mt20" style={{ fontSize: 12.5, whiteSpace: 'pre-wrap', background: '#fafbfc', padding: 14, borderRadius: 8, lineHeight: 1.7 }}>{troubleA}</pre>
+          )}
+        </div>
+
+        <div className="card card-pad mb20">
+          <div className="section-title mb12">🔍 知识检索</div>
           <div className="flex">
             <input
               className="input"

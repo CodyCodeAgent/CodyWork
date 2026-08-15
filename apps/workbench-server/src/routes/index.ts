@@ -10,7 +10,7 @@ import {
   DemandRow,
 } from '../db/index.js'
 import * as csr from '../services/csr.js'
-import { generateSddStep, runCompound, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
+import { generateSddStep, runCompound, runTroubleshoot, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
 import { KnowledgeIndex } from '../services/knowledge.js'
 import { ChatManager } from '../services/chat.js'
 
@@ -182,6 +182,16 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     if (!msg) throw new Error('message 必填')
     const messages = await ctx.chat.chat(d.slug, String(msg))
     return { messages }
+  })
+
+  // ── 排障 ──
+  r('POST', '/api/workspaces/:id/troubleshoot', async (c) => {
+    const ws = getWs(ctx, param(c, 'id'))
+    if (!ctx.ai) throw new Error('AI 生成层未配置（缺少 DEEPSEEK_API_KEY 或 dsh 运行时）')
+    const question = c.body?.['question']
+    if (!question) throw new Error('question 必填')
+    const answer = await runTroubleshoot({ ...ctx.ai, cwd: ws.path }, String(question))
+    return { answer }
   })
 
   // ── worktree ──
