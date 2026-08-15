@@ -7,14 +7,24 @@
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
 
 export interface AiConfig {
-  /** dsh 运行时启动命令（headless jsonrpc-agent）。 */
+  /** dsh jsonrpc-agent bin 的启动命令（node）。 */
   command: string
+  /** dsh jsonrpc-agent bin 路径（源码入口，经 tsx 运行）。 */
+  binPath: string
   /** cordis.yml 路径。 */
   cordisConfig: string
   /** 工作区 cwd（需求 specs/ 所在目录）。 */
   cwd: string
   model?: string
   provider?: string
+}
+
+/** 组装 DeepSeekHarness 的 launch 参数。 */
+export function launchArgs(cfg: AiConfig): { command: string; args: string[] } {
+  return {
+    command: cfg.command,
+    args: ['--import', 'tsx/esm', cfg.binPath, cfg.cordisConfig],
+  }
 }
 
 export interface SddStep {
@@ -69,8 +79,7 @@ export const SDD_STEPS: SddStep[] = [
 export async function generateSddStep(cfg: AiConfig, demandSlug: string, step: SddStep): Promise<string> {
   const harness = new DeepSeekHarness({
     launch: {
-      command: cfg.command,
-      args: [cfg.cordisConfig],
+      ...launchArgs(cfg),
       env: { ...process.env },
     },
     cwd: cfg.cwd,
@@ -112,8 +121,7 @@ export async function generateSddStep(cfg: AiConfig, demandSlug: string, step: S
 export async function runCompound(cfg: AiConfig, demandSlug: string): Promise<string> {
   const harness = new DeepSeekHarness({
     launch: {
-      command: cfg.command,
-      args: [cfg.cordisConfig],
+      ...launchArgs(cfg),
       env: { ...process.env },
     },
     cwd: cfg.cwd,
@@ -164,8 +172,7 @@ const TROUBLESHOOT_PERSONA = [
 export async function runTroubleshoot(cfg: AiConfig, question: string): Promise<string> {
   const harness = new DeepSeekHarness({
     launch: {
-      command: cfg.command,
-      args: [cfg.cordisConfig],
+      ...launchArgs(cfg),
       env: {
         ...process.env,
         DSH_SYSTEM_PROMPT: TROUBLESHOOT_PERSONA,

@@ -5,11 +5,17 @@
  */
 
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
+import { launchArgs } from './ai.js'
 import type { AiConfig } from './ai.js'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+/** 把任意字符串转成 ASCII 安全的 session id 片段（中文 slug → 十六进制）。 */
+function asciiKey(slug: string): string {
+  return Buffer.from(slug, 'utf8').toString('hex').slice(0, 24)
 }
 
 /** 一个需求会话的持有态：sessionId + 消息历史（内存态）。 */
@@ -21,8 +27,7 @@ export interface ChatSession {
 }
 
 /** 会话管理器：按需求 slug 复用会话。 */
-export class ChatManager {
-  private sessions = new Map<string, ChatSession>()
+export class ChatManager {  private sessions = new Map<string, ChatSession>()
   private cfg: AiConfig
 
   constructor(cfg: AiConfig) {
@@ -36,8 +41,7 @@ export class ChatManager {
 
     const harness = new DeepSeekHarness({
       launch: {
-        command: this.cfg.command,
-        args: [this.cfg.cordisConfig],
+        ...launchArgs(this.cfg),
         env: { ...process.env },
       },
       cwd: this.cfg.cwd,
@@ -46,7 +50,7 @@ export class ChatManager {
     })
 
     const session: ChatSession = {
-      id: `demand-${demandSlug}`,
+      id: `demand-${asciiKey(demandSlug)}`,
       demandSlug,
       messages: [],
       harness,
