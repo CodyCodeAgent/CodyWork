@@ -77,11 +77,20 @@ AI 生成层：
 - ✅ 工作台实例管理（多实例，自管理目录）
 - ✅ 确定性操作层：初始化 CSR 骨架 / 添加仓库 / 新建需求 / 切 worktree / 状态机 / 知识库浏览编辑
 - ✅ AI 生成层：SDD 文档生成（spec/plan/tasks/review/test-report）+ compound 知识回流（dsh SDK 驱动）
-- ✅ 排障检索：SQLite FTS5（trigram）+ LIKE 兜底
-- ✅ 前端四大模块：工作台列表 / 项目总览 / 仓库 / 知识库 / 需求看板+详情 / 排障检索
+- ✅ AI 会话区：每需求一个专属会话，多轮对话（dsh session 复用）
+- ✅ 排障：SQLite FTS5（trigram）+ LIKE 兜底检索 + 排障 Agent（证据链排查）
+- ✅ 前端：工作台列表 / 项目总览 / 仓库 / 知识库 / 需求看板+详情 / AI 会话 / 排障
+- ✅ 测试：28 个单元+集成测试（csr/db/knowledge/http）
+
+## 测试
+
+```sh
+cd apps/workbench-server
+npx vitest run tests
+```
+
+覆盖：CSR 目录操作、SQLite 元数据、FTS5 检索、HTTP 路由集成（含 AI 端点优雅降级）。
 
 ## 待办
 
-- [ ] AI 会话区（聊天界面 + 工具调用可视化 + 历史回放，当前 SDD 生成是非交互式）
-- [ ] troubleshoot preset（排障 Agent 长驻 + 字节内部 skills 接入）
-- [ ] 端到端验证 AI 生成层（需 DEEPSEEK_API_KEY，当前已验证路由/错误处理，未跑真实模型）
+- [ ] 端到端验证 AI 生成层/会话/排障（需可用的 DEEPSEEK_API_KEY + DEEPSEEK_BASE_URL）
