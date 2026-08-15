@@ -72,9 +72,16 @@ AI 生成层：
 
 - `POST /api/demands/:id/sdd/:step` 生成 SDD 文档（spec/plan/tasks/review/test-report）
 
+## 已实现功能
+
+- ✅ 工作台实例管理（多实例，自管理目录）
+- ✅ 确定性操作层：初始化 CSR 骨架 / 添加仓库 / 新建需求 / 切 worktree / 状态机 / 知识库浏览编辑
+- ✅ AI 生成层：SDD 文档生成（spec/plan/tasks/review/test-report）+ compound 知识回流（dsh SDK 驱动）
+- ✅ 排障检索：SQLite FTS5（trigram）+ LIKE 兜底
+- ✅ 前端四大模块：工作台列表 / 项目总览 / 仓库 / 知识库 / 需求看板+详情 / 排障检索
+
 ## 待办
 
-- [ ] compound 知识回流（AI 扫描 → 更新 docs/ → 人确认）
-- [ ] 排障检索（SQLite FTS5）+ troubleshoot preset
-- [ ] AI 会话区（聊天界面 + 工具调用可视化 + 历史回放）
-- [ ] 端到端验证 AI 生成层（需 DEEPSEEK_API_KEY）
+- [ ] AI 会话区（聊天界面 + 工具调用可视化 + 历史回放，当前 SDD 生成是非交互式）
+- [ ] troubleshoot preset（排障 Agent 长驻 + 字节内部 skills 接入）
+- [ ] 端到端验证 AI 生成层（需 DEEPSEEK_API_KEY，当前已验证路由/错误处理，未跑真实模型）
