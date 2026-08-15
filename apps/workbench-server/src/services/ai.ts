@@ -104,3 +104,45 @@ export async function generateSddStep(cfg: AiConfig, demandSlug: string, step: S
     await harness.close().catch(() => {})
   }
 }
+
+/**
+ * compound 知识回流：扫描 services/ + specs/，把新增稳定知识沉淀回 docs/。
+ * @returns AI 的总结报告（agent 已把内容写入 docs/）。
+ */
+export async function runCompound(cfg: AiConfig, demandSlug: string): Promise<string> {
+  const harness = new DeepSeekHarness({
+    launch: {
+      command: cfg.command,
+      args: [cfg.cordisConfig],
+      env: { ...process.env },
+    },
+    cwd: cfg.cwd,
+    provider: cfg.provider ?? 'deepseek-official',
+    model: cfg.model ?? 'deepseek-v4-flash',
+  })
+
+  try {
+    const prompt = [
+      '你是一个 CSR 工作台的 AI 研发助手，负责知识回流（compound）。',
+      '当前工作区是 CSR 项目：',
+      '- services/：业务域代码仓库（只读基线，最新合并后的代码）',
+      '- docs/：长期知识库（arch/ product-specs/ references/ rag/）',
+      '- specs/<需求>/：刚完成的需求的 spec.md / plan.md / tasks.md 等',
+      '',
+      `刚完成的需求：${demandSlug}`,
+      '任务：扫描该需求的 specs/ 目录和 services/ 里的相关代码，识别出值得沉淀的稳定知识（架构、业务规则、排障经验、SQL 定位等），',
+      '然后把这些知识写入 docs/ 的对应位置（arch/、product-specs/、references/ 或 references/knowledge/）。',
+      '',
+      '规则：',
+      '1. 不要修改 services/ 下的任何代码。',
+      '2. 优先更新已有文档，避免重复创建。',
+      '3. 写入用中文，保持简洁。',
+      '4. 完成后，报告你写入了哪些文件、每个文件的要点摘要。',
+    ].join('\n')
+
+    const result = await harness.run(prompt)
+    return result.finalResponse
+  } finally {
+    await harness.close().catch(() => {})
+  }
+}

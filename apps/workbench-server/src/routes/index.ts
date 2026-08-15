@@ -10,7 +10,7 @@ import {
   DemandRow,
 } from '../db/index.js'
 import * as csr from '../services/csr.js'
-import { generateSddStep, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
+import { generateSddStep, runCompound, SDD_STEPS as AI_STEPS, AiConfig } from '../services/ai.js'
 import { KnowledgeIndex } from '../services/knowledge.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
@@ -158,6 +158,13 @@ function buildRoutes(ctx: AppContext): { method: string; pattern: string; handle
     if (!step) throw new Error(`非法步骤: ${param(c, 'step')}`)
     const content = await generateSddStep({ ...ctx.ai, cwd: ws.path }, d.slug, step)
     return { step: step.step, content }
+  })
+  r('POST', '/api/demands/:id/compound', async (c) => {
+    const d = getDemand(ctx, param(c, 'id'))
+    const ws = getWs(ctx, d.workspace_id)
+    if (!ctx.ai) throw new Error('AI 生成层未配置（缺少 DEEPSEEK_API_KEY 或 dsh 运行时）')
+    const report = await runCompound({ ...ctx.ai, cwd: ws.path }, d.slug)
+    return { report }
   })
 
   // ── worktree ──

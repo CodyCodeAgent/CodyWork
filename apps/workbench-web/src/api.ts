@@ -60,6 +60,7 @@ export const api = {
   getDemand: (id: string) => request<Demand & { worktrees: Worktree[] }>('GET', `/api/demands/${id}`),
   setDemandStatus: (id: string, status: string) => request<{ ok: boolean; status: string }>('PUT', `/api/demands/${id}/status`, { status }),
   generateSdd: (demandId: string, step: string) => request<{ step: string; content: string }>('POST', `/api/demands/${demandId}/sdd/${step}`),
+  compound: (demandId: string) => request<{ report: string }>('POST', `/api/demands/${demandId}/compound`),
   createWorktrees: (demandId: string, repos: string[]) => request<{ results: { ok: boolean; path?: string; error?: string }[] }>('POST', `/api/demands/${demandId}/worktrees`, { repos }),
   listDocs: (wsId: string) => request<{ files: string[] }>('GET', `/api/workspaces/${wsId}/docs`),
   readDoc: (wsId: string, path: string) => request<{ path: string; content: string }>('GET', `/api/workspaces/${wsId}/docs/${path}`),

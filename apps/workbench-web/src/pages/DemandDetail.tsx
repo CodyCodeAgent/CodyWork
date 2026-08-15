@@ -42,6 +42,18 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
       .finally(() => setGenerating(false))
   }
 
+  const compound = () => {
+    setGenerating(true)
+    setGenerated('')
+    api.compound(demandId)
+      .then((r) => {
+        setGenerated(r.report)
+        showToast('知识回流完成')
+      })
+      .catch(e => showToast(e.message))
+      .finally(() => setGenerating(false))
+  }
+
   const createWorktrees = () => {
     const names = Array.from(selectedRepos)
     if (names.length === 0) {
@@ -142,6 +154,9 @@ export function DemandDetail({ ws, demandId, showToast }: Props) {
                   {generating ? '生成中…' : `生成 ${s}`}
                 </button>
               ))}
+              <button className="btn small" disabled={generating} onClick={compound} style={{ borderColor: 'var(--purple)', color: 'var(--purple)' }}>
+                🌱 知识回流（compound）
+              </button>
             </div>
             {generated && (
               <div className="mt20">
