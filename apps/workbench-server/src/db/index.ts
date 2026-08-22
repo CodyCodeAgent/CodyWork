@@ -179,7 +179,7 @@ export class WorkbenchDb {
       );
     `)
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
-    if (runtimeColumns.some(column => column.name === 'provider' || column.name?.startsWith('dsh_'))) {
+    if (runtimeColumns.some(column => column.name === 'provider' || column.name?.startsWith('legacy_'))) {
       this.db.exec(`
         BEGIN IMMEDIATE;
         ALTER TABLE runtime_settings RENAME TO runtime_settings_legacy;

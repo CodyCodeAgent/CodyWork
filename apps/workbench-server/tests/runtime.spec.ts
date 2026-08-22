@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
@@ -56,7 +57,7 @@ describe('generic runtime protocol', () => {
 
   it('drives a Codex App Server session, goal commands and runtime approvals', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
-    const fixture = resolve(process.cwd(), 'apps/workbench-server/tests/fixtures/codex-runtime.mjs')
+    const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
     const runtime = new CodexRuntimeAdapter({ command: `${process.execPath} ${fixture}` })
     const context = {
       workspacePath: root,

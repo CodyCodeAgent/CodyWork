@@ -25,15 +25,15 @@ describe('workspace-only server primitives', () => {
       CREATE TABLE runtime_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         provider TEXT NOT NULL,
-        dsh_transport TEXT NOT NULL,
-        dsh_url TEXT,
-        dsh_api_key TEXT,
-        dsh_model TEXT,
+        legacy_transport TEXT NOT NULL,
+        legacy_url TEXT,
+        legacy_api_key TEXT,
+        legacy_model TEXT,
         codex_url TEXT,
         codex_command TEXT,
         updated_at TEXT NOT NULL
       );
-      INSERT INTO runtime_settings VALUES (1, 'dsh', 'sdk', 'https://example.invalid', 'secret', 'legacy-model', '', 'custom-codex app-server --stdio', '2026-08-22T00:00:00.000Z');
+      INSERT INTO runtime_settings VALUES (1, 'legacy', 'sdk', 'https://example.invalid', 'secret', 'legacy-model', '', 'custom-codex app-server --stdio', '2026-08-22T00:00:00.000Z');
     `)
     legacy.close()
     const db = new WorkbenchDb(path)
