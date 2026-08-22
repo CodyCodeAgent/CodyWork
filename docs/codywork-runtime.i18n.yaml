@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/codywork-runtime.md
+codywork-runtime.md: 1a14619930f74ab8ed5f242f0eeb60e9cb741eaa
+codywork-runtime.zh.md: dcbc577140b4b830a89cbcb9d2b5782fe084587e

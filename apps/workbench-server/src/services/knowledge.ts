@@ -1,92 +1,63 @@
-/**
- * 知识/排障检索：SQLite FTS5（trigram 分词，支持中文 3 字及以上短语）
- * + LIKE 子串兜底（覆盖 1-2 字短关键词）。
- */
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { extname, join, relative, resolve } from 'node:path'
+import type { WorkspaceRow } from '../db/index.js'
 
-import { DatabaseSync } from 'node:sqlite'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, extname } from 'node:path'
+const DOCUMENT_EXTENSIONS = new Set(['.md', '.mdx', '.txt', '.json', '.yaml', '.yml'])
 
-export interface SearchHit {
+export interface KnowledgeDocument {
+  id: string
+  name: string
+  relativePath: string
   path: string
-  snippet: string
+  extension: string
+  size: number
+  updatedAt: string
+  content?: string
 }
 
-const INDEXABLE_EXT = new Set(['.md', '.txt', '.go', '.py', '.java', '.ts', '.tsx', '.js', '.thrift', '.proto', '.sql', '.yaml', '.yml', '.json'])
+function documentsRoot(workspace: WorkspaceRow): string {
+  return resolve(workspace.path, 'docs')
+}
 
-export class KnowledgeIndex {
-  private db: DatabaseSync
-
-  constructor(dbPath = ':memory:') {
-    this.db = new DatabaseSync(dbPath)
-    this.db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(path, content, tokenize='trigram');
-    `)
+function walk(root: string, current = root): string[] {
+  if (!existsSync(current) || !statSync(current).isDirectory()) return []
+  const files: string[] = []
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue
+    const path = join(current, entry.name)
+    if (entry.isDirectory()) files.push(...walk(root, path))
+    else if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) files.push(path)
   }
+  return files
+}
 
-  /** 清空并重建索引。 */
-  rebuild(root: string): { indexed: number } {
-    this.db.exec('DELETE FROM docs')
-    const stmt = this.db.prepare('INSERT INTO docs (path, content) VALUES (?, ?)')
-    let indexed = 0
-    const walk = (dir: string, relPrefix: string) => {
-      if (!existsSync(dir)) return
-      for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry)
-        const rel = relPrefix ? `${relPrefix}/${entry}` : entry
-        const st = statSync(full)
-        if (st.isDirectory()) {
-          if (entry === 'node_modules' || entry === '.git') continue
-          walk(full, rel)
-        } else if (INDEXABLE_EXT.has(extname(entry))) {
-          try {
-            const content = readFileSync(full, 'utf8')
-            // 大文件截断，避免索引爆炸
-            stmt.run(rel, content.slice(0, 200_000))
-            indexed++
-          } catch {
-            // 跳过不可读文件
-          }
-        }
-      }
-    }
-    walk(join(root, 'docs'), 'docs')
-    walk(join(root, 'specs'), 'specs')
-    walk(join(root, 'services'), 'services')
-    return { indexed }
+function toDocument(root: string, path: string, includeContent: boolean): KnowledgeDocument {
+  const info = statSync(path)
+  const relativePath = relative(root, path)
+  return {
+    id: relativePath,
+    name: relativePath.split('/').pop() ?? relativePath,
+    relativePath,
+    path,
+    extension: extname(path).toLowerCase().slice(1),
+    size: info.size,
+    updatedAt: info.mtime.toISOString(),
+    ...(includeContent ? { content: readFileSync(path, 'utf8') } : {}),
   }
+}
 
-  /**
-   * 检索：trigram 匹配（3 字+），失败时 LIKE 子串兜底。
-   */
-  search(query: string, limit = 20): SearchHit[] {
-    const q = query.trim()
-    if (!q) return []
-    const hits: SearchHit[] = []
+export function listKnowledgeDocuments(workspace: WorkspaceRow): KnowledgeDocument[] {
+  const root = documentsRoot(workspace)
+  return walk(root)
+    .map(path => toDocument(root, path, false))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+}
 
-    if ([...q].length >= 3) {
-      try {
-        const rows = this.db
-          .prepare('SELECT path, snippet(docs, 1, \'\', \'\', \'…\', 24) AS snip FROM docs WHERE docs MATCH ? LIMIT ?')
-          .all(q, limit) as { path: string; snip: string }[]
-        for (const r of rows) hits.push({ path: r.path, snippet: r.snip })
-      } catch {
-        // MATCH 语法错误（特殊字符），走 LIKE 兜底
-      }
-    }
-
-    if (hits.length === 0) {
-      const like = `%${q}%`
-      const rows = this.db
-        .prepare('SELECT path, substr(content, 1, 200) AS snip FROM docs WHERE content LIKE ? LIMIT ?')
-        .all(like, limit) as { path: string; snip: string }[]
-      for (const r of rows) hits.push({ path: r.path, snippet: r.snip })
-    }
-
-    return hits
-  }
-
-  close() {
-    this.db.close()
-  }
+export function getKnowledgeDocument(workspace: WorkspaceRow, id: string): KnowledgeDocument {
+  const root = documentsRoot(workspace)
+  const candidate = resolve(root, id)
+  const relativePath = relative(root, candidate)
+  if (!relativePath || relativePath.startsWith('..') || resolve(root, relativePath) !== candidate) throw new Error('知识文档路径无效')
+  if (!existsSync(candidate) || !statSync(candidate).isFile() || !DOCUMENT_EXTENSIONS.has(extname(candidate).toLowerCase())) throw new Error(`知识文档不存在：${id}`)
+  return toDocument(root, candidate, true)
 }

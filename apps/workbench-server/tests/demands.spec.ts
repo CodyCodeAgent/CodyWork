@@ -1,0 +1,125 @@
+import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../src/db/index.js'
+import { addRepositoryToDemand, createDemand, listDemands, reconcileDemandOperations } from '../src/services/demands.js'
+import { dashboardSnapshot } from '../src/services/dashboard.js'
+import { addRepository, listRepositories } from '../src/services/repositories.js'
+
+function git(cwd: string, args: string[]) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+}
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'cody-demand-'))
+  for (const entry of ['services', 'docs', 'specs', 'worktrees']) mkdirSync(join(root, entry))
+  for (const name of ['repo1', 'repo2']) {
+    const repo = join(root, 'services', name)
+    mkdirSync(repo)
+    git(repo, ['init', '-b', 'main'])
+    git(repo, ['config', 'user.email', 'test@example.com'])
+    git(repo, ['config', 'user.name', 'Test'])
+    writeFileSync(join(repo, 'README.md'), `# ${name}\n`)
+    git(repo, ['add', '.'])
+    git(repo, ['commit', '-m', 'initial'])
+  }
+  const db = new WorkbenchDb(':memory:')
+  const now = nowIso()
+  const workspace: WorkspaceRow = { id: makeId('ws'), name: 'fixture', path: root, created_at: now, last_opened_at: now }
+  db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)').run(workspace.id, workspace.name, workspace.path, workspace.created_at, workspace.last_opened_at)
+  return { root, db, workspace }
+}
+
+describe('demand worktree construction', () => {
+  it('creates one demand directory with multiple linked worktrees and docs', () => {
+    const { root, db, workspace } = fixture()
+    const repositories = listRepositories(db, workspace)
+    const result = createDemand(db, workspace, { name: 'Coupon rule', repositoryIds: repositories.map(repository => repository.id) })
+    expect(result.demand.worktreeKey).toBe('coupon-rule')
+    expect(listDemands(db, workspace)[0]?.repositories).toHaveLength(2)
+    expect(git(join(root, 'services', 'repo1'), ['branch', '--show-current'])).toBe('main')
+    expect(git(join(root, 'worktrees', 'coupon-rule', 'services', 'repo1'), ['branch', '--show-current'])).toBe('coupon-rule')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('rejects an empty repository selection before mutating the filesystem', () => {
+    const { root, db, workspace } = fixture()
+    expect(() => createDemand(db, workspace, { name: 'No repo', repositoryIds: [] })).toThrow('至少选择一个 Repo')
+    expect(git(join(root, 'services', 'repo1'), ['branch', '--show-current'])).toBe('main')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('reports dashboard demand counts after a successful creation', () => {
+    const { root, db, workspace } = fixture()
+    const ids = listRepositories(db, workspace).map(repository => repository.id)
+    const result = createDemand(db, workspace, { name: 'Coupon rule', branchName: 'feature/coupon-rule', repositoryIds: ids })
+    expect(result.demand.worktreeKey).toBe('feature__coupon-rule')
+    expect(listDemands(db, workspace)[0]?.repositories).toHaveLength(2)
+    const snapshot = dashboardSnapshot(db, workspace)
+    expect(snapshot.demands).toEqual({ total: 1, inProgress: 1, completed: 0, blocked: 0 })
+    expect(snapshot.repositories.total).toBe(2)
+    expect(snapshot.codeChanges.filesChanged).toBe(0)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('marks an interrupted operation during startup reconciliation', () => {
+    const { root, db, workspace } = fixture()
+    const operationId = makeId('op')
+    db.db.prepare('INSERT INTO demand_operations (id, workspace_id, status, request_json, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(operationId, workspace.id, 'creating', '{}', nowIso())
+    expect(reconcileDemandOperations(db)).toBe(1)
+    expect(db.db.prepare('SELECT status, error FROM demand_operations WHERE id = ?').get(operationId)).toMatchObject({ status: 'failed' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('aggregates tracked and untracked worktree changes against the captured base commit', () => {
+    const { root, db, workspace } = fixture()
+    const repositories = listRepositories(db, workspace)
+    createDemand(db, workspace, { name: 'Changed demand', repositoryIds: [repositories[0]!.id] })
+    const worktree = join(root, 'worktrees', 'changed-demand', 'services', 'repo1')
+    writeFileSync(join(worktree, 'README.md'), '# repo1\nchanged line\n')
+    writeFileSync(join(worktree, 'new.txt'), 'one\ntwo\n')
+    const snapshot = dashboardSnapshot(db, workspace)
+    expect(snapshot.codeChanges.filesChanged).toBe(2)
+    expect(snapshot.codeChanges.additions).toBeGreaterThanOrEqual(3)
+    expect(snapshot.codeChanges.deletions).toBeGreaterThanOrEqual(0)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('adds a Repo after Workspace creation and attaches it to an existing demand', () => {
+    const { root, db, workspace } = fixture()
+    const added = addRepository(db, workspace, { source: 'folder', path: join(root, 'services', 'repo2'), name: 'repo3' })
+    expect(added.name).toBe('repo3')
+    const repo1 = listRepositories(db, workspace).find(repository => repository.name === 'repo1')!
+    const demand = createDemand(db, workspace, { name: 'Attach later', repositoryIds: [repo1.id] })
+    const updated = addRepositoryToDemand(db, workspace, demand.demand.id, added.id)!
+    expect(updated?.repositories.map(repository => repository.name)).toEqual(['repo1', 'repo3'])
+    expect(git(join(root, 'worktrees', 'attach-later', 'services', 'repo3'), ['branch', '--show-current'])).toBe('attach-later')
+    expect(readFileSync(join(root, 'worktrees', 'attach-later', 'docs', 'context.md'), 'utf8')).toContain('- repo3:')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('counts only skills Codex can recognize', () => {
+    const { root, db, workspace } = fixture()
+    mkdirSync(join(root, '.agents', 'skills', 'valid-skill'), { recursive: true })
+    mkdirSync(join(root, '.agents', 'skills', 'disabled-skill'), { recursive: true })
+    mkdirSync(join(root, '.agents', 'skills', 'broken-skill'), { recursive: true })
+    writeFileSync(join(root, '.agents', 'skills', 'valid-skill', 'SKILL.md'), '---\nname: valid-skill\ndescription: A valid skill\n---\n# valid\n')
+    writeFileSync(join(root, '.agents', 'skills', 'disabled-skill', 'SKILL.md'), '---\nname: disabled-skill\ndescription: Disabled\ndisable-model-invocation: true\n---\n# disabled\n')
+    writeFileSync(join(root, '.agents', 'skills', 'broken-skill', 'SKILL.md'), '# missing frontmatter\n')
+    const skills = dashboardSnapshot(db, workspace).skills
+    expect(skills.available).toBeGreaterThanOrEqual(1)
+    expect(skills.disabled).toBeGreaterThanOrEqual(1)
+    expect(skills.loadFailed).toBeGreaterThanOrEqual(1)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+})

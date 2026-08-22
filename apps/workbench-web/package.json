@@ -1,6 +1,6 @@
 {
-  "name": "@cody-workbench/web",
-  "description": "CSR Workbench web UI (React + Vite)",
+  "name": "@codywork/web",
+  "description": "CodyWork web application (React + Vite)",
   "version": "0.1.0",
   "private": true,
   "type": "module",

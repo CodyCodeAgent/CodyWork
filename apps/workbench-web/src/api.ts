@@ -1,38 +1,136 @@
+export interface WorkspaceSummary {
+  entries: string[]
+  isGit: boolean
+  isRecognized: boolean
+  check: {
+    status: 'ready' | 'empty' | 'incomplete' | 'unsupported'
+    present: string[]
+    missing: string[]
+    message: string
+  }
+  runtime: { status: 'ready'; cwd: string; note: string }
+}
+
 export interface Workspace {
   id: string
   name: string
   path: string
-  created_at: string
+  createdAt: string
+  lastOpenedAt: string
+  active: boolean
 }
 
-export interface RepoStatus {
-  name: string
-  branch: string
-  dirty: boolean
-  lastCommit: string
+export type WorkspaceSource =
+  | { type: 'folder'; path: string }
+  | { type: 'git'; url: string; destination: string }
+
+export interface DashboardSnapshot {
+  generatedAt: string
+  demands: { total: number; inProgress: number; completed: number; blocked: number }
+  repositories: { total: number; normal: number; dirty: number; pullFailed: number }
+  codeChanges: { additions: number; deletions: number; filesChanged: number }
+  knowledge: { documents: number; lastUpdatedAt: string | null }
+  skills: { available: number; disabled: number; loadFailed: number }
 }
 
-export interface Repo {
+export type SkillStatus = 'available' | 'disabled' | 'load_failed'
+export interface WorkspaceSkill {
   id: string
-  workspace_id: string
   name: string
-  created_at: string
-  status: RepoStatus | null
+  description: string
+  path: string
+  source: 'workspace' | 'user'
+  status: SkillStatus
+  modelInvocable: boolean
+  content: string
+  updatedAt: string
+}
+
+export interface SkillInstallEvent {
+  type: string
+  timestamp: string
+  data: Record<string, unknown>
+}
+export interface SkillInstallStatus {
+  id: string
+  workspaceId: string
+  source: string
+  status: 'running' | 'completed' | 'failed'
+  provider?: string
+  message?: string
+  events: SkillInstallEvent[]
+  installed?: Array<{ id: string; name: string; path: string; status: string }>
+  startedAt: string
+  finishedAt?: string
+}
+
+export interface KnowledgeDocument {
+  id: string
+  name: string
+  relativePath: string
+  path: string
+  extension: string
+  size: number
+  updatedAt: string
+  content?: string
+}
+
+export interface Repository {
+  id: string
+  name: string
+  path: string
+  originUrl: string | null
+  defaultRef: string | null
+  syncStatus: 'ok' | 'pull_failed'
+  dirty: boolean
 }
 
 export interface Demand {
   id: string
-  workspace_id: string
   name: string
-  slug: string
-  status: string
-  created_at: string
+  branchName: string
+  worktreeKey: string
+  status: 'in_progress' | 'completed' | 'blocked'
+  createdAt: string
+  updatedAt: string
+  repositories: { id: string; name: string; worktreePath: string }[]
 }
 
-export interface Worktree {
-  repo: string
-  branch: string
-  dirty: boolean
+export type ConversationPermissionMode = 'read-only' | 'workspace-write' | 'yolo'
+export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'disconnected'
+
+export interface Conversation {
+  id: string
+  demandId: string
+  provider: string
+  nativeId: string
+  title: string
+  status: ConversationStatus
+  permissionMode: ConversationPermissionMode
+  goal: { objective?: string; status?: string } | null
+  plan: { active?: boolean; status?: string } | null
+  policyHash: string
+  instructionHash: string
+  lastEventId: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationEvent {
+  id: number
+  type: string
+  conversationId: string
+  turnId?: string
+  itemId?: string
+  provider: string
+  timestamp?: string
+  data: Record<string, unknown>
+}
+
+export interface RuntimeSettings {
+  provider: 'codex'
+  codex: { url: string; command: string }
+  updatedAt: string
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -41,33 +139,57 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     init.headers = { 'Content-Type': 'application/json' }
     init.body = JSON.stringify(body)
   }
-  const res = await fetch(path, init)
-  const json = await res.json()
-  if (!json.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
-  return json.data as T
+  const response = await fetch(path, init)
+  const payload = await response.json().catch(() => ({})) as { ok?: boolean; data?: T; error?: string }
+  if (!response.ok || payload.ok !== true) throw new Error(payload.error ?? `请求失败（${response.status}）`)
+  return payload.data as T
 }
 
 export const api = {
+  runtimeManifest: () => request<{ provider: string; runtimeVersion: string; protocolVersion: string }>('GET', '/api/runtime'),
+  testRuntime: () => request<{ provider: 'codex'; runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
+  runtimeSettings: () => request<RuntimeSettings>('GET', '/api/settings/runtime'),
+  updateRuntimeSettings: (patch: { codex?: { url?: string; command?: string } }) =>
+    request<RuntimeSettings>('PATCH', '/api/settings/runtime', patch),
   listWorkspaces: () => request<Workspace[]>('GET', '/api/workspaces'),
-  createWorkspace: (name: string, path: string, repos: string[] = []) =>
-    request<Workspace>('POST', '/api/workspaces', { name, path, repos }),
-  deleteWorkspace: (id: string) => request<{ ok: boolean }>('DELETE', `/api/workspaces/${id}`),
-  listRepos: (wsId: string) => request<Repo[]>('GET', `/api/workspaces/${wsId}/repos`),
-  addRepo: (wsId: string, url: string) => request<{ ok: boolean; name?: string; error?: string }>('POST', `/api/workspaces/${wsId}/repos`, { url }),
-  removeRepo: (wsId: string, name: string) => request<{ ok: boolean }>('DELETE', `/api/workspaces/${wsId}/repos/${name}`),
-  listDemands: (wsId: string) => request<Demand[]>('GET', `/api/workspaces/${wsId}/demands`),
-  createDemand: (wsId: string, name: string) => request<{ id: string; slug: string; status: string }>('POST', `/api/workspaces/${wsId}/demands`, { name }),
-  getDemand: (id: string) => request<Demand & { worktrees: Worktree[] }>('GET', `/api/demands/${id}`),
-  setDemandStatus: (id: string, status: string) => request<{ ok: boolean; status: string }>('PUT', `/api/demands/${id}/status`, { status }),
-  generateSdd: (demandId: string, step: string) => request<{ step: string; content: string }>('POST', `/api/demands/${demandId}/sdd/${step}`),
-  compound: (demandId: string) => request<{ report: string }>('POST', `/api/demands/${demandId}/compound`),
-  getChat: (demandId: string) => request<{ messages: { role: string; content: string }[] }>('GET', `/api/demands/${demandId}/chat`),
-  sendChat: (demandId: string, message: string) => request<{ messages: { role: string; content: string }[] }>('POST', `/api/demands/${demandId}/chat`, { message }),
-  createWorktrees: (demandId: string, repos: string[]) => request<{ results: { ok: boolean; path?: string; error?: string }[] }>('POST', `/api/demands/${demandId}/worktrees`, { repos }),
-  listDocs: (wsId: string) => request<{ files: string[] }>('GET', `/api/workspaces/${wsId}/docs`),
-  readDoc: (wsId: string, path: string) => request<{ path: string; content: string }>('GET', `/api/workspaces/${wsId}/docs/${path}`),
-  writeDoc: (wsId: string, path: string, content: string) => request<{ ok: boolean }>('PUT', `/api/workspaces/${wsId}/docs/${path}`, { content }),
-  search: (wsId: string, q: string) => request<{ query: string; hits: { path: string; snippet: string }[]; total: number }>('GET', `/api/workspaces/${wsId}/search?q=${encodeURIComponent(q)}`),
-  rebuildSearch: (wsId: string) => request<{ indexed: number }>('POST', `/api/workspaces/${wsId}/search/rebuild`),
-  troubleshoot: (wsId: string, question: string) => request<{ answer: string }>('POST', `/api/workspaces/${wsId}/troubleshoot`, { question }),
+  createWorkspace: (source: WorkspaceSource, name?: string) =>
+    request<{ workspace: Workspace; summary: WorkspaceSummary; action: 'adopted' | 'initialize'; initialization: { status: 'initialized' | 'unsupported'; message: string }; created: boolean }>('POST', '/api/workspaces', { source, name }),
+  getWorkspace: (id: string) => request<{ workspace: Workspace; summary: WorkspaceSummary }>('GET', `/api/workspaces/${id}`),
+  openWorkspace: (id: string) => request<{ workspace: Workspace; summary: WorkspaceSummary }>('POST', `/api/workspaces/${id}/open`),
+  deleteWorkspace: (id: string) => request<{ deleted: true }>('DELETE', `/api/workspaces/${id}`),
+  dashboard: (id: string) => request<DashboardSnapshot>('GET', `/api/workspaces/${id}/dashboard`),
+  refreshDashboard: (id: string) => request<DashboardSnapshot>('POST', `/api/workspaces/${id}/dashboard/refresh`),
+  listSkills: (id: string) => request<WorkspaceSkill[]>('GET', `/api/workspaces/${id}/skills`),
+  getSkill: (id: string, skillId: string) => request<WorkspaceSkill>('GET', `/api/workspaces/${id}/skills/${encodeURIComponent(skillId)}`),
+  installSkill: (id: string, source: string) => request<{ jobId: string; source: string }>('POST', `/api/workspaces/${id}/skills`, { source }),
+  skillInstallStatus: (id: string, jobId: string) => request<SkillInstallStatus>('GET', `/api/workspaces/${id}/skills/install/${encodeURIComponent(jobId)}`),
+  listKnowledge: (id: string) => request<KnowledgeDocument[]>('GET', `/api/workspaces/${id}/knowledge`),
+  getKnowledge: (id: string, documentId: string) => request<KnowledgeDocument>('GET', `/api/workspaces/${id}/knowledge/${encodeURIComponent(documentId)}`),
+  listRepositories: (id: string) => request<Repository[]>('GET', `/api/workspaces/${id}/repositories`),
+  addRepository: (id: string, input: { source: 'git' | 'folder'; url?: string; path?: string; name?: string }) =>
+    request<Repository>('POST', `/api/workspaces/${id}/repositories`, input),
+  listDemands: (id: string) => request<Demand[]>('GET', `/api/workspaces/${id}/demands`),
+  createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[] }) =>
+    request<{ demand: { id: string; name: string; branch_name: string; worktree_key: string; status: Demand['status'] }; repositories: Demand['repositories'] }>('POST', `/api/workspaces/${id}/demands`, input),
+  getDemand: (workspaceId: string, demandId: string) => request<Demand>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}`),
+  addRepositoryToDemand: (workspaceId: string, demandId: string, repositoryId: string) =>
+    request<Demand>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/repositories`, { repositoryId }),
+  listConversations: (workspaceId: string, demandId: string) =>
+    request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
+  createConversation: (workspaceId: string, demandId: string, title?: string) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
+  conversationHistory: (workspaceId: string, conversationId: string, after = 0) =>
+    request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history?after=${after}`),
+  sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue') =>
+    request<{ accepted: true; turnId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { content, mode }),
+  interruptConversation: (workspaceId: string, conversationId: string) =>
+    request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
+  setConversationPermission: (workspaceId: string, conversationId: string, mode: ConversationPermissionMode) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/permission`, { mode }),
+  renameConversation: (workspaceId: string, conversationId: string, title: string) =>
+    request<Conversation>('PATCH', `/api/workspaces/${workspaceId}/conversations/${conversationId}`, { title }),
+  resolveApproval: (workspaceId: string, conversationId: string, approvalId: string, outcome: 'allowed-once' | 'rejected') =>
+    request<{ resolved: true }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/approvals/${encodeURIComponent(approvalId)}`, { outcome }),
+  answerQuestion: (workspaceId: string, conversationId: string, requestId: string, answer: unknown) =>
+    request<{ resolved: true }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/questions/${encodeURIComponent(requestId)}`, { answer }),
 }

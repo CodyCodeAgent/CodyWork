@@ -1,6 +1,6 @@
 {
-  "name": "@cody-workbench/server",
-  "description": "CSR Workbench server: deterministic CSR operations (workspace/repo/specs/worktree) + SQLite metadata + dsh AI orchestration",
+  "name": "@codywork/server",
+  "description": "CodyWork server: Workspace management and Codex runtime integration",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,11 +10,12 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-sdk-client": "workspace:^"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "tsx": "^4.22.4",
     "@types/node": "^22.20.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^6.0.3"
   }
 }

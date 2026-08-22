@@ -1,96 +1,75 @@
-# CSR Workbench（cody-workbench）
+# CodyWork control plane
 
-基于 DeepSeek Harness（dsh）的 CSR 工作台：把「CSR + TTADK + Codex + Worktree」的 AI 研发提效思想做成一个可视化 Web 工作台。
+English | [中文](README.zh.md)
 
-> 方案文档：[docs/csr-workbench-plan.md](../docs/csr-workbench-plan.md)
-
-## 架构
+The current release focuses on Workspace management, Dashboard metrics, demand Worktrees, and demand-development conversations. The demand page is a CodyWork-owned three-column UI. The server streams Codex events over WebSocket and restores message history, Goal, Plan, approvals, permission modes, and multi-conversation metadata.
 
 ```text
-apps/workbench-web/      前端（React + Vite），四大模块：工作台/仓库/知识库/需求看板
-apps/workbench-server/   服务端（Node.js），确定性操作层 + AI 生成层
-  ├─ src/services/csr.ts     确定性操作：git clone / worktree / specs 模板 / docs
-  ├─ src/services/ai.ts      AI 生成层：通过 dsh SDK 驱动 headless agent 写 SDD 文档
-  ├─ src/db/index.ts         SQLite 元数据（workspaces/repos/demands）
-  └─ src/routes/index.ts     HTTP 路由
+apps/workbench-web/      Workspace creation, switching, and automatic restore UI
+apps/workbench-server/   Workspace, Dashboard, repository, demand Worktree, and Runtime control plane
+  ├─ src/services/workspace.ts      directory inspection, registration, and Git clone
+  ├─ src/services/repositories.ts   baseline repository discovery and metrics
+  ├─ src/services/demands.ts        multi-repository Worktrees, demand docs, and rollback
+  ├─ src/runtime/                    protocol, policy, and Codex App Server Adapter
+  ├─ src/services/conversations.ts  conversation metadata, persisted events, and WebSocket subscriptions
+  ├─ src/db/index.ts                 CodyWork metadata
+  └─ src/routes/index.ts             HTTP control plane
 ```
 
-**分工原则**（方案 v1.1）：
+A Workspace is a real folder. After its directory is ready, CodyWork uses it as the Codex working directory. CodyWork performs deterministic control-plane operations; Codex owns the model loop and native tool execution.
 
-- **确定性操作**（初始化/加仓库/切 worktree/建 specs 目录/状态机）→ 服务端直做，不经 AI；
-- **生成性操作**（写 spec/plan/tasks/代码/compound）→ dsh 引擎，人机确认制。
-
-## 运行
-
-### 1. 服务端
+## Run
 
 ```sh
 cd apps/workbench-server
-# 无需 AI：直接启动
 npx tsx src/index.ts
 
-# 启用 AI 生成层：需要 DEEPSEEK_API_KEY
-DEEPSEEK_API_KEY=sk-xxx npx tsx src/index.ts
-```
-
-服务端监听 `http://127.0.0.1:3210`。
-
-环境变量：
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `CODY_WORKBENCH_PORT` | `3210` | 服务端端口 |
-| `CODY_WORKBENCH_DB` | `~/.cody-workbench/workbench.db` | SQLite 元数据路径 |
-| `CODY_WORKBENCH_ROOT` | `~/cody-workbench-workspaces` | 工作台实例根目录 |
-| `DEEPSEEK_API_KEY` | 无 | 配置后启用 AI 生成层 |
-| `CODY_WORKBENCH_MODEL` | `deepseek-v4-flash` | AI 模型 |
-| `CODY_WORKBENCH_CORDIS` | `examples/jsonrpc-agent/cordis.yml` | dsh 运行时配置 |
-
-### 2. 前端
-
-```sh
 cd apps/workbench-web
 npx vite --port 3211
 ```
 
-前端监听 `http://localhost:3211`，通过 proxy 转发 `/api` 到服务端。
+The server listens on `http://127.0.0.1:3210`; the web app listens on `http://localhost:3211`.
 
-## API 概览
+## API
 
-确定性操作：
+- `GET /api/workspaces`: list Workspaces by last-opened time
+- `POST /api/workspaces`: inspect a local folder or clone Git, then register the Workspace; returns `action: adopted | initialize`
+- `GET /api/workspaces/:id`: read a Workspace and its directory summary
+- `POST /api/workspaces/:id/open`: mark a Workspace recently opened and return its summary
+- `DELETE /api/workspaces/:id`: remove registration without deleting files
+- `GET /api/workspaces/:id/dashboard`: read the five Dashboard metric groups
+- `GET /api/workspaces/:id/repositories`: read baseline repositories under `services/`
+- `GET /api/workspaces/:id/demands`: list demands and Worktree mappings
+- `POST /api/workspaces/:id/demands`: create a multi-repository demand Worktree
+- `GET /api/workspaces/:id/demands/:demandId`: read demand-development shell metadata
+- `GET /api/workspaces/:id/demands/:demandId/conversations`: list conversations for a demand
+- `POST /api/workspaces/:id/demands/:demandId/conversations`: create a recoverable conversation
+- `GET /api/workspaces/:id/conversations/:conversationId/history`: read event history
+- `POST /api/workspaces/:id/conversations/:conversationId/messages`: send a queued or steering message
+- `POST /api/workspaces/:id/conversations/:conversationId/interrupt`: interrupt the active turn
+- `POST /api/workspaces/:id/conversations/:conversationId/permission`: switch read-only, Workspace-write, or Yolo mode
+- `ws://127.0.0.1:3210/api/workspaces/:workspaceId/conversations/:conversationId/events`: WebSocket event stream with `after` cursor recovery
 
-- `POST /api/workspaces` 初始化工作台（生成 CSR 骨架 + clone 仓库）
-- `GET /api/workspaces` 列出工作台实例
-- `POST /api/workspaces/:id/repos` 添加仓库
-- `GET /api/workspaces/:id/repos` 仓库状态列表
-- `POST /api/workspaces/:id/demands` 新建需求（生成 specs/ 模板）
-- `PUT /api/demands/:id/status` 需求状态机流转
-- `POST /api/demands/:id/worktrees` 创建 worktree（跨仓库）
-- `GET/PUT /api/workspaces/:id/docs/*` 知识库浏览/编辑
+Example creation request:
 
-AI 生成层：
-
-- `POST /api/demands/:id/sdd/:step` 生成 SDD 文档（spec/plan/tasks/review/test-report）
-
-## 已实现功能
-
-- ✅ 工作台实例管理（多实例，自管理目录）
-- ✅ 确定性操作层：初始化 CSR 骨架 / 添加仓库 / 新建需求 / 切 worktree / 状态机 / 知识库浏览编辑
-- ✅ AI 生成层：SDD 文档生成（spec/plan/tasks/review/test-report）+ compound 知识回流（dsh SDK 驱动）
-- ✅ AI 会话区：每需求一个专属会话，多轮对话（dsh session 复用）
-- ✅ 排障：SQLite FTS5（trigram）+ LIKE 兜底检索 + 排障 Agent（证据链排查）
-- ✅ 前端：工作台列表 / 项目总览 / 仓库 / 知识库 / 需求看板+详情 / AI 会话 / 排障
-- ✅ 测试：28 个单元+集成测试（csr/db/knowledge/http）
-
-## 测试
-
-```sh
-cd apps/workbench-server
-npx vitest run tests
+```json
+{
+  "source": {
+    "type": "git",
+    "url": "git@code.byted.org:life_service/basic_marketing_ai_hub.git",
+    "destination": "/Users/you/projects/basic_marketing_ai_hub"
+  }
+}
 ```
 
-覆盖：CSR 目录操作、SQLite 元数据、FTS5 检索、HTTP 路由集成（含 AI 端点优雅降级）。
+Local folders are first inspected for the CSR core shape: `services/`, `docs/`, `specs/`, and `worktrees/`. A complete folder returns `adopted` and is not rebuilt. An empty folder returns `initialize` and is initialized by Codex. A non-empty incomplete folder is rejected to avoid overwriting existing content. The server does not manufacture a second Workspace scaffold.
 
-## 待办
+The Runtime Adapter contract lives in `src/runtime/protocol.ts`. The product enables only the Codex App Server Adapter. The Policy Resolver permits writes only in declared Worktree roots and neither prompts nor Yolo can widen access outside the Workspace. Browsers use WebSocket for live events; the server talks to Codex over local stdio JSON-RPC.
 
-- [ ] 端到端验证 AI 生成层/会话/排障（需可用的 DEEPSEEK_API_KEY + DEEPSEEK_BASE_URL）
+## Global Codex Runtime settings
+
+Runtime configuration is global and does not belong to one Workspace. The sidebar's **Codex Runtime** page can override the App Server command. CodyWork defaults to `codex app-server --stdio`, reuses the local Codex login, and stores no API key. Changing the configuration marks active conversations `disconnected`; new conversations use the new process.
+
+Codex is integrated through real App Server Thread/Turn APIs. CodyWork maps the CSR instruction bundle to base and developer instructions, maps the demand directory to the working directory and Runtime roots, and forwards message deltas, tools, diffs, Goal, approvals, and interrupt events. If Codex cannot start or cannot enforce the required protocol and policy, conversation creation fails closed; no fake runtime is used.
+
+Environment variables: `CODYWORK_PORT`, `CODYWORK_DB`, `CODY_CODEX_COMMAND`, `CODY_CODEX_MODEL`, and `CODY_CODEX_INIT_PROMPT`. Legacy `CODY_WORKBENCH_PORT` and `CODY_WORKBENCH_DB` remain only for compatibility with existing local data.

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-22-codywork-codex-first-runtime.md
+2026-08-22-codywork-codex-first-runtime.md: 6419d3e493b9234091f2dd9d8277a2f06e93c0b6
+2026-08-22-codywork-codex-first-runtime.zh.md: 8b3daec0349a0a51c03ba23354541735fcb964c1
