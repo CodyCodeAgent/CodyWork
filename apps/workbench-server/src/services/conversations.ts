@@ -109,6 +109,8 @@ export class ConversationService {
   private readonly handles = new Map<string, ConversationHandle>()
   private readonly contexts = new Map<string, RuntimeContext>()
   private readonly listeners = new Map<string, Set<Listener>>()
+  /** Serializes ordinary queue sends per conversation; steering stays attached to the active turn. */
+  private readonly turnChains = new Map<string, Promise<void>>()
 
   private runtime: ConversationRuntimeAdapter
 
@@ -176,7 +178,12 @@ export class ConversationService {
       updated_at: now,
     }
     this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, last_event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(row.id, row.demand_id, row.workspace_id, row.provider, row.native_id, row.title, row.status, row.permission_mode, row.goal_json, row.plan_json, row.policy_hash, row.instruction_hash, row.last_event_id, row.created_at, row.updated_at)
+      .run(
+        row.id, row.demand_id, row.workspace_id, row.provider, row.native_id,
+        row.title, row.status, row.permission_mode, row.goal_json, row.plan_json,
+        row.policy_hash, row.instruction_hash, row.last_event_id, row.created_at,
+        row.updated_at,
+      )
     this.handles.set(id, handle)
     this.contexts.set(id, context)
     this.append(id, { type: 'conversation.created', provider: handle.provider, data: { title: row.title } })
@@ -213,7 +220,13 @@ export class ConversationService {
       return { accepted: true, turnId }
     }
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
-    void this.runTurn(row, text, turnId)
+    const run = () => this.runTurn(row, text, turnId)
+    const previous = this.turnChains.get(conversationId) ?? Promise.resolve()
+    const scheduled = mode === 'queue' ? previous.catch(() => undefined).then(run) : run()
+    this.turnChains.set(conversationId, scheduled)
+    void scheduled.finally(() => {
+      if (this.turnChains.get(conversationId) === scheduled) this.turnChains.delete(conversationId)
+    })
     return { accepted: true, turnId }
   }
 
@@ -304,7 +317,12 @@ export class ConversationService {
     const result = this.db.db.prepare('INSERT INTO conversation_events (conversation_id, type, turn_id, item_id, provider, timestamp, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(conversationId, event.type, event.turnId ?? null, event.itemId ?? null, event.provider, event.timestamp ?? nowIso(), data)
     const id = Number(result.lastInsertRowid)
     this.db.db.prepare('UPDATE conversations SET last_event_id = ?, updated_at = ? WHERE id = ?').run(id, nowIso(), conversationId)
-    const output: ConversationEvent = { id, conversationId, type: event.type, ...(event.turnId ? { turnId: event.turnId } : {}), ...(event.itemId ? { itemId: event.itemId } : {}), provider: event.provider, timestamp: event.timestamp ?? nowIso(), data: event.data }
+    const output: ConversationEvent = {
+      id, conversationId, type: event.type,
+      ...(event.turnId ? { turnId: event.turnId } : {}),
+      ...(event.itemId ? { itemId: event.itemId } : {}),
+      provider: event.provider, timestamp: event.timestamp ?? nowIso(), data: event.data,
+    }
     for (const listener of this.listeners.get(conversationId) ?? []) listener(output)
     return output
   }
@@ -363,7 +381,9 @@ export class ConversationService {
     if (this.handles.has(row.id)) return
     const demand = this.requireDemand(row.workspace_id, row.demand_id)
     const context = permissionPolicy(this.contextFor(demand, row.permission_mode), row.permission_mode)
-    const handle = await (this.runtime.resumeConversation ? this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context }) : this.runtime.createConversation({ conversationId: row.id, context }))
+    const handle = await (this.runtime.resumeConversation
+      ? this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context })
+      : this.runtime.createConversation({ conversationId: row.id, context }))
     this.handles.set(row.id, handle)
     this.contexts.set(row.id, context)
   }

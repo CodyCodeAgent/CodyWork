@@ -3,12 +3,11 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib/types",
-    "jsx": "react-jsx",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "composite": false,
     "incremental": false,
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src/**/*.ts", "src/**/*.vue"]
 }

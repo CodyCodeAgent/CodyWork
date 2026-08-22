@@ -416,6 +416,9 @@ importers:
 
   apps/workbench-server:
     dependencies:
+      '@codycodeagent/cody-web-core':
+        specifier: git+ssh://git@github.com:CodyCodeAgent/CodyWebCore.git#v0.1.3
+        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#df406765351954bc5ebe0e3e5d66a2c040362d15
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -435,22 +438,16 @@ importers:
 
   apps/workbench-web:
     dependencies:
-      react:
-        specifier: ^19.0.0
-        version: 19.2.8
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.8(react@19.2.8)
+      '@codycodeagent/cody-web-core':
+        specifier: git+ssh://git@github.com:CodyCodeAgent/CodyWebCore.git#v0.1.3
+        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#df406765351954bc5ebe0e3e5d66a2c040362d15
+      vue:
+        specifier: ^3.5.13
+        version: 3.5.39(typescript@6.0.3)
     devDependencies:
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.18
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.4(@types/react@19.2.18)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.4
-        version: 4.7.0(vite@6.4.3(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+      '@vitejs/plugin-vue':
+        specifier: ^5.2.1
+        version: 5.2.4(vite@6.4.3(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3))
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -9229,6 +9226,10 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
+  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#df406765351954bc5ebe0e3e5d66a2c040362d15':
+    resolution: {commit: df406765351954bc5ebe0e3e5d66a2c040362d15, repo: git@github.com:CodyCodeAgent/CodyWebCore.git, type: git}
+    version: 0.1.3
+
   '@connectrpc/connect-web@2.0.0-rc.3':
     resolution: {integrity: sha512-w88P8Lsn5CCsA7MFRl2e6oLY4J/5toiNtJns/YJrlyQaWOy3RO8pDgkz+iIkG98RPMhj2thuBvsd3Cn4DKKCkw==}
     peerDependencies:
@@ -14891,6 +14892,8 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
+  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#df406765351954bc5ebe0e3e5d66a2c040362d15': {}
+
   '@connectrpc/connect-web@2.0.0-rc.3(@bufbuild/protobuf@2.13.0)(@connectrpc/connect@2.0.0-rc.3(@bufbuild/protobuf@2.13.0))':
     dependencies:
       '@bufbuild/protobuf': 2.13.0
@@ -16526,6 +16529,7 @@ snapshots:
   '@types/react-dom@19.2.4(@types/react@19.2.18)':
     dependencies:
       '@types/react': 19.2.18
+    optional: true
 
   '@types/react@18.3.31':
     dependencies:
@@ -16535,6 +16539,7 @@ snapshots:
   '@types/react@19.2.18':
     dependencies:
       csstype: 3.2.3
+    optional: true
 
   '@types/retry@0.12.0': {}
 
@@ -16576,21 +16581,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vitejs/plugin-react@4.7.0(vite@6.4.3(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))':
-    dependencies:
-      '@babel/core': 7.29.7
-      '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
-      '@babel/plugin-transform-react-jsx-source': 7.29.7(@babel/core@7.29.7)
-      '@rolldown/pluginutils': 1.0.0-beta.27
-      '@types/babel__core': 7.20.5
-      react-refresh: 0.17.0
-      vite: 6.4.3(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
-    transitivePeerDependencies:
-      - supports-color
-
   '@vitejs/plugin-vue@5.2.4(vite@5.4.21(@types/node@25.9.3)(lightningcss@1.32.0))(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       vite: 5.4.21(@types/node@25.9.3)(lightningcss@1.32.0)
+      vue: 3.5.39(typescript@6.0.3)
+
+  '@vitejs/plugin-vue@5.2.4(vite@6.4.3(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))(vue@3.5.39(typescript@6.0.3))':
+    dependencies:
+      vite: 6.4.3(@types/node@26.1.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
       vue: 3.5.39(typescript@6.0.3)
 
   '@vitest/coverage-v8@4.1.8(vitest@4.1.8)':
