@@ -641,7 +641,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-row:hover, .conversation-row.active { background: #f0f0ff; }
 .conversation-row-wrap { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .conversation-row-wrap .conversation-row { min-width: 0; flex: 1; }
-.conversation-delete { display: grid; flex: 0 0 auto; place-items: center; width: 32px; min-height: 44px; padding: 0; color: #9aa3b2; background: transparent; border: 0; border-radius: 8px; cursor: pointer; transition: color 160ms var(--ease), background 160ms var(--ease); }
+.conversation-delete { display: grid; flex: 0 0 auto; place-items: center; width: 44px; min-height: 44px; padding: 0; color: #9aa3b2; background: transparent; border: 0; border-radius: 8px; cursor: pointer; transition: color 160ms var(--ease), background 160ms var(--ease); }
 .conversation-delete svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .conversation-delete:hover, .conversation-delete:focus-visible { color: #c44857; background: #fff0f1; outline: none; }
 .conversation-delete:focus-visible { box-shadow: 0 0 0 3px rgba(196,72,87,.18); }
