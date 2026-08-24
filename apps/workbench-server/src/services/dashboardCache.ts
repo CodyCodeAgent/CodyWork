@@ -1,4 +1,5 @@
-import { Worker } from 'node:worker_threads'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { WorkbenchDb, WorkspaceRow, nowIso } from '../db/index.js'
 
 export interface DashboardData {
@@ -46,19 +47,26 @@ function emptySnapshot(db: WorkbenchDb, workspace: WorkspaceRow): DashboardData 
 
 function workerCollector(dbPath: string): Collector {
   return (workspace) => new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./dashboardWorker.ts', import.meta.url), {
-      workerData: { dbPath, workspace },
-      // tsx starts the main service, but workers do not inherit its TypeScript
-      // loader automatically when the service is launched through Corepack.
-      execArgv: ['--import', 'tsx'],
+    const taskPath = fileURLToPath(new URL('./dashboardWorker.ts', import.meta.url))
+    const tsxCli = fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url))
+    const input = Buffer.from(JSON.stringify({ dbPath, workspace })).toString('base64url')
+    const child = spawn(process.execPath, [tsxCli, taskPath, input], {
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
-    worker.once('message', (message: { ok: boolean; snapshot?: DashboardData; error?: string }) => {
-      void worker.terminate()
-      if (message.ok && message.snapshot) resolve(message.snapshot)
-      else reject(new Error(message.error ?? '概览后台刷新失败'))
+    let output = ''
+    let errors = ''
+    child.stdout.on('data', chunk => { output += String(chunk) })
+    child.stderr.on('data', chunk => { errors += String(chunk) })
+    child.once('error', reject)
+    child.once('close', code => {
+      try {
+        const message = JSON.parse(output) as { ok: boolean; snapshot?: DashboardData; error?: string }
+        if (message.ok && message.snapshot) resolve(message.snapshot)
+        else reject(new Error((message.error ?? errors) || '概览后台刷新失败'))
+      } catch {
+        reject(new Error(errors || `概览后台任务异常退出：${code ?? 'unknown'}`))
+      }
     })
-    worker.once('error', reject)
-    worker.once('exit', (code) => { if (code !== 0) reject(new Error(`概览后台任务异常退出：${code}`)) })
   })
 }
 

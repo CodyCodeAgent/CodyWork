@@ -1,4 +1,3 @@
-import { parentPort, workerData } from 'node:worker_threads'
 import { WorkbenchDb, type WorkspaceRow } from '../db/index.js'
 import { importExistingWorktrees } from './demands.js'
 import { dashboardSnapshot } from './dashboard.js'
@@ -8,7 +7,9 @@ interface WorkerInput {
   workspace: WorkspaceRow
 }
 
-const input = workerData as WorkerInput
+const encoded = process.argv[2]
+if (!encoded) throw new Error('概览后台任务缺少输入')
+const input = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as WorkerInput
 
 try {
   const db = new WorkbenchDb(input.dbPath)
@@ -17,7 +18,8 @@ try {
   importExistingWorktrees(db, input.workspace)
   const snapshot = dashboardSnapshot(db, input.workspace)
   db.close()
-  parentPort?.postMessage({ ok: true, snapshot })
+  process.stdout.write(JSON.stringify({ ok: true, snapshot }))
 } catch (error) {
-  parentPort?.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) })
+  process.stdout.write(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+  process.exitCode = 1
 }
