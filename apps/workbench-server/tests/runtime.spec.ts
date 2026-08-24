@@ -94,6 +94,12 @@ describe('generic runtime protocol', () => {
     expect(questionEvents).toContain('question.requested')
     expect(questionResult.events.some(event => event.type === 'turn.completed')).toBe(true)
     await runtime.setPermission(conversation, 'yolo')
+
+    await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT' })).rejects.toThrow('exited')
+    const restored = await runtime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId })
+    const recovered = await runtime.sendTurn({ conversation: restored, prompt: 'hello after reconnect' })
+    expect(recovered.finalText).toBe('CODEX_FIXTURE_OK')
+
     await runtime.close()
     rmSync(root, { recursive: true, force: true })
   })

@@ -284,5 +284,27 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
   }
   private itemEvent(session: CodexConversation, turnId: string, phase: 'started' | 'completed', item: unknown, params: Record<string, unknown>): void { const type = itemType(item); const id = item && typeof item === 'object' ? String((item as { id?: unknown }).id ?? '') : ''; const data = { item, nativeEvent: params }; if (type === 'agentMessage') { const text = textFromItem(item); if (text) this.emit(session, turnId, 'message.completed', { text, ...data }, id); return }; if (type === 'fileChange') { this.emit(session, turnId, phase === 'completed' ? 'diff.updated' : 'file.changed', data, id); return }; if (type === 'commandExecution' || type === 'mcpToolCall' || type === 'dynamicToolCall' || type === 'collabAgentToolCall') { this.emit(session, turnId, phase === 'completed' ? 'tool.completed' : 'tool.started', data, id); return }; if (type === 'plan') { this.emit(session, turnId, 'plan.updated', data, id); return }; if (type === 'reasoning') { const text = textFromItem(item); if (text) this.emit(session, turnId, 'reasoning.delta', { text, ...data }, id) } }
   private isApprovalRequest(method: string): boolean { return method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval' || method === 'execCommandApproval' || method === 'item/permissions/requestApproval' }
-  private handleDisconnect(reason: Error): void { for (const session of this.sessions.values()) { const turnId = session.activeTurn ?? `turn-${randomUUID()}`; this.emit(session, turnId, 'runtime.disconnected', { error: reason.message }); const run = this.runs.get(turnId); if (run) { run.failed = reason; run.reject?.(reason) }; session.activeTurn = undefined } }
+  private handleDisconnect(reason: Error): void {
+    // A host exit invalidates every App Server-side thread attachment. Keeping
+    // these objects around would let the next turn start a fresh process without
+    // initialize/thread-resume, which looks like a successfully accepted message
+    // that never receives a response.
+    const sessions = [...this.sessions.values()]
+    this.sessions.clear()
+    this.sessionsByThread.clear()
+    this.unlisten?.()
+    this.unlisten = null
+    this.host = null
+
+    for (const session of sessions) {
+      const turnId = session.activeTurn ?? `turn-${randomUUID()}`
+      this.emit(session, turnId, 'runtime.disconnected', { error: reason.message })
+      const run = this.runs.get(turnId)
+      if (run) {
+        run.failed = reason
+        run.reject?.(reason)
+      }
+      session.activeTurn = undefined
+    }
+  }
 }

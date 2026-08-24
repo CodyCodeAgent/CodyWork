@@ -43,7 +43,8 @@ rl.on('line', line => {
   } else if (message.method === 'turn/start') {
     write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
     const prompt = String(message.params?.input?.[0]?.text ?? '')
-    if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(prompt), 5)
+    if (prompt.includes('DISCONNECT')) setTimeout(() => process.exit(23), 5)
+    else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(prompt), 5)
     else setTimeout(() => emitTurn(prompt), 5)
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })
   else if (message.id === 900 + turnSequence) {
