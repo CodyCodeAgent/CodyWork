@@ -16,6 +16,7 @@ import { getSkill, listSkills } from '../services/skills.js'
 import { getKnowledgeDocument, listKnowledgeDocuments } from '../services/knowledge.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/policy.js'
 import type { RuntimeEvent } from '../runtime/protocol.js'
+import { listBrowsableDirectories } from '../services/directories.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
@@ -24,6 +25,7 @@ interface Ctx {
   res: ServerResponse
   params: Record<string, string>
   body: Record<string, unknown>
+  query: URLSearchParams
 }
 
 interface SkillInstallJob {
@@ -234,6 +236,8 @@ function buildRoutes(ctx: AppContext) {
     const current = activeId(ctx)
     return rows.map(row => workspaceView(row, current))
   })
+
+  add('GET', '/api/filesystem/directories', (c) => listBrowsableDirectories(c.query.get('path') ?? undefined))
 
   add('POST', '/api/workspaces', async (c) => {
     const source = normalizeSource(c.body)
@@ -497,7 +501,7 @@ export function startServer(ctx: AppContext, port: number) {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const route = routes.find(item => item.method === req.method && match(item.pattern, url.pathname) !== null)
     if (!route) return json(req, res, 404, { ok: false, error: `not found: ${req.method} ${url.pathname}` })
-    const c: Ctx = { req, res, params: match(route.pattern, url.pathname) ?? {}, body: await readBody(req).catch(() => ({})) }
+    const c: Ctx = { req, res, params: match(route.pattern, url.pathname) ?? {}, body: await readBody(req).catch(() => ({})), query: url.searchParams }
     try {
       const result = await route.handler(c)
       if (!res.writableEnded) json(req, res, 200, { ok: true, data: result })

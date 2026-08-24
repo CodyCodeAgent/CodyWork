@@ -24,6 +24,13 @@ export type WorkspaceSource =
   | { type: 'folder'; path: string }
   | { type: 'git'; url: string; destination: string }
 
+export interface DirectoryListing {
+  roots: Array<{ name: string; path: string }>
+  current: string
+  parent: string | null
+  directories: Array<{ name: string; path: string }>
+}
+
 export interface DashboardSnapshot {
   generatedAt: string
   demands: { total: number; inProgress: number; completed: number; blocked: number }
@@ -157,6 +164,7 @@ export const api = {
   updateRuntimeSettings: (patch: { codex?: { url?: string; command?: string } }) =>
     request<RuntimeSettings>('PATCH', '/api/settings/runtime', patch),
   listWorkspaces: () => request<Workspace[]>('GET', '/api/workspaces'),
+  listDirectories: (path?: string) => request<DirectoryListing>('GET', `/api/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   createWorkspace: (source: WorkspaceSource, name?: string) =>
     request<{ workspace: Workspace; summary: WorkspaceSummary; action: 'adopted' | 'initialize'; initialization: { status: 'initialized' | 'unsupported'; message: string }; created: boolean }>('POST', '/api/workspaces', { source, name }),
   getWorkspace: (id: string) => request<{ workspace: Workspace; summary: WorkspaceSummary }>('GET', `/api/workspaces/${id}`),

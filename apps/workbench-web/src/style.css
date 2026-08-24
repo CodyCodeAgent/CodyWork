@@ -227,6 +227,25 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .repo-option strong, .repo-option small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-option small { margin-top: 2px; color: #8c97a7; font: 10px var(--mono); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.path-field { display: flex; align-items: center; gap: 8px; }
+.path-field .input { min-width: 0; flex: 1; }
+.path-field .btn { flex: 0 0 auto; margin-bottom: 9px; }
+.directory-picker-backdrop { z-index: 60; }
+.directory-picker { width: min(700px, 100%); }
+.directory-help { margin: -7px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.directory-browser { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
+.directory-roots { display: flex; gap: 6px; overflow: auto; padding: 8px; background: #f6f8fb; border-bottom: 1px solid var(--line); }
+.directory-root { flex: 0 0 auto; padding: 6px 9px; color: #647187; background: #fff; border: 1px solid #dce3ec; border-radius: 7px; font-size: 11px; font-weight: 650; }
+.directory-root.active { color: #2e5fc5; background: #eef4ff; border-color: #9db7ed; }
+.directory-current { display: flex; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid #edf0f4; }
+.directory-current code { min-width: 0; flex: 1; overflow: hidden; color: #4e5b70; font: 11px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.directory-list { max-height: 300px; overflow: auto; }
+.directory-list button { display: grid; grid-template-columns: 18px minmax(120px, .42fr) 1fr; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; color: #425169; background: #fff; border: 0; border-bottom: 1px solid #edf0f4; text-align: left; }
+.directory-list button:hover { background: #f5f8ff; }
+.directory-list button > span { color: #6788d5; }
+.directory-list strong { overflow: hidden; color: #344259; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.directory-list code { overflow: hidden; color: #8b96a6; font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.directory-list .muted, .directory-loading { padding: 20px 12px; margin: 0; text-align: center; }
 .shell-body { max-width: 1050px; }
 .shell-hero { display: flex; align-items: center; gap: 16px; padding: 23px; background: #fff; border: 1px solid var(--line); border-radius: 15px; }
 .shell-hero h2 { margin: 0; font-size: 21px; }
