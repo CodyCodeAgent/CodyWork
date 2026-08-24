@@ -62,6 +62,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .topbar { position: sticky; z-index: 5; top: 0; display: flex; align-items: center; justify-content: space-between; min-height: 74px; padding: 13px 36px; background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); backdrop-filter: blur(10px); }
 .topbar h1 { margin: 2px 0 0; font-size: 22px; letter-spacing: -.03em; }
 .topbar-actions { display: flex; gap: 8px; }
+.cache-status { align-self: center; padding: 5px 8px; color: #637187; background: #f1f4f8; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+.cache-status.refreshing { color: #8a6418; background: #fff5dc; }
+.cache-status.stale, .cache-status.empty { color: #92631d; background: #fff4d7; }
 .eyebrow, .card-kicker { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .15em; }
 .btn { min-height: 37px; padding: 7px 13px; color: #4c5665; background: #fff; border: 1px solid #ccd3dd; border-radius: 8px; font-size: 12px; font-weight: 650; }
 .btn:hover { background: #f7f9fb; border-color: #aeb8c6; }

@@ -38,6 +38,12 @@ export interface DashboardSnapshot {
   codeChanges: { additions: number; deletions: number; filesChanged: number }
   knowledge: { documents: number; lastUpdatedAt: string | null }
   skills: { available: number; disabled: number; loadFailed: number }
+  cache: {
+    state: 'fresh' | 'stale' | 'refreshing' | 'empty'
+    generatedAt: string | null
+    ageSeconds: number | null
+    lastError: string | null
+  }
 }
 
 export type SkillStatus = 'available' | 'disabled' | 'load_failed'

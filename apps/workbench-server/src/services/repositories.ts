@@ -78,6 +78,11 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
 
 export function listRepositories(db: WorkbenchDb, workspace: WorkspaceRow): RepositoryRow[] {
   discoverRepositories(db, workspace)
+  return listCachedRepositories(db, workspace)
+}
+
+/** Fast path for UI reads; reconciliation is performed by the dashboard worker. */
+export function listCachedRepositories(db: WorkbenchDb, workspace: WorkspaceRow): RepositoryRow[] {
   return db.db.prepare('SELECT * FROM repositories WHERE workspace_id = ? AND present = 1 ORDER BY name').all(workspace.id) as unknown as RepositoryRow[]
 }
 

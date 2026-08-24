@@ -4,9 +4,8 @@ import { mkdirSync } from 'node:fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
-import { dashboardSnapshot } from '../services/dashboard.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
-import { addRepository, listRepositories } from '../services/repositories.js'
+import { addRepository, listCachedRepositories } from '../services/repositories.js'
 import { delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
 import { CodexRuntimeAdapter } from '../runtime/codex.js'
 import { runtimeSettings, runtimeSettingsRow, updateRuntimeSettings } from '../runtime/settings.js'
@@ -17,6 +16,7 @@ import { getKnowledgeDocument, listKnowledgeDocuments } from '../services/knowle
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/policy.js'
 import type { RuntimeEvent } from '../runtime/protocol.js'
 import { listBrowsableDirectories } from '../services/directories.js'
+import { DashboardCache } from '../services/dashboardCache.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
@@ -58,6 +58,7 @@ async function fetchSkillDocument(source: string): Promise<{ url: string; conten
 export interface AppContext {
   db: WorkbenchDb
   conversations?: ConversationService
+  dashboards?: DashboardCache
 }
 
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:3211', 'http://localhost:3211'])
@@ -143,8 +144,18 @@ function requiredParam(ctx: Ctx, key: string): string {
 }
 
 function conversationService(ctx: AppContext): ConversationService {
-  if (!ctx.conversations) ctx.conversations = new ConversationService(ctx.db, createDefaultRuntime(ctx.db))
+  if (!ctx.conversations) ctx.conversations = new ConversationService(ctx.db, createDefaultRuntime(ctx.db), workspaceId => {
+    setTimeout(() => {
+      const workspace = ctx.db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
+      if (workspace) void dashboardCache(ctx).refresh(workspace)
+    }, 30_000)
+  })
   return ctx.conversations
+}
+
+function dashboardCache(ctx: AppContext): DashboardCache {
+  if (!ctx.dashboards) ctx.dashboards = new DashboardCache(ctx.db)
+  return ctx.dashboards
 }
 
 function createDefaultRuntime(db?: WorkbenchDb) {
@@ -256,8 +267,9 @@ function buildRoutes(ctx: AppContext) {
     const openedAt = nowIso()
     if (existing) {
       ctx.db.db.prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(openedAt, existing.id)
-      const worktreeImport = importExistingWorktrees(ctx.db, { ...existing, last_opened_at: openedAt })
-      return { workspace: workspaceView({ ...existing, last_opened_at: openedAt }, existing.id), summary: inspectWorkspace(prepared.path), action: prepared.action, initialization, worktreeImport, created: false }
+      const updated = { ...existing, last_opened_at: openedAt }
+      void dashboardCache(ctx).refresh(updated)
+      return { workspace: workspaceView(updated, existing.id), summary: inspectWorkspace(prepared.path), action: prepared.action, created: false }
     }
     const row: WorkspaceRow = {
       id: makeId('ws'),
@@ -268,8 +280,8 @@ function buildRoutes(ctx: AppContext) {
     }
     ctx.db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run(row.id, row.name, row.path, row.created_at, row.last_opened_at)
-    const worktreeImport = importExistingWorktrees(ctx.db, row)
-    return { workspace: workspaceView(row, row.id), summary: inspectWorkspace(row.path), action: prepared.action, initialization, worktreeImport, created: true }
+    void dashboardCache(ctx).refresh(row)
+    return { workspace: workspaceView(row, row.id), summary: inspectWorkspace(row.path), action: prepared.action, initialization, created: true }
   })
 
   add('GET', '/api/workspaces/:id', (c) => {
@@ -282,17 +294,18 @@ function buildRoutes(ctx: AppContext) {
     const openedAt = nowIso()
     ctx.db.db.prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(openedAt, row.id)
     const updated = { ...row, last_opened_at: openedAt }
-    return { workspace: workspaceView(updated, row.id), summary: inspectWorkspace(row.path), worktreeImport: importExistingWorktrees(ctx.db, updated) }
+    void dashboardCache(ctx).refresh(updated)
+    return { workspace: workspaceView(updated, row.id), summary: inspectWorkspace(row.path) }
   })
 
   add('GET', '/api/workspaces/:id/dashboard', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return dashboardSnapshot(ctx.db, row)
+    return dashboardCache(ctx).refreshIfStale(row)
   })
 
   add('POST', '/api/workspaces/:id/dashboard/refresh', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return dashboardSnapshot(ctx.db, row)
+    return dashboardCache(ctx).refresh(row)
   })
 
   add('GET', '/api/workspaces/:id/knowledge', (c) => {
@@ -349,7 +362,7 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/workspaces/:id/repositories', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return listRepositories(ctx.db, row).map(repository => ({
+    return listCachedRepositories(ctx.db, row).map(repository => ({
       id: repository.id,
       name: repository.name,
       path: repository.baseline_path,
@@ -371,6 +384,7 @@ function buildRoutes(ctx: AppContext) {
       ...(typeof source.path === 'string' ? { path: source.path } : {}),
       ...(typeof source.name === 'string' ? { name: source.name } : typeof c.body.name === 'string' ? { name: c.body.name } : {}),
     })
+    void dashboardCache(ctx).refresh(row)
     return { id: repository.id, name: repository.name, path: repository.baseline_path, originUrl: repository.origin_url, defaultRef: repository.default_ref, syncStatus: repository.sync_status, dirty: Boolean(repository.dirty) }
   })
 
@@ -381,7 +395,9 @@ function buildRoutes(ctx: AppContext) {
 
   add('POST', '/api/workspaces/:id/worktrees/import', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return importExistingWorktrees(ctx.db, row)
+    const result = importExistingWorktrees(ctx.db, row)
+    void dashboardCache(ctx).refresh(row)
+    return result
   })
 
   add('POST', '/api/workspaces/:id/demands', (c) => {
@@ -390,7 +406,9 @@ function buildRoutes(ctx: AppContext) {
     const name = typeof body.name === 'string' ? body.name : ''
     const branchName = typeof body.branchName === 'string' ? body.branchName : undefined
     const repositoryIds = Array.isArray(body.repositoryIds) ? body.repositoryIds.filter((value): value is string => typeof value === 'string') : []
-    return createDemand(ctx.db, row, { name, ...(branchName === undefined ? {} : { branchName }), repositoryIds })
+    const result = createDemand(ctx.db, row, { name, ...(branchName === undefined ? {} : { branchName }), repositoryIds })
+    void dashboardCache(ctx).refresh(row)
+    return result
   })
 
   add('GET', '/api/workspaces/:id/demands/:demandId', (c) => {
@@ -402,7 +420,9 @@ function buildRoutes(ctx: AppContext) {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     const repositoryId = typeof c.body.repositoryId === 'string' ? c.body.repositoryId : ''
     if (!repositoryId) throw new Error('Repo 参数缺失')
-    return addRepositoryToDemand(ctx.db, row, requiredParam(c, 'demandId'), repositoryId)
+    const result = addRepositoryToDemand(ctx.db, row, requiredParam(c, 'demandId'), repositoryId)
+    void dashboardCache(ctx).refresh(row)
+    return result
   })
 
   add('GET', '/api/workspaces/:id/demands/:demandId/conversations', (c) => {

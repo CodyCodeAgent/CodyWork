@@ -13,7 +13,7 @@ describe('workspace-only server primitives', () => {
     db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run(makeId('ws'), 'demo', '/tmp/demo', now, now)
     const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]
-    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_events', 'conversation_audits', 'runtime_settings'])
+    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_events', 'conversation_audits', 'runtime_settings', 'dashboard_snapshots'])
     db.close()
   })
 

@@ -76,8 +76,10 @@ export interface ConversationEventRow {
 
 export class WorkbenchDb {
   readonly db: DatabaseSync
+  readonly path: string
 
   constructor(dbPath: string) {
+    this.path = dbPath
     if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true })
     this.db = new DatabaseSync(dbPath)
     this.db.exec(`
@@ -175,6 +177,13 @@ export class WorkbenchDb {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         codex_url TEXT,
         codex_command TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dashboard_snapshots (
+        workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+        payload_json TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        last_error TEXT,
         updated_at TEXT NOT NULL
       );
     `)

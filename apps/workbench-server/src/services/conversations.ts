@@ -114,7 +114,7 @@ export class ConversationService {
 
   private runtime: ConversationRuntimeAdapter
 
-  constructor(private readonly db: WorkbenchDb, runtime: ConversationRuntimeAdapter) { this.runtime = runtime }
+  constructor(private readonly db: WorkbenchDb, runtime: ConversationRuntimeAdapter, private readonly onTurnFinished?: (workspaceId: string) => void) { this.runtime = runtime }
 
   getRuntime(): ConversationRuntimeAdapter { return this.runtime }
 
@@ -297,6 +297,7 @@ export class ConversationService {
     } catch (error) {
       this.fail(row.id, row.provider, turnId, error instanceof Error ? error : new Error(String(error)))
     }
+    this.onTurnFinished?.(row.workspace_id)
     void mode
   }
 

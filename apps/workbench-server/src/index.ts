@@ -16,8 +16,10 @@ const server = startServer(appContext, PORT)
 function close() {
   server.close(() => {
     void appContext.conversations?.getRuntime().close().finally(() => {
-      db.close()
-      process.exit(0)
+      void appContext.dashboards?.dispose().finally(() => {
+        db.close()
+        process.exit(0)
+      })
     })
   })
 }
