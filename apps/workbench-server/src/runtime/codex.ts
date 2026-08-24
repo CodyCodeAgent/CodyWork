@@ -16,7 +16,9 @@ import type {
   RuntimeContext,
   RuntimeEvent,
   RuntimeManifest,
+  RuntimeComposerOptions,
   RuntimePermissionMode,
+  ReasoningEffort,
   SendTurnRequest,
   SendTurnResult,
   WorkspaceCheckRequest,
@@ -43,6 +45,7 @@ type CodexConversation = ConversationHandle & {
   mode: RuntimePermissionMode
   planMode: boolean
   model: string
+  reasoningEffort: ReasoningEffort | ''
   activeTurn: string | undefined
   approvals: Map<string, PendingApproval>
 }
@@ -51,9 +54,9 @@ function workspaceCheck(path: string): WorkspaceCheckResult { return { status: '
 function threadModeOptions(context: RuntimeContext, mode: RuntimePermissionMode): Record<string, unknown> {
   return { cwd: context.demandPath ?? context.workspacePath, runtimeWorkspaceRoots: context.effectivePolicy.readableRoots, sandbox: mode === 'read-only' ? 'read-only' : 'workspace-write', approvalPolicy: mode === 'yolo' || mode === 'read-only' ? 'never' : 'on-request' }
 }
-function turnModeOptions(context: RuntimeContext, mode: RuntimePermissionMode, planMode: boolean, model: string): Record<string, unknown> {
+function turnModeOptions(context: RuntimeContext, mode: RuntimePermissionMode, planMode: boolean, model: string, reasoningEffort: ReasoningEffort | ''): Record<string, unknown> {
   const sandboxPolicy = mode === 'read-only' ? { type: 'readOnly', networkAccess: false } : { type: 'workspaceWrite', writableRoots: context.effectivePolicy.writableRoots, networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true }
-  return { cwd: context.demandPath ?? context.workspacePath, runtimeWorkspaceRoots: context.effectivePolicy.readableRoots, sandboxPolicy, approvalPolicy: mode === 'yolo' || mode === 'read-only' ? 'never' : 'on-request', ...(planMode ? { collaborationMode: { mode: 'plan', settings: { model, reasoning_effort: null, developer_instructions: null } } } : {}) }
+  return { cwd: context.demandPath ?? context.workspacePath, runtimeWorkspaceRoots: context.effectivePolicy.readableRoots, sandboxPolicy, approvalPolicy: mode === 'yolo' || mode === 'read-only' ? 'never' : 'on-request', ...(planMode ? { collaborationMode: { mode: 'plan', settings: { model, reasoning_effort: reasoningEffort || null, developer_instructions: null } } } : {}), ...(model ? { model } : {}), ...(reasoningEffort ? { reasoningEffort } : {}) }
 }
 function itemType(item: unknown): string { return item && typeof item === 'object' ? String((item as { type?: unknown }).type ?? '') : '' }
 function textFromItem(item: unknown): string { if (!item || typeof item !== 'object') return ''; const value = item as { text?: unknown; aggregatedOutput?: unknown }; return typeof value.text === 'string' ? value.text : typeof value.aggregatedOutput === 'string' ? value.aggregatedOutput : '' }
@@ -74,6 +77,27 @@ function threadSummary(value: unknown): NativeThreadSummary | null {
     ...(toIsoTimestamp(thread.updatedAt) ? { updatedAt: toIsoTimestamp(thread.updatedAt) } : {}),
     ...(typeof thread.source === 'string' && thread.source ? { source: thread.source } : {}),
   }
+}
+function composerOptions(value: unknown): RuntimeComposerOptions {
+  const record = asRecord(value) ?? {}
+  const models = Array.isArray(record.data) ? record.data.flatMap(item => {
+    const model = asRecord(item)
+    const id = typeof model?.id === 'string' ? model.id.trim() : typeof model?.model === 'string' ? model.model.trim() : ''
+    return id ? [id] : []
+  }) : []
+  return { models: [...new Set(models)], collaborationModes: [] }
+}
+function collaborationOptions(value: unknown): RuntimeComposerOptions['collaborationModes'] {
+  const record = asRecord(value) ?? {}
+  const data = Array.isArray(record.data) ? record.data : []
+  return data.flatMap(item => {
+    const mode = asRecord(item)
+    const name = typeof mode?.name === 'string' ? mode.name.trim() : ''
+    const kind = mode?.mode === 'plan' ? 'plan' : 'default'
+    if (!name) return []
+    const settings = asRecord(mode?.settings) ?? {}
+    return [{ name, mode: kind, label: typeof mode?.label === 'string' && mode.label.trim() ? mode.label.trim() : name, ...(typeof settings.model === 'string' && settings.model.trim() ? { model: settings.model.trim() } : {}), ...(typeof settings.reasoning_effort === 'string' ? { reasoningEffort: settings.reasoning_effort as ReasoningEffort } : {}) }]
+  })
 }
 
 /** A single service-level Codex App Server, with every thread bound to its own demand worktree policy. */
@@ -116,14 +140,14 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     const result = await host.call<{ thread?: { id?: string; model?: string } }>('thread/start', { model: this.options.model ?? null, ...threadModeOptions(request.context, mode), baseInstructions: request.context.instructionBundle.systemInstructions, developerInstructions: this.policyInstructions(request.context) })
     const nativeId = result.thread?.id; if (!nativeId) throw new Error('Codex App Server 没有返回 thread id')
     const handle = { id: request.conversationId ?? `conversation-${randomUUID()}`, provider: this.provider, nativeId, createdAt: nowIso() }
-    this.attach({ ...handle, context: request.context, mode, planMode: false, model: this.options.model ?? result.thread?.model ?? 'gpt-5.4', activeTurn: undefined, approvals: new Map() })
+    this.attach({ ...handle, context: request.context, mode, planMode: false, model: this.options.model ?? result.thread?.model ?? 'gpt-5.4', reasoningEffort: '', activeTurn: undefined, approvals: new Map() })
     return handle
   }
   async resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle> {
     const host = await this.ensureHost(request.context); const mode = this.modeFromContext(request.context)
     await host.call('thread/resume', { threadId: request.nativeId, model: this.options.model ?? null, ...threadModeOptions(request.context, mode), baseInstructions: request.context.instructionBundle.systemInstructions, developerInstructions: this.policyInstructions(request.context) })
     const handle = { id: request.conversationId ?? `conversation-${randomUUID()}`, provider: this.provider, nativeId: request.nativeId, createdAt: nowIso() }
-    this.attach({ ...handle, context: request.context, mode, planMode: false, model: this.options.model ?? 'gpt-5.4', activeTurn: undefined, approvals: new Map() }); return handle
+    this.attach({ ...handle, context: request.context, mode, planMode: false, model: this.options.model ?? 'gpt-5.4', reasoningEffort: '', activeTurn: undefined, approvals: new Map() }); return handle
   }
   async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
     const host = await this.ensureHost(request.context)
@@ -148,6 +172,16 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     }
     return summaries
   }
+  async getComposerOptions(context: RuntimeContext): Promise<RuntimeComposerOptions> {
+    const host = await this.ensureHost(context)
+    const [modelsResult, modesResult] = await Promise.allSettled([
+      host.call('model/list', {}),
+      host.call('collaborationMode/list', {}),
+    ])
+    const models = modelsResult.status === 'fulfilled' ? composerOptions(modelsResult.value).models : []
+    const collaborationModes = modesResult.status === 'fulfilled' ? collaborationOptions(modesResult.value) : []
+    return { models, collaborationModes }
+  }
   async setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void> {
     const session = this.require(conversation); session.mode = mode
     await this.requireHost().call('thread/settings/update', { threadId: session.nativeId, cwd: session.context.demandPath ?? session.context.workspacePath, approvalPolicy: mode === 'yolo' || mode === 'read-only' ? 'never' : 'on-request', sandboxPolicy: mode === 'read-only' ? { type: 'readOnly', networkAccess: false } : { type: 'workspaceWrite', writableRoots: session.context.effectivePolicy.writableRoots, networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true } })
@@ -157,7 +191,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     if (request.prompt.startsWith('/plan')) {
       if (request.prompt === '/plan' || request.prompt === '/plan on') session.planMode = !session.planMode
       else if (request.prompt === '/plan off' || request.prompt === '/plan reject') session.planMode = false
-      await host.call('thread/settings/update', { threadId: session.nativeId, collaborationMode: { mode: session.planMode ? 'plan' : 'default', settings: { model: session.model, reasoning_effort: null, developer_instructions: null } } })
+      await host.call('thread/settings/update', { threadId: session.nativeId, collaborationMode: { mode: session.planMode ? 'plan' : 'default', settings: { model: session.model, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } })
       return { conversation: request.conversation, finalText: '', events: [] }
     }
     const value = request.prompt.replace(/^\/goal\s*/i, '').trim()
@@ -169,8 +203,10 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
   }
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
     const session = this.require(request.conversation); if (session.activeTurn && request.mode !== 'steer') throw new Error('该会话已有运行中的 Turn；请排队或先中断。')
+    if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
+    if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
     const steer = request.mode === 'steer' && Boolean(session.activeTurn)
-    const result = await this.requireHost().call<{ turn?: { id?: string } }>(steer ? 'turn/steer' : 'turn/start', steer ? { threadId: session.nativeId, expectedTurnId: session.activeTurn, input: [{ type: 'text', text: request.prompt, text_elements: [] }] } : { threadId: session.nativeId, input: [{ type: 'text', text: request.prompt, text_elements: [] }], ...turnModeOptions(session.context, session.mode, session.planMode, session.model) })
+    const result = await this.requireHost().call<{ turn?: { id?: string } }>(steer ? 'turn/steer' : 'turn/start', steer ? { threadId: session.nativeId, expectedTurnId: session.activeTurn, input: [{ type: 'text', text: request.prompt, text_elements: [] }] } : { threadId: session.nativeId, input: [{ type: 'text', text: request.prompt, text_elements: [] }], ...turnModeOptions(session.context, session.mode, session.planMode, session.model, session.reasoningEffort) })
     const turnId = result.turn?.id ?? `turn-${randomUUID()}`; session.activeTurn = turnId
     const run = this.runs.get(turnId) ?? { events: [], finalText: '', completed: false, failed: null, listener: undefined, resolve: undefined, reject: undefined }; this.runs.set(turnId, run); if (request.onEvent) run.listener = request.onEvent; for (const event of run.events) request.onEvent?.(event)
     if (!run.completed && !run.failed) await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error('Codex turn 超时')), 10 * 60 * 1000); run.resolve = () => { clearTimeout(timer); resolve() }; run.reject = (error) => { clearTimeout(timer); reject(error) } })

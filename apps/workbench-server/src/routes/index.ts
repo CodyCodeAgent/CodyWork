@@ -437,6 +437,11 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).listAvailableNativeThreads(workspace.id, requiredParam(c, 'demandId'))
   })
 
+  add('GET', '/api/workspaces/:id/demands/:demandId/composer-options', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return conversationService(ctx).composerOptions(workspace.id, requiredParam(c, 'demandId'))
+  })
+
   add('POST', '/api/workspaces/:id/demands/:demandId/conversations', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const title = typeof c.body.title === 'string' ? c.body.title : undefined
@@ -465,7 +470,13 @@ function buildRoutes(ctx: AppContext) {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const content = typeof c.body.content === 'string' ? c.body.content : ''
     const mode = c.body.mode === 'steer' ? 'steer' : 'queue'
-    return conversationService(ctx).send(workspace.id, requiredParam(c, 'conversationId'), content, mode)
+    const reasoningEfforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
+    const settings = {
+      ...(typeof c.body.model === 'string' && c.body.model.trim() ? { model: c.body.model.trim().slice(0, 160) } : {}),
+      ...(typeof c.body.reasoningEffort === 'string' && reasoningEfforts.has(c.body.reasoningEffort) ? { reasoningEffort: c.body.reasoningEffort as 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}),
+      ...(Array.isArray(c.body.skills) ? { skills: c.body.skills.filter((item: unknown) => typeof item === 'string').slice(0, 20) as string[] } : {}),
+    }
+    return conversationService(ctx).send(workspace.id, requiredParam(c, 'conversationId'), content, mode, settings)
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/interrupt', async (c) => {

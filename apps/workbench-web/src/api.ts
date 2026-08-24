@@ -155,6 +155,11 @@ export interface AvailableNativeThread {
   bound: boolean
 }
 
+export interface ComposerOptions {
+  models: string[]
+  collaborationModes: Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>
+}
+
 export interface RuntimeSettings {
   provider: 'codex'
   codex: { url: string; command: string }
@@ -208,14 +213,16 @@ export const api = {
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
   listAvailableNativeThreads: (workspaceId: string, demandId: string) =>
     request<AvailableNativeThread[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/available-threads`),
+  composerOptions: (workspaceId: string, demandId: string) =>
+    request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/composer-options`),
   createConversation: (workspaceId: string, demandId: string, title?: string) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
   bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string, after = 0) =>
     request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history?after=${after}`),
-  sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue') =>
-    request<{ accepted: true; turnId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { content, mode }),
+  sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; skills?: string[] }) =>
+    request<{ accepted: true; turnId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { content, mode, ...(settings ?? {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
   setConversationPermission: (workspaceId: string, conversationId: string, mode: ConversationPermissionMode) =>

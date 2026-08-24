@@ -151,7 +151,24 @@ export interface SendTurnRequest {
   conversation: ConversationHandle
   prompt: string
   mode?: 'queue' | 'steer'
+  settings?: {
+    model?: string
+    reasoningEffort?: ReasoningEffort
+  }
   onEvent?: (event: RuntimeEvent) => void
+}
+
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export interface RuntimeComposerOptions {
+  models: string[]
+  collaborationModes: Array<{
+    name: string
+    mode: 'default' | 'plan'
+    label: string
+    model?: string
+    reasoningEffort?: ReasoningEffort | ''
+  }>
 }
 
 export interface SendTurnResult {
@@ -176,6 +193,8 @@ export interface ConversationRuntimeAdapter extends RuntimeAdapter {
   resumeConversation?(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle>
   /** Lists resumable provider-native threads without attaching one to a Demand. */
   listNativeThreads?(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
+  /** Discover provider-supported Composer options without making the UI guess a protocol version. */
+  getComposerOptions?(context: RuntimeContext): Promise<RuntimeComposerOptions>
   /** Send a provider-native slash command without adding CodyWork policy prompt text. */
   sendCommand?(request: SendTurnRequest): Promise<SendTurnResult>
   setPermission?(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>
