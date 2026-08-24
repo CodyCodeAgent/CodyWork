@@ -32,6 +32,11 @@ rl.on('line', line => {
   if (message.method === 'initialize') write({ id: message.id, result: { serverInfo: { name: 'codex-fixture', version: '1' } } })
   else if (message.method === 'thread/start') write({ id: message.id, result: { thread: { id: 'native-fixture-thread' } } })
   else if (message.method === 'thread/resume') write({ id: message.id, result: { thread: { id: message.params?.threadId ?? 'native-fixture-thread' } } })
+  else if (message.method === 'thread/read') write({ id: message.id, result: { thread: { id: message.params?.threadId, turns: [{ id: 'turn-history', status: 'completed', items: [
+    { id: 'user-history', type: 'userMessage', content: [{ type: 'text', text: 'historical prompt' }] },
+    { id: 'command-history', type: 'commandExecution', command: 'pnpm test', status: 'completed', aggregatedOutput: 'all green' },
+    { id: 'agent-history', type: 'agentMessage', text: 'historical answer' },
+  ] }] } } })
   else if (message.method === 'thread/settings/update') write({ id: message.id, result: {} })
   else if (message.method === 'thread/goal/get') write({ id: message.id, result: { goal } })
   else if (message.method === 'thread/goal/set') {

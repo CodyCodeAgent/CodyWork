@@ -58,20 +58,8 @@ export interface ConversationRow {
   plan_json: string | null
   policy_hash: string
   instruction_hash: string
-  last_event_id: number
   created_at: string
   updated_at: string
-}
-
-export interface ConversationEventRow {
-  id: number
-  conversation_id: string
-  type: string
-  turn_id: string | null
-  item_id: string | null
-  provider: string
-  timestamp: string
-  data_json: string
 }
 
 export class WorkbenchDb {
@@ -150,22 +138,10 @@ export class WorkbenchDb {
         plan_json TEXT,
         policy_hash TEXT NOT NULL,
         instruction_hash TEXT NOT NULL,
-        last_event_id INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(provider, native_id)
       );
-      CREATE TABLE IF NOT EXISTS conversation_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-        type TEXT NOT NULL,
-        turn_id TEXT,
-        item_id TEXT,
-        provider TEXT NOT NULL,
-        timestamp TEXT NOT NULL,
-        data_json TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS conversation_events_conversation_id_id ON conversation_events(conversation_id, id);
       CREATE TABLE IF NOT EXISTS conversation_audits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -187,6 +163,11 @@ export class WorkbenchDb {
         updated_at TEXT NOT NULL
       );
     `)
+    // Direct cut-over: native Codex threads are the sole conversation history.
+    // Old event mirrors are intentionally discarded instead of migrated.
+    this.db.exec('DROP INDEX IF EXISTS conversation_events_conversation_id_id; DROP TABLE IF EXISTS conversation_events;')
+    const conversationColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name?: string }[]
+    if (conversationColumns.some(column => column.name === 'last_event_id')) this.db.exec('ALTER TABLE conversations DROP COLUMN last_event_id;')
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
     if (runtimeColumns.some(column => column.name === 'provider' || column.name?.startsWith('legacy_'))) {
       this.db.exec(`

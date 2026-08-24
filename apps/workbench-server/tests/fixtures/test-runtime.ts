@@ -7,6 +7,7 @@ import type {
   CreateConversationRequest,
   ListNativeThreadsRequest,
   NativeThreadSummary,
+  ReadConversationRequest,
   RuntimeContext,
   RuntimeEvent,
   RuntimeManifest,
@@ -24,6 +25,7 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
   readonly provider = 'test'
   private readonly conversations = new Map<string, ConversationHandle>()
   private readonly contexts = new Map<string, RuntimeContext>()
+  private readonly history = new Map<string, RuntimeEvent[]>()
 
   async getManifest(): Promise<RuntimeManifest> {
     return { provider: this.provider, runtimeVersion: 'test-1.0.0', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION, streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: false, readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'disabled', approval: 'workbench', workspaceInitialize: false, workspaceRepair: false, goals: true, plans: true, questions: true }
@@ -36,13 +38,19 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const conversation = { id, provider: this.provider, nativeId: id, createdAt: nowIso() }
     this.conversations.set(id, conversation); this.contexts.set(id, request.context)
+    if (!this.history.has(conversation.nativeId)) this.history.set(conversation.nativeId, [])
     return conversation
   }
 
   async resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle> {
-    const conversation = await this.createConversation({ ...request, conversationId: request.conversationId ?? request.nativeId })
-    return { ...conversation, nativeId: request.nativeId }
+    const id = request.conversationId ?? request.nativeId
+    const conversation = { id, provider: this.provider, nativeId: request.nativeId, createdAt: nowIso() }
+    this.conversations.set(id, conversation); this.contexts.set(id, request.context)
+    if (!this.history.has(conversation.nativeId)) this.history.set(conversation.nativeId, [])
+    return conversation
   }
+
+  async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> { return this.history.get(request.conversation.nativeId) ?? [] }
 
   async listNativeThreads(_request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
     return [
@@ -67,9 +75,10 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
     emit('message.delta', { text: `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}` })
     emit('item.completed', { name: 'csr.policy.check', status: 'completed' })
     emit('turn.completed', { status: 'completed' })
+    this.history.set(request.conversation.nativeId, events)
     return { conversation: request.conversation, finalText: `Test runtime received: ${request.prompt}`, events }
   }
 
   async interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }> { return { supported: this.conversations.has(conversation.id) } }
-  async close(): Promise<void> { this.conversations.clear(); this.contexts.clear() }
+  async close(): Promise<void> { this.conversations.clear(); this.contexts.clear(); this.history.clear() }
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
-import { WorkbenchDb, ConversationEventRow, ConversationPermissionMode, ConversationRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
+import { WorkbenchDb, ConversationPermissionMode, ConversationRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
 import { getDemand } from './demands.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/policy.js'
 import type {
@@ -24,20 +24,17 @@ export interface ConversationView {
   plan: unknown
   policyHash: string
   instructionHash: string
-  lastEventId: number
   createdAt: string
   updatedAt: string
 }
 
-export interface ConversationEvent {
-  id: number
-  type: string
+export interface ConversationEvent extends RuntimeEvent {
+  id: string
+  type: RuntimeEvent['type']
   conversationId: string
   turnId?: string
   itemId?: string
   provider: string
-  timestamp?: string
-  data: Record<string, unknown>
 }
 
 export interface AvailableNativeThread extends NativeThreadSummary {
@@ -76,22 +73,8 @@ function toView(row: ConversationRow): ConversationView {
     plan: parseJson(row.plan_json),
     policyHash: row.policy_hash,
     instructionHash: row.instruction_hash,
-    lastEventId: row.last_event_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  }
-}
-
-function eventFromRow(row: ConversationEventRow): ConversationEvent {
-  return {
-    id: row.id,
-    type: row.type,
-    conversationId: row.conversation_id,
-    ...(row.turn_id ? { turnId: row.turn_id } : {}),
-    ...(row.item_id ? { itemId: row.item_id } : {}),
-    provider: row.provider,
-    timestamp: row.timestamp,
-    data: parseJson(row.data_json) as Record<string, unknown> ?? {},
   }
 }
 
@@ -155,10 +138,18 @@ export class ConversationService {
     return toView(row)
   }
 
-  history(workspaceId: string, conversationId: string, after = 0, limit = 500): ConversationEvent[] {
-    this.get(workspaceId, conversationId)
-    const rows = this.db.db.prepare('SELECT * FROM conversation_events WHERE conversation_id = ? AND id > ? ORDER BY id ASC LIMIT ?').all(conversationId, Math.max(0, after), Math.min(Math.max(1, limit), 1000)) as unknown as ConversationEventRow[]
-    return rows.map(eventFromRow)
+  async history(workspaceId: string, conversationId: string): Promise<ConversationEvent[]> {
+    const row = this.requireConversation(workspaceId, conversationId)
+    await this.ensureHandle(row)
+    if (!this.runtime.readConversation) throw new Error('当前 Runtime 不支持读取原生 Thread 历史')
+    try {
+      return await this.runtime.readConversation({ conversation: this.handleFor(row), context: this.contexts.get(conversationId)! })
+    } catch (error) {
+      // App Server cannot read a just-started native thread until its first user
+      // turn materializes. Treat only an untouched local conversation as empty.
+      if (row.status === 'idle' && !row.goal_json && !row.plan_json) return []
+      throw error
+    }
   }
 
   subscribe(conversationId: string, listener: Listener): () => void {
@@ -190,20 +181,18 @@ export class ConversationService {
       plan_json: null,
       policy_hash: context.effectivePolicy.hash,
       instruction_hash: context.instructionBundle.sha256,
-      last_event_id: 0,
       created_at: now,
       updated_at: now,
     }
-    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, last_event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         row.id, row.demand_id, row.workspace_id, row.provider, row.native_id,
         row.title, row.status, row.permission_mode, row.goal_json, row.plan_json,
-        row.policy_hash, row.instruction_hash, row.last_event_id, row.created_at,
+        row.policy_hash, row.instruction_hash, row.created_at,
         row.updated_at,
       )
     this.handles.set(id, handle)
     this.contexts.set(id, context)
-    this.append(id, { type: 'conversation.created', provider: handle.provider, data: { title: row.title } })
     return this.get(workspaceId, id)
   }
 
@@ -237,16 +226,14 @@ export class ConversationService {
       plan_json: null,
       policy_hash: context.effectivePolicy.hash,
       instruction_hash: context.instructionBundle.sha256,
-      last_event_id: 0,
       created_at: now,
       updated_at: now,
     }
-    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, last_event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(row.id, row.demand_id, row.workspace_id, row.provider, row.native_id, row.title, row.status, row.permission_mode, row.goal_json, row.plan_json, row.policy_hash, row.instruction_hash, row.last_event_id, row.created_at, row.updated_at)
+    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.demand_id, row.workspace_id, row.provider, row.native_id, row.title, row.status, row.permission_mode, row.goal_json, row.plan_json, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
     this.handles.set(id, handle)
     this.contexts.set(id, context)
     this.audit(id, 'conversation.bound', { nativeId, demandId: demand.id, policyHash: context.effectivePolicy.hash })
-    this.append(id, { type: 'conversation.bound', provider: handle.provider, data: { nativeId, title: row.title, policyHash: context.effectivePolicy.hash } })
     return this.get(workspaceId, id)
   }
 
@@ -264,7 +251,7 @@ export class ConversationService {
     const turnId = `turn-${randomUUID()}`
     const requestedSkills = (settings?.skills ?? []).filter(skill => typeof skill === 'string' && skill.trim()).map(skill => skill.trim()).slice(0, 20)
     const promptWithSkills = requestedSkills.length ? `Use these explicitly selected Workspace Skills when relevant: ${requestedSkills.map(skill => `$${skill}`).join(', ')}.\n\n${text}` : text
-    this.append(conversationId, { type: 'message.user', provider: row.provider, turnId, data: { text, mode, ...(settings?.model ? { model: settings.model } : {}), ...(settings?.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}), ...(requestedSkills.length ? { skills: requestedSkills } : {}) } })
+    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'message.user', provider: row.provider, turnId, timestamp: nowIso(), data: { text, mode, ...(settings?.model ? { model: settings.model } : {}), ...(settings?.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}), ...(requestedSkills.length ? { skills: requestedSkills } : {}) } })
     if (text === '/plan' || text === '/plan on' || text === '/plan off' || text === '/plan approve' || text === '/plan reject') {
       await this.runtime.sendCommand?.({ conversation: this.handleFor(row), prompt: text, mode })
       const current = parseJson(row.plan_json) as { active?: boolean } | null
@@ -272,8 +259,7 @@ export class ConversationService {
       const status = text === '/plan approve' ? 'approved' : text === '/plan reject' ? 'rejected' : active ? 'planning' : 'inactive'
       const plan = { active, status, updatedAt: nowIso() }
       this.db.db.prepare('UPDATE conversations SET plan_json = ?, status = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(plan), 'idle', nowIso(), conversationId)
-      this.append(conversationId, { type: 'plan.updated', provider: row.provider, turnId, data: plan })
-      this.append(conversationId, { type: 'message.completed', provider: row.provider, turnId, data: { text: status === 'approved' ? '计划已确认，Agent 可以开始执行。' : status === 'rejected' ? '计划已拒绝，Agent 将继续澄清。' : active ? '已进入 Plan 模式。请描述你希望完成的目标。' : '已退出 Plan 模式。' } })
+      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'plan.updated', provider: row.provider, turnId, timestamp: nowIso(), data: plan })
       return { accepted: true, turnId }
     }
     if (text.startsWith('/goal')) {
@@ -283,8 +269,7 @@ export class ConversationService {
       const commandStatus = objective === 'pause' || objective === '暂停' ? 'paused' : objective === 'resume' || objective === '恢复' ? 'active' : objective === 'complete' || objective === '完成' ? 'completed' : objective === 'clear' || objective === '清除' ? 'cleared' : null
       const goal = commandStatus === 'cleared' ? null : commandStatus ? { objective: current?.objective ?? '', status: commandStatus, updatedAt: nowIso() } : objective ? { objective, status: 'active', updatedAt: nowIso() } : null
       this.db.db.prepare('UPDATE conversations SET goal_json = ?, status = ?, updated_at = ? WHERE id = ?').run(goal ? JSON.stringify(goal) : null, 'idle', nowIso(), conversationId)
-      this.append(conversationId, { type: 'goal.updated', provider: row.provider, turnId, data: goal ? { ...goal } : { status: 'cleared' } })
-      this.append(conversationId, { type: 'message.completed', provider: row.provider, turnId, data: { text: goal ? (commandStatus ? `Goal 状态已更新：${commandStatus}` : `Goal 已设置：${objective}`) : 'Goal 已清除。' } })
+      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'goal.updated', provider: row.provider, turnId, timestamp: nowIso(), data: goal ? { ...goal } : { status: 'cleared' } })
       return { accepted: true, turnId }
     }
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
@@ -326,7 +311,7 @@ export class ConversationService {
     await this.ensureHandle(row)
     await this.runtime.respondApproval?.(this.handleFor(row), approvalId, outcome)
     this.audit(conversationId, 'approval.resolved', { approvalId, outcome })
-    this.append(conversationId, { type: 'approval.resolved', provider: row.provider, data: { approvalId, outcome } })
+    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'approval.resolved', provider: row.provider, timestamp: nowIso(), data: { approvalId, outcome } })
   }
 
   async answer(workspaceId: string, conversationId: string, requestId: string, answer: unknown): Promise<void> {
@@ -334,7 +319,7 @@ export class ConversationService {
     await this.ensureHandle(row)
     await this.runtime.respondQuestion?.(this.handleFor(row), requestId, answer)
     this.audit(conversationId, 'question.resolved', { requestId, answer })
-    this.append(conversationId, { type: 'question.resolved', provider: row.provider, data: { requestId, answer } })
+    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'question.resolved', provider: row.provider, timestamp: nowIso(), data: { requestId, answer } })
   }
 
   rename(workspaceId: string, conversationId: string, title: string): ConversationView {
@@ -355,7 +340,7 @@ export class ConversationService {
     const count = this.db.db.prepare('SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND demand_id = ?').get(workspaceId, row.demand_id) as { count: number }
     if (count.count <= 1) throw new Error('每个 Demand 至少保留一个会话')
 
-    // conversation_events and conversation_audits are deleted through their foreign-key cascades.
+    // Local audit records are deleted through their foreign-key cascade; native Thread is retained.
     this.db.db.prepare('DELETE FROM conversations WHERE id = ? AND workspace_id = ?').run(conversationId, workspaceId)
     this.handles.delete(conversationId)
     this.contexts.delete(conversationId)
@@ -389,29 +374,18 @@ export class ConversationService {
 
   private appendRuntimeEvent(event: RuntimeEvent): void {
     const data = event.data
-    this.append(event.conversationId, { ...event, data })
+    this.publish({ ...event, data })
     if (event.type === 'approval.requested') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('awaiting_approval', nowIso(), event.conversationId)
     if (event.type === 'turn.failed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
   }
 
   private fail(conversationId: string, provider: string, turnId: string, error: Error): void {
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), conversationId)
-    this.append(conversationId, { type: 'turn.failed', provider, turnId, data: { error: error.message } })
+    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', provider, turnId, timestamp: nowIso(), data: { error: error.message } })
   }
 
-  private append(conversationId: string, event: Omit<ConversationEvent, 'id' | 'conversationId'>): ConversationEvent {
-    const data = JSON.stringify(event.data)
-    const result = this.db.db.prepare('INSERT INTO conversation_events (conversation_id, type, turn_id, item_id, provider, timestamp, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run(conversationId, event.type, event.turnId ?? null, event.itemId ?? null, event.provider, event.timestamp ?? nowIso(), data)
-    const id = Number(result.lastInsertRowid)
-    this.db.db.prepare('UPDATE conversations SET last_event_id = ?, updated_at = ? WHERE id = ?').run(id, nowIso(), conversationId)
-    const output: ConversationEvent = {
-      id, conversationId, type: event.type,
-      ...(event.turnId ? { turnId: event.turnId } : {}),
-      ...(event.itemId ? { itemId: event.itemId } : {}),
-      provider: event.provider, timestamp: event.timestamp ?? nowIso(), data: event.data,
-    }
-    for (const listener of this.listeners.get(conversationId) ?? []) listener(output)
-    return output
+  private publish(event: ConversationEvent): void {
+    for (const listener of this.listeners.get(event.conversationId) ?? []) listener(event)
   }
 
   private audit(conversationId: string, action: string, data: unknown): void {

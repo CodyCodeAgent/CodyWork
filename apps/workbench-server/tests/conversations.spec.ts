@@ -34,7 +34,7 @@ describe('conversation websocket control plane', () => {
     const bound = await conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123', title: 'Existing context' })
     expect(bound.nativeId).toBe('thread-existing-123')
     expect(bound.title).toBe('Existing context')
-    expect(conversations.history(test.workspaceId, bound.id).map(event => event.type)).toEqual(['conversation.bound'])
+    await expect(conversations.history(test.workspaceId, bound.id)).resolves.toEqual([])
     await expect(conversations.listAvailableNativeThreads(test.workspaceId, test.demandId)).resolves.toEqual([
       expect.objectContaining({ nativeId: 'thread-existing-123', bound: true }),
       expect.objectContaining({ nativeId: 'thread-unbound-456', bound: false }),
@@ -44,16 +44,16 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('deletes an inactive local session with its durable history but retains another Demand session', async () => {
+  it('deletes an inactive local session while retaining another Demand session', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
     const first = await conversations.create(test.workspaceId, test.demandId, 'Keep this session')
     const removed = await conversations.create(test.workspaceId, test.demandId, 'Remove this session')
 
-    expect(conversations.history(test.workspaceId, removed.id).map(event => event.type)).toEqual(['conversation.created'])
+    await expect(conversations.history(test.workspaceId, removed.id)).resolves.toEqual([])
     expect(conversations.remove(test.workspaceId, removed.id)).toEqual({ deleted: true })
     expect(conversations.list(test.workspaceId, test.demandId).map(conversation => conversation.id)).toEqual([first.id])
-    expect(() => conversations.history(test.workspaceId, removed.id)).toThrow('会话不存在')
+    await expect(conversations.history(test.workspaceId, removed.id)).rejects.toThrow('会话不存在')
     expect(() => conversations.remove(test.workspaceId, first.id)).toThrow('至少保留一个会话')
 
     test.db.close()
@@ -73,7 +73,7 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('persists multiple sessions and streams events over WebSocket with cursor replay', async () => {
+  it('streams live events over WebSocket while history is read from the native thread', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
     const server = startServer({ db: test.db, conversations }, 0)
@@ -81,11 +81,11 @@ describe('conversation websocket control plane', () => {
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('server did not bind')
     const base = `http://127.0.0.1:${address.port}/api/workspaces/${test.workspaceId}`
-    const first = await (await fetch(`${base}/demands/${test.demandId}/conversations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as { data: { id: string; lastEventId: number } }
+    const first = await (await fetch(`${base}/demands/${test.demandId}/conversations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as { data: { id: string } }
     const second = await (await fetch(`${base}/demands/${test.demandId}/conversations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as { data: { id: string } }
     expect(second.data.id).not.toBe(first.data.id)
     const events: string[] = []
-    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/workspaces/${test.workspaceId}/conversations/${first.data.id}/events?after=${first.data.lastEventId}`)
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/workspaces/${test.workspaceId}/conversations/${first.data.id}/events`)
     socket.on('message', (data) => { const message = JSON.parse(String(data)) as { event?: { type: string } }; if (message.event) events.push(message.event.type) })
     await once(socket, 'open')
     await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })

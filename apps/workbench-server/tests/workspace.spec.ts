@@ -13,7 +13,9 @@ describe('workspace-only server primitives', () => {
     db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run(makeId('ws'), 'demo', '/tmp/demo', now, now)
     const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]
-    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_events', 'conversation_audits', 'runtime_settings', 'dashboard_snapshots'])
+    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_audits', 'runtime_settings', 'dashboard_snapshots'])
+    const conversationColumns = db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
+    expect(conversationColumns.map(column => column.name)).not.toContain('last_event_id')
     db.close()
   })
 
@@ -41,6 +43,30 @@ describe('workspace-only server primitives', () => {
     expect(columns.map(column => column.name)).toEqual(['id', 'codex_url', 'codex_command', 'updated_at'])
     const row = db.db.prepare('SELECT * FROM runtime_settings WHERE id = 1').get() as { codex_command: string }
     expect(row.codex_command).toBe('custom-codex app-server --stdio')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('directly removes the obsolete SQLite conversation event mirror', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-events-cutover-'))
+    const path = join(root, 'workspace.db')
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY, demand_id TEXT NOT NULL, workspace_id TEXT NOT NULL, provider TEXT NOT NULL,
+        native_id TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, permission_mode TEXT NOT NULL,
+        goal_json TEXT, plan_json TEXT, policy_hash TEXT NOT NULL, instruction_hash TEXT NOT NULL,
+        last_event_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE conversation_events (id INTEGER PRIMARY KEY, conversation_id TEXT NOT NULL, type TEXT NOT NULL);
+      CREATE INDEX conversation_events_conversation_id_id ON conversation_events(conversation_id, id);
+    `)
+    legacy.close()
+    const db = new WorkbenchDb(path)
+    const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conversation_events'").all()
+    const columns = db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
+    expect(tables).toEqual([])
+    expect(columns.map(column => column.name)).not.toContain('last_event_id')
     db.close()
     rmSync(root, { recursive: true, force: true })
   })

@@ -11,6 +11,7 @@ import type {
   ConversationHandle,
   ConversationRuntimeAdapter,
   CreateConversationRequest,
+  ReadConversationRequest,
   ListNativeThreadsRequest,
   NativeThreadSummary,
   RuntimeContext,
@@ -60,6 +61,56 @@ function turnModeOptions(context: RuntimeContext, mode: RuntimePermissionMode, p
 }
 function itemType(item: unknown): string { return item && typeof item === 'object' ? String((item as { type?: unknown }).type ?? '') : '' }
 function textFromItem(item: unknown): string { if (!item || typeof item !== 'object') return ''; const value = item as { text?: unknown; aggregatedOutput?: unknown }; return typeof value.text === 'string' ? value.text : typeof value.aggregatedOutput === 'string' ? value.aggregatedOutput : '' }
+function stableHistoryId(threadId: string, turnId: string, suffix: string): string { return `native:${threadId}:${turnId}:${suffix}` }
+function itemIdentifier(item: unknown, index: number): string {
+  const record = asRecord(item)
+  return typeof record?.id === 'string' && record.id ? record.id : `item-${String(index)}`
+}
+function userText(item: unknown): string {
+  const record = asRecord(item)
+  const content = record?.content
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map(part => {
+    const value = asRecord(part)
+    return typeof value?.text === 'string' ? value.text : typeof value?.content === 'string' ? value.content : ''
+  }).filter(Boolean).join('\n')
+}
+function historyEvent(conversation: ConversationHandle, turnId: string, suffix: string, type: RuntimeEvent['type'], data: Record<string, unknown>, itemId?: string): RuntimeEvent {
+  return { id: stableHistoryId(conversation.nativeId, turnId, suffix), type, conversationId: conversation.id, turnId, ...(itemId ? { itemId } : {}), provider: conversation.provider, timestamp: nowIso(), data }
+}
+function readHistoryEvents(conversation: ConversationHandle, payload: unknown): RuntimeEvent[] {
+  const thread = asRecord(asRecord(payload)?.thread)
+  const turns = Array.isArray(thread?.turns) ? thread.turns : []
+  const events: RuntimeEvent[] = []
+  for (let turnIndex = 0; turnIndex < turns.length; turnIndex += 1) {
+    const turn = asRecord(turns[turnIndex])
+    const turnId = typeof turn?.id === 'string' && turn.id ? turn.id : `turn-${String(turnIndex)}`
+    const status = typeof turn?.status === 'string' ? turn.status : ''
+    events.push(historyEvent(conversation, turnId, 'started', 'turn.started', { nativeHistory: true, turn }))
+    const items = Array.isArray(turn?.items) ? turn.items : []
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const item = items[itemIndex]
+      const type = itemType(item)
+      const id = itemIdentifier(item, itemIndex)
+      const data = { item, nativeEvent: { threadId: conversation.nativeId, turnId, item } }
+      if (type === 'userMessage') {
+        events.push(historyEvent(conversation, turnId, id, 'message.user', { text: userText(item), ...data }, id))
+      } else if (type === 'agentMessage') {
+        events.push(historyEvent(conversation, turnId, id, 'message.completed', { text: textFromItem(item), ...data }, id))
+      } else if (type === 'plan') {
+        events.push(historyEvent(conversation, turnId, id, 'plan.updated', { text: textFromItem(item), ...data }, id))
+      } else if (type === 'reasoning') {
+        events.push(historyEvent(conversation, turnId, id, 'reasoning.delta', { text: textFromItem(item), ...data }, id))
+      } else {
+        events.push(historyEvent(conversation, turnId, id, 'tool.completed', data, id))
+      }
+    }
+    if (status === 'failed') events.push(historyEvent(conversation, turnId, 'failed', 'turn.failed', { error: turn?.error ?? 'Codex turn failed', nativeHistory: true }))
+    else if (status !== 'inProgress') events.push(historyEvent(conversation, turnId, 'completed', 'turn.completed', { nativeHistory: true, turn }))
+  }
+  return events
+}
 function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
   return new Date(value * 1000).toISOString()
@@ -148,6 +199,11 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     await host.call('thread/resume', { threadId: request.nativeId, model: this.options.model ?? null, ...threadModeOptions(request.context, mode), baseInstructions: request.context.instructionBundle.systemInstructions, developerInstructions: this.policyInstructions(request.context) })
     const handle = { id: request.conversationId ?? `conversation-${randomUUID()}`, provider: this.provider, nativeId: request.nativeId, createdAt: nowIso() }
     this.attach({ ...handle, context: request.context, mode, planMode: false, model: this.options.model ?? 'gpt-5.4', reasoningEffort: '', activeTurn: undefined, approvals: new Map() }); return handle
+  }
+  async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> {
+    const host = await this.ensureHost(request.context)
+    const payload = await host.call('thread/read', { threadId: request.conversation.nativeId, includeTurns: true })
+    return readHistoryEvents(request.conversation, payload)
   }
   async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
     const host = await this.ensureHost(request.context)

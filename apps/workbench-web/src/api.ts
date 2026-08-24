@@ -61,7 +61,7 @@ export interface WorkspaceSkill {
 
 export interface SkillInstallEvent {
   type: string
-  timestamp: string
+  timestamp?: string
   data: Record<string, unknown>
 }
 export interface SkillInstallStatus {
@@ -129,13 +129,12 @@ export interface Conversation {
   plan: { active?: boolean; status?: string } | null
   policyHash: string
   instructionHash: string
-  lastEventId: number
   createdAt: string
   updatedAt: string
 }
 
 export interface ConversationEvent {
-  id: number
+  id: string
   type: string
   conversationId: string
   turnId?: string
@@ -219,8 +218,8 @@ export const api = {
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
   bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
-  conversationHistory: (workspaceId: string, conversationId: string, after = 0) =>
-    request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history?after=${after}`),
+  conversationHistory: (workspaceId: string, conversationId: string) =>
+    request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
   sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; skills?: string[] }) =>
     request<{ accepted: true; turnId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { content, mode, ...(settings ?? {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>

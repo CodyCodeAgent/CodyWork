@@ -177,6 +177,11 @@ export interface SendTurnResult {
   events: RuntimeEvent[]
 }
 
+export interface ReadConversationRequest {
+  conversation: ConversationHandle
+  context: RuntimeContext
+}
+
 export interface RuntimeAdapter {
   readonly provider: string
   getManifest(): Promise<RuntimeManifest>
@@ -195,6 +200,8 @@ export interface ConversationRuntimeAdapter extends RuntimeAdapter {
   listNativeThreads?(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
   /** Discover provider-supported Composer options without making the UI guess a protocol version. */
   getComposerOptions?(context: RuntimeContext): Promise<RuntimeComposerOptions>
+  /** Reads provider-native durable history. CodyWork deliberately does not mirror this in SQLite. */
+  readConversation?(request: ReadConversationRequest): Promise<RuntimeEvent[]>
   /** Send a provider-native slash command without adding CodyWork policy prompt text. */
   sendCommand?(request: SendTurnRequest): Promise<SendTurnResult>
   setPermission?(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>

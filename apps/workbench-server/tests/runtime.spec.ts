@@ -84,6 +84,9 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('message.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
+    const nativeHistory = await runtime.readConversation({ conversation, context })
+    expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'message.user', 'tool.completed', 'message.completed', 'turn.completed'])
+    expect(nativeHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
 
     await runtime.sendCommand({ conversation, prompt: '/plan on' })
     const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL' })

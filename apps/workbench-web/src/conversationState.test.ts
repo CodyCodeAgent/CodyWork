@@ -4,10 +4,10 @@ import { buildMessages, buildTimeline, findPendingEvent } from './conversationSt
 describe('conversation state', () => {
   it('reconciles streamed assistant deltas with durable history', () => {
     const events = [
-      { id: 1, type: 'message.user', conversationId: 'c', provider: 'codex', data: { text: 'ship it' } },
-      { id: 2, type: 'message.delta', conversationId: 'c', turnId: 't', itemId: 'a', provider: 'codex', data: { text: 'Hello ' } },
-      { id: 3, type: 'message.delta', conversationId: 'c', turnId: 't', itemId: 'a', provider: 'codex', data: { text: 'world' } },
-      { id: 4, type: 'message.completed', conversationId: 'c', turnId: 't', itemId: 'a', provider: 'codex', data: { text: 'Hello world' } },
+      { id: '1', type: 'message.user', conversationId: 'c', provider: 'codex', data: { text: 'ship it' } },
+      { id: '2', type: 'message.delta', conversationId: 'c', turnId: 't', itemId: 'a', provider: 'codex', data: { text: 'Hello ' } },
+      { id: '3', type: 'message.delta', conversationId: 'c', turnId: 't', itemId: 'a', provider: 'codex', data: { text: 'world' } },
+      { id: '4', type: 'message.completed', conversationId: 'c', turnId: 't', itemId: 'a', provider: 'codex', data: { text: 'Hello world' } },
     ]
     expect(buildMessages(events)).toEqual([
       expect.objectContaining({ role: 'user', text: 'ship it' }),
@@ -17,11 +17,11 @@ describe('conversation state', () => {
 
   it('builds a safe tool timeline and tracks approval lifecycle', () => {
     const events = [
-      { id: 1, type: 'tool.started', conversationId: 'c', itemId: 'cmd', provider: 'codex', data: { name: 'npm test' } },
-      { id: 2, type: 'approval.requested', conversationId: 'c', provider: 'codex', data: { approvalId: 'a1' } },
-      { id: 3, type: 'approval.resolved', conversationId: 'c', provider: 'codex', data: { approvalId: 'a1' } },
+      { id: '1', type: 'tool.started', conversationId: 'c', itemId: 'cmd', provider: 'codex', data: { item: { type: 'commandExecution', command: 'npm test', cwd: '/repo', status: 'inProgress' } } },
+      { id: '2', type: 'approval.requested', conversationId: 'c', provider: 'codex', data: { approvalId: 'a1' } },
+      { id: '3', type: 'approval.resolved', conversationId: 'c', provider: 'codex', data: { approvalId: 'a1' } },
     ]
-    expect(buildTimeline(events)[0]).toEqual(expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ status: 'running' }) }))
+    expect(buildTimeline(events)[0]).toEqual(expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ title: '命令执行', summary: 'npm test', status: 'running' }) }))
     expect(findPendingEvent(events, 'approval.requested', 'approval.resolved')).toBeNull()
   })
 })

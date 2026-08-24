@@ -460,10 +460,9 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).get(workspace.id, requiredParam(c, 'conversationId'))
   })
 
-  add('GET', '/api/workspaces/:id/conversations/:conversationId/history', (c) => {
+  add('GET', '/api/workspaces/:id/conversations/:conversationId/history', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    const after = Number(new URL(c.req.url ?? '/', 'http://localhost').searchParams.get('after') ?? 0)
-    return { events: conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId'), Number.isFinite(after) ? after : 0) }
+    return { events: await conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId')) }
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/messages', async (c) => {
@@ -567,12 +566,10 @@ export function startServer(ctx: AppContext, port: number) {
     const workspaceId = decodeURIComponent(parts[1] ?? '')
     const conversationId = decodeURIComponent(parts[2] ?? '')
     try { conversationService(ctx).get(workspaceId, conversationId) } catch { socket.destroy(); return }
-    const after = Number(url.searchParams.get('after') ?? 0)
-    websocket.handleUpgrade(req, socket, head, client => websocket.emit('connection', client, req, workspaceId, conversationId, Number.isFinite(after) ? after : 0))
+    websocket.handleUpgrade(req, socket, head, client => websocket.emit('connection', client, req, workspaceId, conversationId))
   })
-  websocket.on('connection', (client: WebSocket, _req: IncomingMessage, workspaceId: string, conversationId: string, after: number) => {
+  websocket.on('connection', (client: WebSocket, _req: IncomingMessage, workspaceId: string, conversationId: string) => {
     const service = conversationService(ctx)
-    for (const event of service.history(workspaceId, conversationId, after)) client.send(JSON.stringify({ type: 'event', event }))
     const unsubscribe = service.subscribe(conversationId, (event) => { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'event', event })) })
     client.on('message', (raw) => {
       try {
