@@ -46,7 +46,12 @@ function emptySnapshot(db: WorkbenchDb, workspace: WorkspaceRow): DashboardData 
 
 function workerCollector(dbPath: string): Collector {
   return (workspace) => new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./dashboardWorker.ts', import.meta.url), { workerData: { dbPath, workspace } })
+    const worker = new Worker(new URL('./dashboardWorker.ts', import.meta.url), {
+      workerData: { dbPath, workspace },
+      // tsx starts the main service, but workers do not inherit its TypeScript
+      // loader automatically when the service is launched through Corepack.
+      execArgv: ['--import', 'tsx'],
+    })
     worker.once('message', (message: { ok: boolean; snapshot?: DashboardData; error?: string }) => {
       void worker.terminate()
       if (message.ok && message.snapshot) resolve(message.snapshot)
@@ -75,7 +80,7 @@ export class DashboardCache {
       const snapshot = JSON.parse(row.payload_json) as DashboardData
       const ageSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(row.generated_at)) / 1000))
       const stale = ageSeconds * 1000 >= STALE_AFTER_MS
-      return { ...snapshot, cache: { state: refreshing ? 'refreshing' : stale ? 'stale' : 'fresh', generatedAt: row.generated_at, ageSeconds, lastError: row.last_error } }
+      return { ...snapshot, cache: { state: refreshing ? 'refreshing' : row.last_error || stale ? 'stale' : 'fresh', generatedAt: row.generated_at, ageSeconds, lastError: row.last_error } }
     } catch {
       return { ...emptySnapshot(this.db, workspace), cache: { state: refreshing ? 'refreshing' : 'empty', generatedAt: null, ageSeconds: null, lastError: '概览缓存已损坏，正在重建。' } }
     }
