@@ -44,6 +44,35 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
+  it('deletes an inactive local session with its durable history but retains another Demand session', async () => {
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const first = await conversations.create(test.workspaceId, test.demandId, 'Keep this session')
+    const removed = await conversations.create(test.workspaceId, test.demandId, 'Remove this session')
+
+    expect(conversations.history(test.workspaceId, removed.id).map(event => event.type)).toEqual(['conversation.created'])
+    expect(conversations.remove(test.workspaceId, removed.id)).toEqual({ deleted: true })
+    expect(conversations.list(test.workspaceId, test.demandId).map(conversation => conversation.id)).toEqual([first.id])
+    expect(() => conversations.history(test.workspaceId, removed.id)).toThrow('会话不存在')
+    expect(() => conversations.remove(test.workspaceId, first.id)).toThrow('至少保留一个会话')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('refuses to delete a running session', async () => {
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const running = await conversations.create(test.workspaceId, test.demandId, 'Running session')
+    await conversations.create(test.workspaceId, test.demandId, 'Other session')
+    test.db.db.prepare("UPDATE conversations SET status = 'running' WHERE id = ?").run(running.id)
+
+    expect(() => conversations.remove(test.workspaceId, running.id)).toThrow('正在执行或等待确认')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('persists multiple sessions and streams events over WebSocket with cursor replay', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
@@ -64,6 +93,8 @@ describe('conversation websocket control plane', () => {
     expect(events).toEqual(['message.user', 'turn.started', 'item.started', 'message.delta', 'item.completed', 'turn.completed'])
     const history = await (await fetch(`${base}/conversations/${first.data.id}/history`)).json() as { data: { events: { type: string }[] } }
     expect(history.data.events.some(event => event.type === 'message.delta')).toBe(true)
+    const deletion = await (await fetch(`${base}/conversations/${second.data.id}`, { method: 'DELETE' })).json() as { data: { deleted: boolean } }
+    expect(deletion.data).toEqual({ deleted: true })
     socket.close()
     server.close()
     test.db.close()

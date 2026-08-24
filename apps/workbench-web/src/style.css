@@ -639,6 +639,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-demand { background: #f1f1ff; border-color: #e0e1fc; }
 .conversation-row { min-height: 50px; border-radius: 8px; }
 .conversation-row:hover, .conversation-row.active { background: #f0f0ff; }
+.conversation-row-wrap { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.conversation-row-wrap .conversation-row { min-width: 0; flex: 1; }
+.conversation-delete { display: grid; flex: 0 0 auto; place-items: center; width: 32px; min-height: 44px; padding: 0; color: #9aa3b2; background: transparent; border: 0; border-radius: 8px; cursor: pointer; transition: color 160ms var(--ease), background 160ms var(--ease); }
+.conversation-delete svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.conversation-delete:hover, .conversation-delete:focus-visible { color: #c44857; background: #fff0f1; outline: none; }
+.conversation-delete:focus-visible { box-shadow: 0 0 0 3px rgba(196,72,87,.18); }
+.conversation-delete:disabled { color: #c8ced8; cursor: not-allowed; }
+.conversation-delete:disabled:hover { background: transparent; }
+.delete-conversation-modal { width: min(430px, 100%); }
+.delete-conversation-modal > p { margin: 0 0 11px; color: #536071; font-size: 13px; line-height: 1.6; }
+.delete-conversation-note { padding: 10px 11px; color: #516cae !important; background: #f1f4ff; border: 1px solid #dfe4ff; border-radius: 9px; }
+.btn.danger { color: #fff; background: #c44857; border-color: #c44857; }
+.btn.danger:hover:not(:disabled) { background: #ad3c4a; border-color: #ad3c4a; }
 .chat-toolbar { min-height: 50px; padding: 9px 18px; border-bottom-color: #e5e7eb; }
 .goal-chip, .plan-chip { min-height: 32px; border-radius: 8px; }
 .plan-chip.active { background: #5b5cf0; border-color: #5b5cf0; }

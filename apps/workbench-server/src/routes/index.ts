@@ -483,6 +483,11 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).rename(workspace.id, requiredParam(c, 'conversationId'), typeof c.body.title === 'string' ? c.body.title : '')
   })
 
+  add('DELETE', '/api/workspaces/:id/conversations/:conversationId', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return conversationService(ctx).remove(workspace.id, requiredParam(c, 'conversationId'))
+  })
+
   add('POST', '/api/workspaces/:id/conversations/:conversationId/approvals/:approvalId', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const outcome = c.body.outcome === 'rejected' ? 'rejected' : 'allowed-once'

@@ -222,6 +222,8 @@ export const api = {
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/permission`, { mode }),
   renameConversation: (workspaceId: string, conversationId: string, title: string) =>
     request<Conversation>('PATCH', `/api/workspaces/${workspaceId}/conversations/${conversationId}`, { title }),
+  deleteConversation: (workspaceId: string, conversationId: string) =>
+    request<{ deleted: true }>('DELETE', `/api/workspaces/${workspaceId}/conversations/${conversationId}`),
   resolveApproval: (workspaceId: string, conversationId: string, approvalId: string, outcome: 'allowed-once' | 'rejected') =>
     request<{ resolved: true }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/approvals/${encodeURIComponent(approvalId)}`, { outcome }),
   answerQuestion: (workspaceId: string, conversationId: string, requestId: string, answer: unknown) =>

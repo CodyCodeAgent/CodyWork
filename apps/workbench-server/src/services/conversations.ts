@@ -337,6 +337,23 @@ export class ConversationService {
     return this.get(workspaceId, conversationId)
   }
 
+  /** Removes CodyWork's local record only. The provider-native Thread is intentionally retained. */
+  remove(workspaceId: string, conversationId: string): { deleted: true } {
+    const row = this.requireConversation(workspaceId, conversationId)
+    if (row.status === 'running' || row.status === 'awaiting_approval' || this.turnChains.has(conversationId)) {
+      throw new Error('会话正在执行或等待确认，请先停止后再删除')
+    }
+    const count = this.db.db.prepare('SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND demand_id = ?').get(workspaceId, row.demand_id) as { count: number }
+    if (count.count <= 1) throw new Error('每个 Demand 至少保留一个会话')
+
+    // conversation_events and conversation_audits are deleted through their foreign-key cascades.
+    this.db.db.prepare('DELETE FROM conversations WHERE id = ? AND workspace_id = ?').run(conversationId, workspaceId)
+    this.handles.delete(conversationId)
+    this.contexts.delete(conversationId)
+    this.listeners.delete(conversationId)
+    return { deleted: true }
+  }
+
   private async runTurn(row: ConversationRow, prompt: string, turnId: string): Promise<void> {
     const handle = this.handles.get(row.id)
     const context = this.contexts.get(row.id)
