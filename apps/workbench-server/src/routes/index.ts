@@ -276,7 +276,7 @@ function buildRoutes(ctx: AppContext) {
     const openedAt = nowIso()
     ctx.db.db.prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(openedAt, row.id)
     const updated = { ...row, last_opened_at: openedAt }
-    return { workspace: workspaceView(updated, row.id), summary: inspectWorkspace(row.path) }
+    return { workspace: workspaceView(updated, row.id), summary: inspectWorkspace(row.path), worktreeImport: importExistingWorktrees(ctx.db, updated) }
   })
 
   add('GET', '/api/workspaces/:id/dashboard', (c) => {
