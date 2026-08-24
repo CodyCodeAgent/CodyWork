@@ -11,6 +11,8 @@ import type {
   ConversationHandle,
   ConversationRuntimeAdapter,
   CreateConversationRequest,
+  ListNativeThreadsRequest,
+  NativeThreadSummary,
   RuntimeContext,
   RuntimeEvent,
   RuntimeManifest,
@@ -55,6 +57,24 @@ function turnModeOptions(context: RuntimeContext, mode: RuntimePermissionMode, p
 }
 function itemType(item: unknown): string { return item && typeof item === 'object' ? String((item as { type?: unknown }).type ?? '') : '' }
 function textFromItem(item: unknown): string { if (!item || typeof item !== 'object') return ''; const value = item as { text?: unknown; aggregatedOutput?: unknown }; return typeof value.text === 'string' ? value.text : typeof value.aggregatedOutput === 'string' ? value.aggregatedOutput : '' }
+function toIsoTimestamp(value: unknown): string | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  return new Date(value * 1000).toISOString()
+}
+function threadSummary(value: unknown): NativeThreadSummary | null {
+  if (!value || typeof value !== 'object') return null
+  const thread = value as Record<string, unknown>
+  const nativeId = typeof thread.id === 'string' ? thread.id.trim() : ''
+  if (!nativeId) return null
+  return {
+    nativeId,
+    preview: typeof thread.preview === 'string' ? thread.preview.trim() : '',
+    ...(typeof thread.cwd === 'string' && thread.cwd.trim() ? { cwd: thread.cwd.trim() } : {}),
+    ...(toIsoTimestamp(thread.createdAt) ? { createdAt: toIsoTimestamp(thread.createdAt) } : {}),
+    ...(toIsoTimestamp(thread.updatedAt) ? { updatedAt: toIsoTimestamp(thread.updatedAt) } : {}),
+    ...(typeof thread.source === 'string' && thread.source ? { source: thread.source } : {}),
+  }
+}
 
 /** A single service-level Codex App Server, with every thread bound to its own demand worktree policy. */
 export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
@@ -104,6 +124,29 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     await host.call('thread/resume', { threadId: request.nativeId, model: this.options.model ?? null, ...threadModeOptions(request.context, mode), baseInstructions: request.context.instructionBundle.systemInstructions, developerInstructions: this.policyInstructions(request.context) })
     const handle = { id: request.conversationId ?? `conversation-${randomUUID()}`, provider: this.provider, nativeId: request.nativeId, createdAt: nowIso() }
     this.attach({ ...handle, context: request.context, mode, planMode: false, model: this.options.model ?? 'gpt-5.4', activeTurn: undefined, approvals: new Map() }); return handle
+  }
+  async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
+    const host = await this.ensureHost(request.context)
+    const summaries: NativeThreadSummary[] = []
+    let cursor: string | null = null
+    // The App Server has opaque cursors. Bound the picker to a useful recent window
+    // so a large local session archive cannot monopolize the server process.
+    for (let page = 0; page < 10; page += 1) {
+      const result: { data?: unknown; nextCursor?: unknown } = await host.call('thread/list', {
+        archived: false,
+        limit: 100,
+        sortKey: 'updated_at',
+        ...(cursor ? { cursor } : {}),
+      })
+      const data = Array.isArray(result.data) ? result.data : []
+      for (const item of data) {
+        const summary = threadSummary(item)
+        if (summary) summaries.push(summary)
+      }
+      cursor = typeof result.nextCursor === 'string' && result.nextCursor ? result.nextCursor : null
+      if (!cursor) break
+    }
+    return summaries
   }
   async setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void> {
     const session = this.require(conversation); session.mode = mode

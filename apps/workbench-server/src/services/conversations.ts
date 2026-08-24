@@ -6,6 +6,7 @@ import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/pol
 import type {
   ConversationHandle,
   ConversationRuntimeAdapter,
+  NativeThreadSummary,
   RuntimeContext,
   RuntimeEvent,
 } from '../runtime/protocol.js'
@@ -36,6 +37,10 @@ export interface ConversationEvent {
   provider: string
   timestamp?: string
   data: Record<string, unknown>
+}
+
+export interface AvailableNativeThread extends NativeThreadSummary {
+  bound: boolean
 }
 
 type Listener = (event: ConversationEvent) => void
@@ -130,6 +135,17 @@ export class ConversationService {
   list(workspaceId: string, demandId: string): ConversationView[] {
     const rows = this.db.db.prepare('SELECT * FROM conversations WHERE workspace_id = ? AND demand_id = ? ORDER BY updated_at DESC, created_at DESC').all(workspaceId, demandId) as unknown as ConversationRow[]
     return rows.map(toView)
+  }
+
+  /** Returns recent provider threads that may be resumed under this Demand's policy. */
+  async listAvailableNativeThreads(workspaceId: string, demandId: string): Promise<AvailableNativeThread[]> {
+    const demand = this.requireDemand(workspaceId, demandId)
+    const manifest = await this.runtime.getManifest()
+    if (!manifest.resume || !this.runtime.listNativeThreads) throw new Error('当前 Runtime 不支持列出可恢复 Thread')
+    const threads = await this.runtime.listNativeThreads({ context: this.contextFor(demand, 'workspace-write') })
+    const boundRows = this.db.db.prepare('SELECT native_id FROM conversations WHERE provider = ?').all(this.runtime.provider) as Array<{ native_id: string }>
+    const bound = new Set(boundRows.map(row => row.native_id))
+    return threads.map(thread => ({ ...thread, bound: bound.has(thread.nativeId) }))
   }
 
   get(workspaceId: string, conversationId: string): ConversationView {

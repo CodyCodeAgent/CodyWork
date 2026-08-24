@@ -133,6 +133,20 @@ export interface CreateConversationRequest {
   context: RuntimeContext
 }
 
+/** A lightweight provider-native thread record suitable for a picker. */
+export interface NativeThreadSummary {
+  nativeId: string
+  preview: string
+  cwd?: string
+  createdAt?: string
+  updatedAt?: string
+  source?: string
+}
+
+export interface ListNativeThreadsRequest {
+  context: RuntimeContext
+}
+
 export interface SendTurnRequest {
   conversation: ConversationHandle
   prompt: string
@@ -160,6 +174,8 @@ export interface RuntimeAdapter {
 /** Optional long-lived capabilities used by the CodyWork conversation facade. */
 export interface ConversationRuntimeAdapter extends RuntimeAdapter {
   resumeConversation?(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle>
+  /** Lists resumable provider-native threads without attaching one to a Demand. */
+  listNativeThreads?(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
   /** Send a provider-native slash command without adding CodyWork policy prompt text. */
   sendCommand?(request: SendTurnRequest): Promise<SendTurnResult>
   setPermission?(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>

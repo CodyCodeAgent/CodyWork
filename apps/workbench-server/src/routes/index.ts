@@ -430,6 +430,11 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).list(workspace.id, requiredParam(c, 'demandId'))
   })
 
+  add('GET', '/api/workspaces/:id/demands/:demandId/available-threads', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return conversationService(ctx).listAvailableNativeThreads(workspace.id, requiredParam(c, 'demandId'))
+  })
+
   add('POST', '/api/workspaces/:id/demands/:demandId/conversations', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const title = typeof c.body.title === 'string' ? c.body.title : undefined

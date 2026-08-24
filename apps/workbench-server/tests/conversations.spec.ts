@@ -35,6 +35,10 @@ describe('conversation websocket control plane', () => {
     expect(bound.nativeId).toBe('thread-existing-123')
     expect(bound.title).toBe('Existing context')
     expect(conversations.history(test.workspaceId, bound.id).map(event => event.type)).toEqual(['conversation.bound'])
+    await expect(conversations.listAvailableNativeThreads(test.workspaceId, test.demandId)).resolves.toEqual([
+      expect.objectContaining({ nativeId: 'thread-existing-123', bound: true }),
+      expect.objectContaining({ nativeId: 'thread-unbound-456', bound: false }),
+    ])
     await expect(conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123' })).rejects.toThrow('已绑定到当前 Demand')
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })

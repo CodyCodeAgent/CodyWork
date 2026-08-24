@@ -145,6 +145,16 @@ export interface ConversationEvent {
   data: Record<string, unknown>
 }
 
+export interface AvailableNativeThread {
+  nativeId: string
+  preview: string
+  cwd?: string
+  createdAt?: string
+  updatedAt?: string
+  source?: string
+  bound: boolean
+}
+
 export interface RuntimeSettings {
   provider: 'codex'
   codex: { url: string; command: string }
@@ -196,6 +206,8 @@ export const api = {
     request<Demand>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/repositories`, { repositoryId }),
   listConversations: (workspaceId: string, demandId: string) =>
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
+  listAvailableNativeThreads: (workspaceId: string, demandId: string) =>
+    request<AvailableNativeThread[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/available-threads`),
   createConversation: (workspaceId: string, demandId: string, title?: string) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
   bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>

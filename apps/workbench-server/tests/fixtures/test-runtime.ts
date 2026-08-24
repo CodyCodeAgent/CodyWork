@@ -5,6 +5,8 @@ import type {
   ConversationHandle,
   ConversationRuntimeAdapter,
   CreateConversationRequest,
+  ListNativeThreadsRequest,
+  NativeThreadSummary,
   RuntimeContext,
   RuntimeEvent,
   RuntimeManifest,
@@ -40,6 +42,13 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
   async resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle> {
     const conversation = await this.createConversation({ ...request, conversationId: request.conversationId ?? request.nativeId })
     return { ...conversation, nativeId: request.nativeId }
+  }
+
+  async listNativeThreads(_request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
+    return [
+      { nativeId: 'thread-existing-123', preview: 'Continue existing context', cwd: '/test/project', updatedAt: '2026-08-24T00:00:00.000Z', source: 'cli' },
+      { nativeId: 'thread-unbound-456', preview: 'Implement demand picker', cwd: '/test/project', updatedAt: '2026-08-23T00:00:00.000Z', source: 'appServer' },
+    ]
   }
 
   async setPermission(_conversation: ConversationHandle, _mode: RuntimePermissionMode): Promise<void> {}
