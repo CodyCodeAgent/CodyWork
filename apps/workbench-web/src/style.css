@@ -650,6 +650,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer { padding-top: 12px; padding-bottom: 14px; box-shadow: 0 -10px 35px rgba(30,38,55,.035); }
 .composer textarea { min-height: 78px; border-color: #d7dbe3; border-radius: 11px; }
 
+/* Work mode navigation: its own scroll surface keeps the runtime footer stable. */
+.sidebar { overflow: hidden; }
+.sidebar-scroll { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #343946 transparent; }
+.sidebar-scroll::-webkit-scrollbar, .sidebar-subnav::-webkit-scrollbar { width: 6px; }
+.sidebar-scroll::-webkit-scrollbar-thumb, .sidebar-subnav::-webkit-scrollbar-thumb { background: #343946; border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+.switcher-wrap { position: relative; }
+.sidebar-demand-section { margin-top: 11px; padding: 0 3px; border: 1px solid #262b35; border-radius: 11px; background: linear-gradient(180deg, rgba(29,33,42,.78), rgba(20,23,29,.52)); }
+.sidebar-demand-section .sidebar-section-label { width: 100%; min-height: 42px; padding: 8px 7px 8px 9px; color: #8790a0; background: transparent; border: 0; border-radius: 9px; cursor: pointer; text-align: left; }
+.sidebar-demand-section .sidebar-section-label:hover { color: #c4c9d4; background: rgba(255,255,255,.035); }
+.sidebar-demand-section .sidebar-section-label span { flex: 0 0 auto; }
+.sidebar-demand-section .sidebar-section-label small { margin-left: auto; padding-right: 6px; }
+.sidebar-demand-section .sidebar-accordion-trigger em { min-width: 20px; padding: 2px 6px; color: #babdff; background: rgba(99,101,235,.18); border-radius: 999px; font-size: 9px; font-style: normal; font-variant-numeric: tabular-nums; text-align: center; }
+.sidebar-demand-section .sidebar-accordion-chevron { width: 19px; height: 19px; margin-left: 2px; }
+.sidebar-demand-section .sidebar-subnav { max-height: min(42vh, 360px); margin: 0 2px 3px 10px; padding: 2px 3px 4px 12px; overscroll-behavior: contain; }
+.sidebar-demand-section .sidebar-subnav::before { left: 1px; bottom: 7px; background: #363b47; }
+.sidebar-demand-section .sidebar-subnav-item { min-height: 46px; gap: 8px; padding: 6px 7px; }
+.sidebar-demand-section .sidebar-subnav-item.active { background: linear-gradient(90deg, rgba(94,95,232,.27), rgba(94,95,232,.1)); }
+.sidebar-demand-section .sidebar-subnav-item.active::before { top: 16px; left: -13px; width: 6px; height: 6px; }
+.sidebar-demand-section .sidebar-subnav-item strong { color: inherit; font-size: 10.5px; font-weight: 630; letter-spacing: -.01em; }
+.sidebar-demand-section .sidebar-subnav-item small { max-width: 158px; color: #697281; font-size: 8px; }
+.sidebar-demand-section .sidebar-subnav-item.all-demands { min-height: 37px; margin-bottom: 2px; color: #aeb7c6; background: rgba(255,255,255,.025); }
+.sidebar-demand-section .sidebar-subnav-item.all-demands:hover { background: rgba(255,255,255,.06); }
+.sidebar-demand-section .sidebar-subnav-item.all-demands strong { font-size: 10px; }
+.sidebar-demand-section .subnav-rail-icon { color: #959cec; }
+.sidebar-demand-section .subnav-status { width: 6px; height: 6px; box-shadow: 0 0 0 3px rgba(101,113,234,.1); }
+.demand-status-tag { margin-left: auto; padding: 2px 5px; color: #9199a8; background: #252a34; border: 1px solid #323844; border-radius: 999px; font-size: 8px; font-style: normal; font-weight: 650; white-space: nowrap; }
+.demand-status-tag.in_progress { color: #aebdff; border-color: #4c5293; background: rgba(75,84,179,.24); }
+.demand-status-tag.completed { color: #83d5ad; border-color: #396f58; background: rgba(37,109,74,.2); }
+.demand-status-tag.blocked { color: #efc083; border-color: #815b32; background: rgba(132,84,29,.22); }
+.sidebar-new-demand { display: flex; align-items: center; gap: 5px; width: calc(100% - 8px); min-height: 32px; margin: 3px 4px 5px; padding: 5px 8px; color: #aeb2ff; background: rgba(91,92,240,.09); border: 1px dashed rgba(126,128,255,.34); border-radius: 7px; font-size: 9px; font-weight: 650; text-align: left; }
+.sidebar-new-demand:hover { color: #d5d6ff; background: rgba(91,92,240,.17); border-style: solid; }
+@media (prefers-reduced-motion: reduce) { .sidebar-accordion-trigger .sidebar-accordion-chevron, .sidebar-subnav { animation: none; transition: none; } }
+
 @media (max-width: 1120px) {
   .sidebar { width: 250px; flex-basis: 250px; }
   .metric-card { grid-column: span 6; }
