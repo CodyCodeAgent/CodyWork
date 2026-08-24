@@ -12,6 +12,12 @@ import type {
 
 const hash = (value: string): string => createHash('sha256').update(value).digest('hex')
 
+// The App Server rejects instructions above 1 MiB. Keep a margin for its own
+// generated policy/developer instructions and never inline every SKILL.md: the
+// workspace remains readable, so Codex can load a selected skill from disk.
+const MAX_SYSTEM_INSTRUCTIONS_CHARS = 800_000
+const MAX_NON_SKILL_SOURCE_CHARS = 120_000
+
 function canonicalPath(path: string): string {
   const resolved = resolve(path)
   let probe = resolved
@@ -45,6 +51,35 @@ function skillEntries(root: string): InstructionBundle['skills'] {
       return { name: entry.name, path, sha256: hash(content) }
     })
     .filter((entry): entry is { name: string; path: string; sha256: string } => entry !== null)
+}
+
+function clipped(value: string, limit: number): string {
+  if (value.length <= limit) return value
+  return `${value.slice(0, Math.max(0, limit - 96))}\n\n[内容已截断；请在对应 Workspace 文件中读取完整内容。]`
+}
+
+function instructionText(sources: RuntimeInstructionSource[], skills: InstructionBundle['skills']): string {
+  const sections: string[] = []
+  let remaining = MAX_SYSTEM_INSTRUCTIONS_CHARS
+  for (const item of sources) {
+    if (item.kind === 'skill' || remaining <= 0) continue
+    const heading = `## ${item.label}\n\n`
+    const body = clipped(item.content, Math.min(MAX_NON_SKILL_SOURCE_CHARS, Math.max(0, remaining - heading.length)))
+    const section = `${heading}${body}`
+    if (section.length > remaining) {
+      sections.push(clipped(section, remaining))
+      remaining = 0
+    } else {
+      sections.push(section)
+      remaining -= section.length + 2
+    }
+  }
+
+  if (skills.length && remaining > 0) {
+    const catalog = `## Workspace skills\n\nAvailable skills are listed below. Their full SKILL.md files are intentionally not inlined; read the relevant file from the Workspace when a skill is selected or needed.\n\n${skills.map(skill => `- ${skill.name}: ${skill.path}`).join('\n')}`
+    sections.push(clipped(catalog, remaining))
+  }
+  return sections.join('\n\n')
 }
 
 export interface InstructionBundleInput {
@@ -85,7 +120,7 @@ export function resolveInstructionBundle(input: InstructionBundleInput): Instruc
     const content = readFileSync(skill.path, 'utf8')
     sources.push({ kind: 'skill', path: skill.path, label: `skill:${skill.name}`, sha256: skill.sha256, content })
   }
-  const systemInstructions = sources.map(item => `## ${item.label}\n\n${item.content}`).join('\n\n')
+  const systemInstructions = instructionText(sources, skills)
   return {
     systemInstructions,
     sources,
