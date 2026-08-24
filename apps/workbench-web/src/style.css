@@ -741,6 +741,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .next-step-card { min-height: 235px; }
 .bind-thread-modal { width: min(580px, 100%); }
 .bind-thread-intro { margin: -5px 0 19px; color: #657084; font-size: 12px; line-height: 1.65; }
+.thread-project-select { margin: 7px 0 16px; }
+.thread-project-select select { width: 100%; min-height: 43px; padding: 0 36px 0 12px; color: var(--text); background: #fff; border: 1px solid #cfd6df; border-radius: 8px; font: 12px var(--mono); cursor: pointer; }
+.thread-project-select select:focus { border-color: var(--blue); outline: 3px solid rgba(53,111,242,.12); }
+.thread-project-select small { display: block; overflow: hidden; margin: 7px 1px 0; color: #7b8798; font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .thread-search { position: relative; }
 .thread-search .input { padding-right: 46px; }
 .thread-search > span { position: absolute; top: 18px; right: 12px; min-width: 22px; padding: 2px 5px; color: #647087; background: #eef1f6; border-radius: 999px; font: 10px var(--mono); text-align: center; }
