@@ -539,6 +539,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .demand-context-nav .sidebar-item { min-height: 44px; }
 
 .main { position: relative; background: var(--bg); scroll-behavior: smooth; }
+.app-error-banner { position: sticky; z-index: 20; top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(860px, calc(100% - 40px)); padding: 11px 13px; margin: 12px auto -4px; color: #a04444; background: #fff0f0; border: 1px solid #f2d0d0; border-radius: 10px; box-shadow: 0 8px 24px rgba(127, 47, 47, .1); font-size: 12px; }
+.app-error-banner button { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; color: #8f3c3c; background: transparent; border: 0; border-radius: 6px; font-size: 18px; line-height: 1; }
+.app-error-banner button:hover { background: #f9dede; }
 .topbar { min-height: 88px; padding: 15px clamp(24px, 3vw, 44px); background: rgba(255,255,255,.9); border-color: #e7e9ee; box-shadow: 0 1px rgba(17,24,39,.015); backdrop-filter: blur(14px); }
 .topbar h1 { margin: 4px 0 0; font-size: clamp(20px, 2vw, 26px); font-weight: 680; letter-spacing: -.035em; }
 .topbar-subtitle { margin-top: 4px; color: #80899a; font-size: 11px; }

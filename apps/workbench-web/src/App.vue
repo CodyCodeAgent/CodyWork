@@ -28,6 +28,7 @@
     </aside>
 
     <main class="main">
+      <div v-if="error" class="app-error-banner" role="alert"><span>{{ error }}</span><button type="button" aria-label="关闭错误提示" @click="error = ''">×</button></div>
       <div v-if="loading" class="page-loading">正在加载 CodyWork…</div>
       <section v-else-if="!workspace" class="create-page"><div class="create-hero"><div class="eyebrow">CODYWORK / VUE</div><h1>为你的研发工作创建 Workspace</h1><p>Workspace 管理真实目录；每个需求拥有独立 Worktree，Codex 对话始终遵循这个边界。</p></div><button class="btn primary" @click="showCreateWorkspace = true">创建 Workspace</button></section>
       <section v-else-if="activePage === 'dashboard'" class="workspace-page">
@@ -53,7 +54,6 @@
           <section class="chat-main">
             <div class="chat-toolbar"><button :class="['plan-chip', { active: selectedConversation?.plan?.active }]" @click="sendCommand('/plan')">{{ selectedConversation?.plan?.active ? 'Plan 模式' : '进入 Plan' }}</button><select v-model="permission" @change="savePermission"><option value="read-only">只读</option><option value="workspace-write">Worktree 写入</option><option value="yolo">Yolo（仍受 Worktree 限制）</option></select><span v-if="selectedConversation?.goal?.objective" class="goal-chip">Goal · {{ selectedConversation.goal.objective }}</span></div>
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
-              <div v-if="error" class="error-banner">{{ error }}</div>
               <div v-if="messages.length === 0 && timeline.length === 0 && !boundThreadNotice" class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div>
               <article v-if="boundThreadNotice" class="bound-thread-note"><div><strong>已绑定已有 Thread</strong><code>{{ boundThreadNotice }}</code></div><p>后续消息会继续该 Thread 的上下文；所有新工具调用仍受当前 Demand 的 Worktree policy 限制。历史消息不会自动导入。</p></article>
               <template v-for="entry in renderedEntries" :key="entry.id">
@@ -162,7 +162,7 @@ function threadTitle(thread: AvailableNativeThread): string { const title = thre
 function formatThreadTime(value: string): string { const time = Date.parse(value); if (!Number.isFinite(time)) return ''; const minutes = Math.max(0, Math.round((Date.now() - time) / 60_000)); return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前` : minutes < 1_440 ? `${Math.round(minutes / 60)} 小时前` : `${Math.round(minutes / 1_440)} 天前` }
 function onScroll(): void { const node = scrollArea.value; if (node) followBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 160 }
 async function scrollToBottom(): Promise<void> { await nextTick(); if (followBottom) scrollArea.value?.scrollTo({ top: scrollArea.value.scrollHeight, behavior: 'smooth' }) }
-async function loadWorkspaces(): Promise<void> { loading.value = true; try { workspaces.value = await api.listWorkspaces(); const active = workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
+async function loadWorkspaces(): Promise<void> { loading.value = true; error.value = ''; try { workspaces.value = await api.listWorkspaces(); const active = workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
 function goTo(page: Exclude<Page, 'chat'>): void {
   activePage.value = page
   selectedDemand.value = null
@@ -174,16 +174,29 @@ function goTo(page: Exclude<Page, 'chat'>): void {
   if (page === 'settings') void loadRuntime()
 }
 async function selectWorkspace(next: Workspace): Promise<void> {
-  const opened = await api.openWorkspace(next.id)
-  workspace.value = opened.workspace
+  // The list response is already authoritative enough to restore the shell.  Do
+  // this before the optional "open" acknowledgement so a transient POST error
+  // can never make an existing Workspace look as if it disappeared.
+  workspace.value = next
   workspaces.value = workspaces.value.map((item) => ({ ...item, active: item.id === next.id }))
   showWorkspacePicker.value = false
-  demands.value = await api.listDemands(next.id)
-  repositories.value = await api.listRepositories(next.id)
   activePage.value = 'dashboard'
   selectedDemand.value = null
   selectedConversation.value = null
-  await refreshDashboard()
+  try {
+    const opened = await api.openWorkspace(next.id)
+    workspace.value = opened.workspace
+  } catch (cause) {
+    error.value = `已恢复 Workspace，但无法同步打开状态：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+  try {
+    const [nextDemands, nextRepositories] = await Promise.all([api.listDemands(next.id), api.listRepositories(next.id)])
+    demands.value = nextDemands
+    repositories.value = nextRepositories
+    await refreshDashboard()
+  } catch (cause) {
+    error.value = `Workspace 已显示，但部分数据加载失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
 }
 async function refreshDashboard(): Promise<void> { if (!workspace.value) return; dashboard.value = await api.dashboard(workspace.value.id); if (dashboard.value.cache.state === 'empty' || dashboard.value.cache.state === 'stale') void requestDashboardRefresh() }
 async function requestDashboardRefresh(): Promise<void> { if (!workspace.value || dashboardRefreshing.value) return; dashboardRefreshing.value = true; try { dashboard.value = await api.refreshDashboard(workspace.value.id) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { dashboardRefreshing.value = false } }
