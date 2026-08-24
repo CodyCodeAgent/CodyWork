@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { DemandRow, RepositoryRow, WorkbenchDb, WorkspaceRow, makeId, nowIso } from '../db/index.js'
 import { listRepositories } from './repositories.js'
@@ -35,6 +35,115 @@ function branchCheckedOut(repo: RepositoryRow, branch: string): boolean {
 
 function baseRef(repo: RepositoryRow): string {
   return repo.default_ref || 'HEAD'
+}
+
+function gitRepositoryRoot(path: string): string | null {
+  try { return realpathSync(runGit(path, ['rev-parse', '--show-toplevel'])) } catch { return null }
+}
+
+function gitCommonDir(path: string): string | null {
+  try { return realpathSync(resolve(path, runGit(path, ['rev-parse', '--git-common-dir']))) } catch { return null }
+}
+
+function currentBranch(path: string): string | null {
+  try { return runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || null } catch { return null }
+}
+
+function importedBaseCommit(path: string, repository: RepositoryRow, branch: string): string {
+  try { return runGit(path, ['merge-base', branch, baseRef(repository)]) } catch { return runGit(path, ['rev-parse', 'HEAD']) }
+}
+
+export interface ExistingWorktreeImportResult {
+  imported: Array<{ id: string; name: string; branchName: string; worktreeKey: string; repositories: number }>
+  skipped: Array<{ worktreeKey: string; reason: string }>
+}
+
+/**
+ * Adopt existing Git worktrees as CodyWork demands without changing the
+ * filesystem. A worktree directory is trusted only when all of its direct
+ * service repositories match registered baseline repositories and share one
+ * checked-out branch.
+ */
+export function importExistingWorktrees(db: WorkbenchDb, workspace: WorkspaceRow): ExistingWorktreeImportResult {
+  const result: ExistingWorktreeImportResult = { imported: [], skipped: [] }
+  const worktreesRoot = resolve(workspace.path, 'worktrees')
+  if (!existsSync(worktreesRoot) || !statSync(worktreesRoot).isDirectory()) return result
+
+  const repositories = listRepositories(db, workspace)
+  const repositoriesByName = new Map(repositories.map(repository => [repository.name, repository]))
+  for (const entry of readdirSync(worktreesRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue
+    const worktreeKey = entry.name
+    const demandRoot = resolve(worktreesRoot, worktreeKey)
+    if (!isInside(worktreesRoot, demandRoot)) continue
+    const servicesRoot = resolve(demandRoot, 'services')
+    if (!existsSync(servicesRoot) || !statSync(servicesRoot).isDirectory()) {
+      result.skipped.push({ worktreeKey, reason: '未找到 services 目录' })
+      continue
+    }
+    const existing = db.db.prepare('SELECT id FROM demands WHERE workspace_id = ? AND worktree_key = ?').get(workspace.id, worktreeKey) as { id?: string } | undefined
+    if (existing?.id) continue
+
+    const mappings: Array<{ repository: RepositoryRow; path: string; branch: string }> = []
+    let reason = ''
+    for (const service of readdirSync(servicesRoot, { withFileTypes: true })) {
+      if (!service.isDirectory() || service.isSymbolicLink() || service.name.startsWith('.')) continue
+      const path = resolve(servicesRoot, service.name)
+      let canonicalPath: string
+      try { canonicalPath = realpathSync(path) } catch { reason = `${service.name} 在扫描期间消失`; break }
+      if (!isInside(servicesRoot, path) || gitRepositoryRoot(path) !== canonicalPath) {
+        reason = `${service.name} 不是可识别的 Git worktree`
+        break
+      }
+      const repository = repositoriesByName.get(service.name)
+      if (!repository) {
+        reason = `${service.name} 没有对应的基线 Repo`
+        break
+      }
+      if (gitCommonDir(path) !== gitCommonDir(repository.baseline_path)) {
+        reason = `${service.name} 不属于对应基线 Repo 的 Git worktree`
+        break
+      }
+      const branch = currentBranch(path)
+      if (!branch) {
+        reason = `${service.name} 处于 detached HEAD`
+        break
+      }
+      mappings.push({ repository, path, branch })
+    }
+    if (reason || mappings.length === 0) {
+      result.skipped.push({ worktreeKey, reason: reason || '未找到可导入的 Git Repo' })
+      continue
+    }
+    const branchName = mappings[0]!.branch
+    if (mappings.some(mapping => mapping.branch !== branchName)) {
+      result.skipped.push({ worktreeKey, reason: '多个 Repo 的当前分支不一致' })
+      continue
+    }
+    const conflict = mappings.some(({ repository }) => Boolean(db.db.prepare('SELECT 1 FROM demand_repositories WHERE repository_id = ? AND branch_name = ?').get(repository.id, branchName)))
+    if (conflict) {
+      result.skipped.push({ worktreeKey, reason: `分支 ${branchName} 已关联到其他 Demand` })
+      continue
+    }
+
+    const now = nowIso()
+    const demandId = makeId('demand')
+    try {
+      db.db.exec('BEGIN')
+      db.db.prepare('INSERT INTO demands (id, workspace_id, name, branch_name, worktree_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(demandId, workspace.id, branchName, branchName, worktreeKey, 'in_progress', now, now)
+      for (const mapping of mappings) {
+        db.db.prepare('INSERT INTO demand_repositories (demand_id, repository_id, branch_name, worktree_path, base_ref, base_commit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(demandId, mapping.repository.id, branchName, mapping.path, baseRef(mapping.repository), importedBaseCommit(mapping.path, mapping.repository, branchName), now)
+      }
+      db.db.exec('COMMIT')
+      result.imported.push({ id: demandId, name: branchName, branchName, worktreeKey, repositories: mappings.length })
+    } catch (error) {
+      try { db.db.exec('ROLLBACK') } catch { /* transaction did not start */ }
+      result.skipped.push({ worktreeKey, reason: `元数据写入失败：${error instanceof Error ? error.message : String(error)}` })
+    }
+  }
+  return result
 }
 
 export interface CreateDemandInput { name: string; branchName?: string; repositoryIds: string[] }

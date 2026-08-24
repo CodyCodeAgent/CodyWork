@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
 import { dashboardSnapshot } from '../services/dashboard.js'
-import { addRepositoryToDemand, createDemand, getDemand, listDemands } from '../services/demands.js'
+import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
 import { addRepository, listRepositories } from '../services/repositories.js'
 import { delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
 import { CodexRuntimeAdapter } from '../runtime/codex.js'
@@ -250,7 +250,8 @@ function buildRoutes(ctx: AppContext) {
     const openedAt = nowIso()
     if (existing) {
       ctx.db.db.prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(openedAt, existing.id)
-      return { workspace: workspaceView({ ...existing, last_opened_at: openedAt }, existing.id), summary: inspectWorkspace(prepared.path), action: prepared.action, initialization, created: false }
+      const worktreeImport = importExistingWorktrees(ctx.db, { ...existing, last_opened_at: openedAt })
+      return { workspace: workspaceView({ ...existing, last_opened_at: openedAt }, existing.id), summary: inspectWorkspace(prepared.path), action: prepared.action, initialization, worktreeImport, created: false }
     }
     const row: WorkspaceRow = {
       id: makeId('ws'),
@@ -261,7 +262,8 @@ function buildRoutes(ctx: AppContext) {
     }
     ctx.db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run(row.id, row.name, row.path, row.created_at, row.last_opened_at)
-    return { workspace: workspaceView(row, row.id), summary: inspectWorkspace(row.path), action: prepared.action, initialization, created: true }
+    const worktreeImport = importExistingWorktrees(ctx.db, row)
+    return { workspace: workspaceView(row, row.id), summary: inspectWorkspace(row.path), action: prepared.action, initialization, worktreeImport, created: true }
   })
 
   add('GET', '/api/workspaces/:id', (c) => {
@@ -369,6 +371,11 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/demands', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return listDemands(ctx.db, row)
+  })
+
+  add('POST', '/api/workspaces/:id/worktrees/import', (c) => {
+    const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    return importExistingWorktrees(ctx.db, row)
   })
 
   add('POST', '/api/workspaces/:id/demands', (c) => {

@@ -96,6 +96,11 @@ export interface Demand {
   repositories: { id: string; name: string; worktreePath: string }[]
 }
 
+export interface ExistingWorktreeImportResult {
+  imported: Array<{ id: string; name: string; branchName: string; worktreeKey: string; repositories: number }>
+  skipped: Array<{ worktreeKey: string; reason: string }>
+}
+
 export type ConversationPermissionMode = 'read-only' | 'workspace-write' | 'yolo'
 export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'disconnected'
 
@@ -169,6 +174,7 @@ export const api = {
   addRepository: (id: string, input: { source: 'git' | 'folder'; url?: string; path?: string; name?: string }) =>
     request<Repository>('POST', `/api/workspaces/${id}/repositories`, input),
   listDemands: (id: string) => request<Demand[]>('GET', `/api/workspaces/${id}/demands`),
+  importExistingWorktrees: (id: string) => request<ExistingWorktreeImportResult>('POST', `/api/workspaces/${id}/worktrees/import`),
   createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[] }) =>
     request<{ demand: { id: string; name: string; branch_name: string; worktree_key: string; status: Demand['status'] }; repositories: Demand['repositories'] }>('POST', `/api/workspaces/${id}/demands`, input),
   getDemand: (workspaceId: string, demandId: string) => request<Demand>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}`),

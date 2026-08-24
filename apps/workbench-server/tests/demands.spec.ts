@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../src/db/index.js'
-import { addRepositoryToDemand, createDemand, listDemands, reconcileDemandOperations } from '../src/services/demands.js'
+import { addRepositoryToDemand, createDemand, importExistingWorktrees, listDemands, reconcileDemandOperations } from '../src/services/demands.js'
 import { dashboardSnapshot } from '../src/services/dashboard.js'
 import { addRepository, listRepositories } from '../src/services/repositories.js'
 
@@ -41,6 +41,49 @@ describe('demand worktree construction', () => {
     expect(listDemands(db, workspace)[0]?.repositories).toHaveLength(2)
     expect(git(join(root, 'services', 'repo1'), ['branch', '--show-current'])).toBe('main')
     expect(git(join(root, 'worktrees', 'coupon-rule', 'services', 'repo1'), ['branch', '--show-current'])).toBe('coupon-rule')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('imports an existing multi-repo worktree using its Git branch as the demand name', () => {
+    const { root, db, workspace } = fixture()
+    const worktreeRoot = join(root, 'worktrees', 'existing-coupon')
+    for (const name of ['repo1', 'repo2']) {
+      const baseline = join(root, 'services', name)
+      mkdirSync(join(worktreeRoot, 'services'), { recursive: true })
+      git(baseline, ['worktree', 'add', '-b', 'feature/existing-coupon', join(worktreeRoot, 'services', name)])
+    }
+    const imported = importExistingWorktrees(db, workspace)
+    expect(imported.imported).toEqual([{ id: expect.any(String), name: 'feature/existing-coupon', branchName: 'feature/existing-coupon', worktreeKey: 'existing-coupon', repositories: 2 }])
+    expect(listDemands(db, workspace)).toMatchObject([{ name: 'feature/existing-coupon', branchName: 'feature/existing-coupon', worktreeKey: 'existing-coupon', repositories: [{ name: 'repo1' }, { name: 'repo2' }] }])
+    expect(importExistingWorktrees(db, workspace)).toEqual({ imported: [], skipped: [] })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('skips an existing worktree when its repositories are on different branches', () => {
+    const { root, db, workspace } = fixture()
+    const worktreeRoot = join(root, 'worktrees', 'inconsistent')
+    mkdirSync(join(worktreeRoot, 'services'), { recursive: true })
+    git(join(root, 'services', 'repo1'), ['worktree', 'add', '-b', 'feature/one', join(worktreeRoot, 'services', 'repo1')])
+    git(join(root, 'services', 'repo2'), ['worktree', 'add', '-b', 'feature/two', join(worktreeRoot, 'services', 'repo2')])
+    expect(importExistingWorktrees(db, workspace)).toEqual({ imported: [], skipped: [{ worktreeKey: 'inconsistent', reason: '多个 Repo 的当前分支不一致' }] })
+    expect(listDemands(db, workspace)).toEqual([])
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('skips a same-named repository when it is not linked to the baseline Git repository', () => {
+    const { root, db, workspace } = fixture()
+    const impostor = join(root, 'worktrees', 'impostor', 'services', 'repo1')
+    mkdirSync(impostor, { recursive: true })
+    git(impostor, ['init', '-b', 'feature/impostor'])
+    git(impostor, ['config', 'user.email', 'test@example.com'])
+    git(impostor, ['config', 'user.name', 'Test'])
+    writeFileSync(join(impostor, 'README.md'), '# unrelated\n')
+    git(impostor, ['add', '.'])
+    git(impostor, ['commit', '-m', 'initial'])
+    expect(importExistingWorktrees(db, workspace)).toEqual({ imported: [], skipped: [{ worktreeKey: 'impostor', reason: 'repo1 不属于对应基线 Repo 的 Git worktree' }] })
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
