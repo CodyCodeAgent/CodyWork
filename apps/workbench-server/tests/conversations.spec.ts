@@ -28,6 +28,18 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('binds an existing provider thread to one Demand and persists the policy-scoped mapping', async () => {
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const bound = await conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123', title: 'Existing context' })
+    expect(bound.nativeId).toBe('thread-existing-123')
+    expect(bound.title).toBe('Existing context')
+    expect(conversations.history(test.workspaceId, bound.id).map(event => event.type)).toEqual(['conversation.bound'])
+    await expect(conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123' })).rejects.toThrow('已绑定到当前 Demand')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('persists multiple sessions and streams events over WebSocket with cursor replay', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())

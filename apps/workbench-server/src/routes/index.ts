@@ -436,6 +436,13 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).create(workspace.id, requiredParam(c, 'demandId'), title)
   })
 
+  add('POST', '/api/workspaces/:id/demands/:demandId/conversations/bind', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const nativeId = typeof c.body.nativeId === 'string' ? c.body.nativeId : ''
+    const title = typeof c.body.title === 'string' ? c.body.title : undefined
+    return conversationService(ctx).bind(workspace.id, requiredParam(c, 'demandId'), { nativeId, title })
+  })
+
   add('GET', '/api/workspaces/:id/conversations/:conversationId', (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return conversationService(ctx).get(workspace.id, requiredParam(c, 'conversationId'))

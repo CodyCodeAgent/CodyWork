@@ -739,6 +739,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .repository-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px; color: #939ba8; background: #fbfcfd; font-size: 10px; }
 .repository-card-foot .btn { flex: 0 0 auto; }
 .next-step-card { min-height: 235px; }
+.bind-thread-modal { width: min(580px, 100%); }
+.bind-thread-intro { margin: -5px 0 19px; color: #657084; font-size: 12px; line-height: 1.65; }
+.bound-thread-note { max-width: min(760px, 94%); padding: 15px 17px; margin: 18px auto; color: #45516a; background: #f2f3ff; border: 1px solid #dedffc; border-radius: 12px; }
+.bound-thread-note > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bound-thread-note strong { color: #4f50be; font-size: 12px; }
+.bound-thread-note code { overflow: hidden; padding: 3px 6px; color: #696bb7; background: #e5e6ff; border-radius: 5px; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.bound-thread-note p { margin: 8px 0 0; color: #68738c; font-size: 11px; line-height: 1.6; }
 
 @media (max-width: 1120px) {
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -752,4 +759,5 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .repository-row { gap: 10px; }
   .repository-name code { display: none; }
   .repository-copy small { max-width: 190px; }
+  .bound-thread-note > div { align-items: flex-start; flex-direction: column; gap: 6px; }
 }

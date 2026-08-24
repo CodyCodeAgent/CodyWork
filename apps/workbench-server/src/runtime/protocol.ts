@@ -94,6 +94,7 @@ export interface ConversationHandle {
 
 export type RuntimeEventType =
   | 'conversation.created'
+  | 'conversation.bound'
   | 'turn.started'
   | 'turn.completed'
   | 'turn.failed'

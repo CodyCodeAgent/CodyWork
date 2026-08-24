@@ -198,6 +198,8 @@ export const api = {
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
   createConversation: (workspaceId: string, demandId: string, title?: string) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
+  bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string, after = 0) =>
     request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history?after=${after}`),
   sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue') =>

@@ -190,6 +190,49 @@ export class ConversationService {
     return this.get(workspaceId, id)
   }
 
+  /** Binds a provider-native thread to this Demand without weakening its Worktree policy. */
+  async bind(workspaceId: string, demandId: string, input: { nativeId: string; title?: string }): Promise<ConversationView> {
+    const nativeId = input.nativeId.trim()
+    if (!nativeId) throw new Error('请输入 Thread 或 Session ID')
+    if (nativeId.length > 240) throw new Error('Thread 或 Session ID 过长')
+    const demand = this.requireDemand(workspaceId, demandId)
+    const manifest = await this.runtime.getManifest()
+    if (!manifest.resume || !this.runtime.resumeConversation) throw new Error('当前 Runtime 不支持恢复已有 Thread')
+    const existing = this.db.db.prepare('SELECT * FROM conversations WHERE provider = ? AND native_id = ?').get(this.runtime.provider, nativeId) as ConversationRow | undefined
+    if (existing) {
+      if (existing.workspace_id === workspaceId && existing.demand_id === demandId) throw new Error('这个 Thread 已绑定到当前 Demand')
+      throw new Error('这个 Thread 已绑定到另一个 Demand，不能跨 Worktree 复用')
+    }
+    const context = this.contextFor(demand, 'workspace-write')
+    const id = makeId('conversation')
+    const handle = await this.runtime.resumeConversation({ conversationId: id, nativeId, context })
+    const now = nowIso()
+    const row: ConversationRow = {
+      id,
+      demand_id: demand.id,
+      workspace_id: workspaceId,
+      provider: handle.provider,
+      native_id: nativeId,
+      title: input.title?.trim() || `已绑定 Thread ${nativeId.slice(0, 8)}`,
+      status: 'idle',
+      permission_mode: 'workspace-write',
+      goal_json: null,
+      plan_json: null,
+      policy_hash: context.effectivePolicy.hash,
+      instruction_hash: context.instructionBundle.sha256,
+      last_event_id: 0,
+      created_at: now,
+      updated_at: now,
+    }
+    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, last_event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.demand_id, row.workspace_id, row.provider, row.native_id, row.title, row.status, row.permission_mode, row.goal_json, row.plan_json, row.policy_hash, row.instruction_hash, row.last_event_id, row.created_at, row.updated_at)
+    this.handles.set(id, handle)
+    this.contexts.set(id, context)
+    this.audit(id, 'conversation.bound', { nativeId, demandId: demand.id, policyHash: context.effectivePolicy.hash })
+    this.append(id, { type: 'conversation.bound', provider: handle.provider, data: { nativeId, title: row.title, policyHash: context.effectivePolicy.hash } })
+    return this.get(workspaceId, id)
+  }
+
   async send(workspaceId: string, conversationId: string, prompt: string, mode: 'queue' | 'steer' = 'queue'): Promise<{ accepted: true; turnId: string }> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
