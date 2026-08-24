@@ -59,6 +59,8 @@ export interface AppContext {
 }
 
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:3211', 'http://localhost:3211'])
+const publicOrigin = process.env.CODYWORK_PUBLIC_ORIGIN?.trim()
+if (publicOrigin) ALLOWED_ORIGINS.add(publicOrigin)
 
 function corsHeaders(req: IncomingMessage): Record<string, string> {
   const origin = req.headers.origin
