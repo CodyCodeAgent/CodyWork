@@ -162,7 +162,7 @@ export interface RuntimeSettings {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method }
+  const init: RequestInit = { method, cache: 'no-store' }
   if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json' }
     init.body = JSON.stringify(body)

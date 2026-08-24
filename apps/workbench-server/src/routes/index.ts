@@ -75,6 +75,8 @@ function corsHeaders(req: IncomingMessage): Record<string, string> {
 function json(req: IncomingMessage, res: ServerResponse, code: number, payload: unknown) {
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
+    // Workspace, Demand, and conversation state is user-mutated; never let a browser reuse stale API data.
+    'Cache-Control': 'no-store, max-age=0',
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     ...corsHeaders(req),
