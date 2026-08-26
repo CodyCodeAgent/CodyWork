@@ -180,6 +180,10 @@ function appendSetupEvent(job: WorkspaceSetupJob, event: RuntimeEvent) {
   }
 }
 
+function retryableSetupError(message: string): boolean {
+  return /reconnecting|responseStreamDisconnected|request timed out|EPIPE|disconnected/i.test(message)
+}
+
 function registerWorkspace(ctx: AppContext, path: string, name: string | undefined): { workspace: ReturnType<typeof workspaceView>; created: boolean } {
   const existing = ctx.db.db.prepare('SELECT * FROM workspaces WHERE path = ?').get(path) as WorkspaceRow | undefined
   const openedAt = nowIso()
@@ -204,9 +208,16 @@ function startWorkspaceSetup(ctx: AppContext, source: WorkspaceSource, name: str
       job.path = prepared.path
       job.events.push({ type: 'preflight.completed', timestamp: nowIso(), text: `${prepared.check.message} 当前状态：${prepared.check.status}` })
       setupStage(job, 'agent', 25, 'AI 正在审阅并准备 CSR Workspace')
-      const initialized = await delegateWorkspaceInitialization(prepared.path, process.env, event => appendSetupEvent(job, event), job.prompt)
-      job.response = initialized.message || job.response
-      if (initialized.status === 'error') throw new Error(initialized.message)
+      let initialized: Awaited<ReturnType<typeof delegateWorkspaceInitialization>> | undefined
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        job.events.push({ type: 'agent.attempt', timestamp: nowIso(), text: `启动 AI 初始化，第 ${attempt}/3 次尝试。` })
+        const result = await delegateWorkspaceInitialization(prepared.path, process.env, event => appendSetupEvent(job, event), job.prompt)
+        job.response = result.message || job.response
+        if (result.status !== 'error') { initialized = result; break }
+        if (!retryableSetupError(result.message) || attempt === 3) throw new Error(result.message)
+        job.events.push({ type: 'agent.retry', timestamp: nowIso(), text: `AI 连接短暂中断，准备自动重试（${attempt + 1}/3）。` })
+      }
+      if (!initialized) throw new Error('AI Workspace 初始化没有返回结果')
       setupStage(job, 'verify', 82, '复检目录、策略文件与 Worktree 容器')
       const check = inspectWorkspace(prepared.path).check
       if (check.status !== 'ready') {
