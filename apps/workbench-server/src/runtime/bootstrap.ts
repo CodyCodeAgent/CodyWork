@@ -17,7 +17,9 @@ Allowed setup work only:
 4. Do not create a concrete Demand Worktree or a branch. Only prepare the worktrees/ container; a human must name/select a Demand and repositories before CodyWork creates one.
 5. Verify the final directory structure and report: detected repositories, changed setup files, and any blocker.
 
-Use the available tools. Your final response must be a compact, factual setup report in Markdown.`
+Before changing AGENTS.md or CONSTITUTION.md, read the existing file if present. Never replace either file wholesale: preserve its existing headings, rules, examples, ownership notes, and project-specific terminology. Make the smallest possible targeted edit (prefer adding a clearly labelled CodyWork/CSR section); if the existing rules conflict with this setup, report the conflict instead of silently deleting or rewriting them.
+
+Use the available tools. Your final response must be a compact, factual setup report in Markdown. Include a “Policy file changes” section that identifies every AGENTS.md/CONSTITUTION.md edit and confirms what existing material was preserved.`
 
 /**
  * Delegate an empty Workspace to the same Codex App Server used for demand
