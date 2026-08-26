@@ -66,6 +66,11 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
   if (candidates.length === 0 && isGitRepository(workspace.path)) candidates.push({ name: basename(workspace.path), path: workspace.path })
   const seen = new Set<string>()
   const now = nowIso()
+  // Reconciliation is authoritative for this scan. Mark prior inventory rows
+  // absent first, then the successful candidates below restore present = 1.
+  // This also removes a stale root-repository row after a Workspace gains a
+  // normal services/ inventory.
+  db.db.prepare('UPDATE repositories SET present = 0, inspected_at = ? WHERE workspace_id = ?').run(now, workspace.id)
   for (const candidate of candidates) {
     const { path } = candidate
     const id = (db.db.prepare('SELECT id FROM repositories WHERE workspace_id = ? AND baseline_path = ?').get(workspace.id, path) as { id?: string } | undefined)?.id ?? makeId('repo')
@@ -82,7 +87,6 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
     `).run(id, workspace.id, candidate.name, path, inspection.originUrl, inspection.defaultRef, inspection.dirty ? 1 : 0, now)
     seen.add(path)
   }
-  db.db.prepare('UPDATE repositories SET present = 0, inspected_at = ? WHERE workspace_id = ? AND baseline_path NOT IN (SELECT baseline_path FROM repositories WHERE workspace_id = ? AND present = 1)').run(now, workspace.id, workspace.id)
   const rows = db.db.prepare('SELECT * FROM repositories WHERE workspace_id = ? AND present = 1 ORDER BY name').all(workspace.id) as unknown as RepositoryRow[]
   return rows.filter(row => seen.has(row.baseline_path))
 }
