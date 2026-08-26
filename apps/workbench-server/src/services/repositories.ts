@@ -50,10 +50,6 @@ export function inspectRepository(path: string): { dirty: boolean; defaultRef: s
 export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): RepositoryRow[] {
   const servicesRoot = resolve(workspace.path, 'services')
   const candidates: Array<{ name: string; path: string }> = []
-  // A selected existing Git project must not be moved into services/ merely to
-  // use CodyWork. Treat the Workspace root as one baseline repository while
-  // preserving the regular multi-repository services/ layout.
-  if (isGitRepository(workspace.path)) candidates.push({ name: basename(workspace.path), path: workspace.path })
   const entries = existsSync(servicesRoot) && statSync(servicesRoot).isDirectory()
     ? readdirSync(servicesRoot, { withFileTypes: true })
     : []
@@ -63,6 +59,11 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
     if (entry.isSymbolicLink() || !isInside(servicesRoot, path) || !isGitRepository(path)) continue
     candidates.push({ name: entry.name, path })
   }
+  // A selected existing Git project must not be moved into services/ merely to
+  // use CodyWork. It is a baseline only for a single-project Workspace. In a
+  // normal CSR Workspace the root may also be a Git repository, but services/
+  // remains the authoritative multi-repository inventory.
+  if (candidates.length === 0 && isGitRepository(workspace.path)) candidates.push({ name: basename(workspace.path), path: workspace.path })
   const seen = new Set<string>()
   const now = nowIso()
   for (const candidate of candidates) {
