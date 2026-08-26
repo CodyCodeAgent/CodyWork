@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
-import { checkWorkspace, inspectWorkspace, prepareWorkspace } from '../src/services/workspace.js'
+import { checkWorkspace, inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup } from '../src/services/workspace.js'
+import { listRepositories } from '../src/services/repositories.js'
 
 describe('workspace-only server primitives', () => {
   it('stores only workspace registration and latest open time', () => {
@@ -100,6 +102,35 @@ describe('workspace-only server primitives', () => {
     mkdirSync(join(root, 'notes'))
     expect(checkWorkspace(root).status).toBe('unsupported')
     expect(() => prepareWorkspace({ type: 'folder', path: root })).toThrow('不会覆盖已有内容')
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('allows an explicitly opted-in setup agent to inspect a non-empty directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workspace-assisted-'))
+    writeFileSync(join(root, 'README.md'), '# existing project\n')
+    expect(() => prepareWorkspace({ type: 'folder', path: root })).toThrow('不会覆盖已有内容')
+    const prepared = prepareWorkspaceForAssistedSetup({ type: 'folder', path: root })
+    expect(prepared.action).toBe('initialize')
+    expect(prepared.check.status).toBe('unsupported')
+    expect(prepared.path).toBe(root)
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('treats a Git project at the Workspace root as a baseline repository', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workspace-root-repo-'))
+    execFileSync('git', ['init', '-b', 'main'], { cwd: root })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root })
+    writeFileSync(join(root, 'README.md'), '# root repo\n')
+    execFileSync('git', ['add', '.'], { cwd: root })
+    execFileSync('git', ['commit', '-m', 'initial'], { cwd: root })
+    for (const entry of ['services', 'docs', 'specs', 'worktrees']) mkdirSync(join(root, entry))
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspace = { id: makeId('ws'), name: 'root-repo', path: root, created_at: now, last_opened_at: now }
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)').run(workspace.id, workspace.name, workspace.path, workspace.created_at, workspace.last_opened_at)
+    expect(listRepositories(db, workspace)).toMatchObject([{ name: basename(root), baseline_path: root }])
+    db.close()
     rmSync(root, { recursive: true, force: true })
   })
 

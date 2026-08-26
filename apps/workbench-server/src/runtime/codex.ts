@@ -183,7 +183,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
   async initializeWorkspace(request: WorkspaceInitializationRequest): Promise<WorkspaceInitializationResult> {
     const context: RuntimeContext = { workspacePath: request.workspacePath, instructionBundle: resolveInstructionBundle({ workspacePath: request.workspacePath, platformInstructions: request.instruction }), effectivePolicy: resolveEffectivePolicy({ workspacePath: request.workspacePath, readableRoots: [request.workspacePath], writableRoots: [request.workspacePath], shell: 'allowlist', approval: 'none' }) }
     const conversation = await this.createConversation({ context })
-    const result = await this.sendTurn({ conversation, prompt: request.instruction })
+    const result = await this.sendTurn({ conversation, prompt: request.instruction, ...(request.onEvent ? { onEvent: request.onEvent } : {}) })
     return { status: 'initialized', message: result.finalText || 'Codex 已完成 Workspace 初始化。' }
   }
   async createConversation(request: CreateConversationRequest): Promise<ConversationHandle> {

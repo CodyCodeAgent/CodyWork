@@ -3,10 +3,10 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../db/index.js'
-import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
+import { inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup, WorkspaceSource } from '../services/workspace.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
 import { addRepository, listCachedRepositories } from '../services/repositories.js'
-import { delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
+import { DEFAULT_WORKSPACE_SETUP_PROMPT, delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
 import { CodexRuntimeAdapter } from '../runtime/codex.js'
 import { runtimeSettings, runtimeSettingsRow, updateRuntimeSettings } from '../runtime/settings.js'
 import type { RuntimeSettingsPatch } from '../runtime/settings.js'
@@ -41,7 +41,26 @@ interface SkillInstallJob {
   finishedAt?: string
 }
 
+type WorkspaceSetupStage = 'preflight' | 'agent' | 'verify' | 'register' | 'completed' | 'failed'
+interface WorkspaceSetupJob {
+  id: string
+  status: 'running' | 'completed' | 'failed'
+  stage: WorkspaceSetupStage
+  progress: number
+  title: string
+  source: WorkspaceSource
+  prompt: string
+  response: string
+  events: Array<{ type: string; timestamp: string; text: string }>
+  path?: string
+  workspace?: ReturnType<typeof workspaceView>
+  error?: string
+  startedAt: string
+  finishedAt?: string
+}
+
 const skillInstallJobs = new Map<string, SkillInstallJob>()
+const workspaceSetupJobs = new Map<string, WorkspaceSetupJob>()
 
 async function fetchSkillDocument(source: string): Promise<{ url: string; content: string } | null> {
   let url = source.trim()
@@ -137,6 +156,77 @@ function normalizeSource(body: Record<string, unknown>): WorkspaceSource {
   }
   // Keep one small compatibility path for callers from the previous prototype.
   return typeof body.path === 'string' ? { type: 'folder', path: body.path } : { type: 'folder' }
+}
+
+function setupStage(job: WorkspaceSetupJob, stage: WorkspaceSetupStage, progress: number, title: string) {
+  job.stage = stage
+  job.progress = progress
+  job.title = title
+}
+
+function setupEventText(event: RuntimeEvent): string {
+  const data = event.data
+  const text = typeof data.text === 'string' ? data.text : typeof data.error === 'string' ? data.error : event.type
+  return text.replace(/\s+/g, ' ').trim().slice(0, 2_000)
+}
+
+function appendSetupEvent(job: WorkspaceSetupJob, event: RuntimeEvent) {
+  const text = setupEventText(event)
+  if (text) job.events.push({ type: event.type, timestamp: event.timestamp, text })
+  if (job.events.length > 120) job.events.splice(0, job.events.length - 120)
+  if (event.type === 'message.delta' || event.type === 'message.completed') {
+    const chunk = typeof event.data.text === 'string' ? event.data.text : ''
+    if (chunk) job.response = `${job.response}${chunk}`.slice(-24_000)
+  }
+}
+
+function registerWorkspace(ctx: AppContext, path: string, name: string | undefined): { workspace: ReturnType<typeof workspaceView>; created: boolean } {
+  const existing = ctx.db.db.prepare('SELECT * FROM workspaces WHERE path = ?').get(path) as WorkspaceRow | undefined
+  const openedAt = nowIso()
+  if (existing) {
+    ctx.db.db.prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(openedAt, existing.id)
+    const updated = { ...existing, last_opened_at: openedAt }
+    void dashboardCache(ctx).refresh(updated)
+    return { workspace: workspaceView(updated, existing.id), created: false }
+  }
+  const row: WorkspaceRow = { id: makeId('ws'), name: name?.trim() || path.split('/').filter(Boolean).at(-1) || path, path, created_at: openedAt, last_opened_at: openedAt }
+  ctx.db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)').run(row.id, row.name, row.path, row.created_at, row.last_opened_at)
+  void dashboardCache(ctx).refresh(row)
+  return { workspace: workspaceView(row, row.id), created: true }
+}
+
+function startWorkspaceSetup(ctx: AppContext, source: WorkspaceSource, name: string | undefined): WorkspaceSetupJob {
+  const job: WorkspaceSetupJob = { id: makeId('workspace_setup'), status: 'running', stage: 'preflight', progress: 5, title: '检查目录与 Git 状态', source, prompt: DEFAULT_WORKSPACE_SETUP_PROMPT, response: '', events: [], startedAt: nowIso() }
+  workspaceSetupJobs.set(job.id, job)
+  void (async () => {
+    try {
+      const prepared = prepareWorkspaceForAssistedSetup(source)
+      job.path = prepared.path
+      job.events.push({ type: 'preflight.completed', timestamp: nowIso(), text: `${prepared.check.message} 当前状态：${prepared.check.status}` })
+      setupStage(job, 'agent', 25, 'AI 正在审阅并准备 CSR Workspace')
+      const initialized = await delegateWorkspaceInitialization(prepared.path, process.env, event => appendSetupEvent(job, event), job.prompt)
+      job.response = initialized.message || job.response
+      if (initialized.status === 'error') throw new Error(initialized.message)
+      setupStage(job, 'verify', 82, '复检目录、策略文件与 Worktree 容器')
+      const check = inspectWorkspace(prepared.path).check
+      if (check.status !== 'ready') {
+        const missing = check.missing.length ? `缺少：${check.missing.join('、')}` : check.message
+        throw new Error(`AI 完成后 Workspace 复检未通过：${missing}`)
+      }
+      setupStage(job, 'register', 94, '登记 Workspace 并刷新仓库状态')
+      const registered = registerWorkspace(ctx, prepared.path, name || prepared.name)
+      job.workspace = registered.workspace
+      setupStage(job, 'completed', 100, registered.created ? 'Workspace 已准备并登记' : 'Workspace 已检查并更新')
+      job.status = 'completed'
+      job.finishedAt = nowIso()
+    } catch (error) {
+      job.status = 'failed'
+      job.error = error instanceof Error ? error.message : String(error)
+      setupStage(job, 'failed', 100, '初始化未完成')
+      job.finishedAt = nowIso()
+    }
+  })()
+  return job
 }
 
 function requiredParam(ctx: Ctx, key: string): string {
@@ -252,6 +342,17 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/filesystem/directories', (c) => listBrowsableDirectories(c.query.get('path') ?? undefined))
 
+  add('POST', '/api/workspace-setup', (c) => {
+    const source = normalizeSource(c.body)
+    return startWorkspaceSetup(ctx, source, typeof c.body.name === 'string' ? c.body.name : undefined)
+  })
+
+  add('GET', '/api/workspace-setup/:jobId', (c) => {
+    const job = workspaceSetupJobs.get(requiredParam(c, 'jobId'))
+    if (!job) throw new Error('Workspace 初始化任务不存在或已过期')
+    return job
+  })
+
   add('POST', '/api/workspaces', async (c) => {
     const source = normalizeSource(c.body)
     const prepared = prepareWorkspace(source)
@@ -265,25 +366,8 @@ function buildRoutes(ctx: AppContext) {
         throw new Error(`Codex 完成后 Workspace 复检未通过：${missing}`)
       }
     }
-    const existing = ctx.db.db.prepare('SELECT * FROM workspaces WHERE path = ?').get(prepared.path) as WorkspaceRow | undefined
-    const openedAt = nowIso()
-    if (existing) {
-      ctx.db.db.prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(openedAt, existing.id)
-      const updated = { ...existing, last_opened_at: openedAt }
-      void dashboardCache(ctx).refresh(updated)
-      return { workspace: workspaceView(updated, existing.id), summary: inspectWorkspace(prepared.path), action: prepared.action, created: false }
-    }
-    const row: WorkspaceRow = {
-      id: makeId('ws'),
-      name: typeof c.body.name === 'string' && c.body.name.trim() ? c.body.name.trim() : prepared.name,
-      path: prepared.path,
-      created_at: openedAt,
-      last_opened_at: openedAt,
-    }
-    ctx.db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
-      .run(row.id, row.name, row.path, row.created_at, row.last_opened_at)
-    void dashboardCache(ctx).refresh(row)
-    return { workspace: workspaceView(row, row.id), summary: inspectWorkspace(row.path), action: prepared.action, initialization, created: true }
+    const registered = registerWorkspace(ctx, prepared.path, typeof c.body.name === 'string' && c.body.name.trim() ? c.body.name.trim() : prepared.name)
+    return { workspace: registered.workspace, summary: inspectWorkspace(prepared.path), action: prepared.action, initialization, created: registered.created }
   })
 
   add('GET', '/api/workspaces/:id', (c) => {

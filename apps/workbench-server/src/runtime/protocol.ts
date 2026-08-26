@@ -78,6 +78,7 @@ export interface WorkspaceCheckResult {
 
 export interface WorkspaceInitializationRequest extends WorkspaceCheckRequest {
   instruction: string
+  onEvent?: (event: RuntimeEvent) => void
 }
 
 export interface WorkspaceInitializationResult {

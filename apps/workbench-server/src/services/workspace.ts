@@ -86,6 +86,25 @@ export function prepareWorkspace(source: WorkspaceSource): { path: string; name:
   throw invalidWorkspaceError(path, check)
 }
 
+/**
+ * Explicitly opt-in assisted setup.  Unlike the regular registration path this
+ * may hand a non-empty, incomplete directory to the Workspace setup agent.
+ * The agent is still required to preserve existing source files; this merely
+ * allows it to add the CodyWork control-plane folders and policy documents.
+ */
+export function prepareWorkspaceForAssistedSetup(source: WorkspaceSource): { path: string; name: string; check: WorkspaceCheck; action: WorkspaceAction } {
+  if (source.type === 'git') {
+    if (!source.url || !source.destination) throw new Error('Git Workspace 需要 Git 地址和目标路径')
+    const path = cloneWorkspace(source.url, source.destination)
+    const check = checkWorkspace(path)
+    return { path, name: basename(path), check, action: check.status === 'ready' ? 'adopted' : 'initialize' }
+  }
+  if (!source.path) throw new Error('本地 Workspace 需要文件夹路径')
+  const path = ensureDirectory(source.path)
+  const check = checkWorkspace(path)
+  return { path, name: basename(path) || path, check, action: check.status === 'ready' ? 'adopted' : 'initialize' }
+}
+
 function invalidWorkspaceError(path: string, check: WorkspaceCheck): Error {
   const detail = check.missing.length > 0 ? `缺少：${check.missing.join('、')}` : check.message
   return new Error(`目录不是可识别的 Workspace：${path}。${detail}。不会覆盖已有内容，请补齐目录结构或选择空文件夹。`)

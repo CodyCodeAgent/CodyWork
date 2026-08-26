@@ -49,14 +49,24 @@ export function inspectRepository(path: string): { dirty: boolean; defaultRef: s
 
 export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): RepositoryRow[] {
   const servicesRoot = resolve(workspace.path, 'services')
-  if (!existsSync(servicesRoot) || !statSync(servicesRoot).isDirectory()) return []
-  const entries = readdirSync(servicesRoot, { withFileTypes: true })
-  const seen = new Set<string>()
-  const now = nowIso()
+  const candidates: Array<{ name: string; path: string }> = []
+  // A selected existing Git project must not be moved into services/ merely to
+  // use CodyWork. Treat the Workspace root as one baseline repository while
+  // preserving the regular multi-repository services/ layout.
+  if (isGitRepository(workspace.path)) candidates.push({ name: basename(workspace.path), path: workspace.path })
+  const entries = existsSync(servicesRoot) && statSync(servicesRoot).isDirectory()
+    ? readdirSync(servicesRoot, { withFileTypes: true })
+    : []
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue
     const path = resolve(servicesRoot, entry.name)
     if (entry.isSymbolicLink() || !isInside(servicesRoot, path) || !isGitRepository(path)) continue
+    candidates.push({ name: entry.name, path })
+  }
+  const seen = new Set<string>()
+  const now = nowIso()
+  for (const candidate of candidates) {
+    const { path } = candidate
     const id = (db.db.prepare('SELECT id FROM repositories WHERE workspace_id = ? AND baseline_path = ?').get(workspace.id, path) as { id?: string } | undefined)?.id ?? makeId('repo')
     let inspection: ReturnType<typeof inspectRepository>
     try {
@@ -68,7 +78,7 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
       INSERT INTO repositories (id, workspace_id, name, baseline_path, origin_url, default_ref, sync_status, sync_error, dirty, present, inspected_at)
       VALUES (?, ?, ?, ?, ?, ?, 'ok', NULL, ?, 1, ?)
       ON CONFLICT(id) DO UPDATE SET name = excluded.name, origin_url = excluded.origin_url, default_ref = excluded.default_ref, dirty = excluded.dirty, present = 1, inspected_at = excluded.inspected_at
-    `).run(id, workspace.id, entry.name, path, inspection.originUrl, inspection.defaultRef, inspection.dirty ? 1 : 0, now)
+    `).run(id, workspace.id, candidate.name, path, inspection.originUrl, inspection.defaultRef, inspection.dirty ? 1 : 0, now)
     seen.add(path)
   }
   db.db.prepare('UPDATE repositories SET present = 0, inspected_at = ? WHERE workspace_id = ? AND baseline_path NOT IN (SELECT baseline_path FROM repositories WHERE workspace_id = ? AND present = 1)').run(now, workspace.id, workspace.id)

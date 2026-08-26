@@ -1,12 +1,29 @@
 import { existsSync } from 'node:fs'
 import { CodexRuntimeAdapter } from './codex.js'
-import type { WorkspaceInitializationResult } from './protocol.js'
+import type { RuntimeEvent, WorkspaceInitializationResult } from './protocol.js'
+
+export const DEFAULT_WORKSPACE_SETUP_PROMPT = `You are the CodyWork Workspace setup agent. Inspect the selected directory before changing anything, then prepare it for CSR-style work.
+
+Hard safety rules:
+- Do not edit, delete, rename, move, format, or generate application/source code.
+- Do not run git commit, reset, clean, checkout, merge, rebase, or create a branch/worktree for a Demand.
+- Never access paths outside the selected Workspace.
+- Preserve any existing repository exactly where it is. A repository at the Workspace root remains a valid baseline repository; do not move it under services/.
+
+Allowed setup work only:
+1. Inspect the directory, Git status, and existing instruction files.
+2. Ensure these empty control-plane directories exist when missing: services/, docs/, specs/, worktrees/, and .agents/skills/.
+3. Create or improve root CONSTITUTION.md and AGENTS.md. Preserve useful existing rules, make them concise, and clearly state that business code is developed only through Demand Worktrees.
+4. Do not create a concrete Demand Worktree or a branch. Only prepare the worktrees/ container; a human must name/select a Demand and repositories before CodyWork creates one.
+5. Verify the final directory structure and report: detected repositories, changed setup files, and any blocker.
+
+Use the available tools. Your final response must be a compact, factual setup report in Markdown.`
 
 /**
  * Delegate an empty Workspace to the same Codex App Server used for demand
  * development. CodyWork never synthesizes a competing scaffold itself.
  */
-export async function delegateWorkspaceInitialization(workspacePath: string, env: NodeJS.ProcessEnv = process.env): Promise<WorkspaceInitializationResult> {
+export async function delegateWorkspaceInitialization(workspacePath: string, env: NodeJS.ProcessEnv = process.env, onEvent?: (event: RuntimeEvent) => void, instruction?: string): Promise<WorkspaceInitializationResult> {
   if (!existsSync(workspacePath)) return { status: 'error', message: 'Workspace path does not exist' }
   const command = env.CODY_CODEX_COMMAND?.trim() || 'codex app-server --stdio'
   const model = env.CODY_CODEX_MODEL?.trim()
@@ -14,7 +31,8 @@ export async function delegateWorkspaceInitialization(workspacePath: string, env
   try {
     return await adapter.initializeWorkspace({
       workspacePath,
-      instruction: env.CODY_CODEX_INIT_PROMPT?.trim() || 'Initialize this empty directory as a CSR Workspace. Create the required services, docs, specs, worktrees, and .agents/skills directories plus concise CONSTITUTION.md and AGENTS.md policy files. Do not create application code or access paths outside this Workspace. Verify the structure and report what was created.',
+      instruction: instruction ?? (env.CODY_CODEX_INIT_PROMPT?.trim() || DEFAULT_WORKSPACE_SETUP_PROMPT),
+      ...(onEvent ? { onEvent } : {}),
     })
   } catch (error) {
     return { status: 'error', message: error instanceof Error ? error.message : String(error) }

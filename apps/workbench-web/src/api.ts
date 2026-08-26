@@ -24,6 +24,21 @@ export type WorkspaceSource =
   | { type: 'folder'; path: string }
   | { type: 'git'; url: string; destination: string }
 
+export interface WorkspaceSetupJob {
+  id: string
+  status: 'running' | 'completed' | 'failed'
+  stage: 'preflight' | 'agent' | 'verify' | 'register' | 'completed' | 'failed'
+  progress: number
+  title: string
+  prompt: string
+  response: string
+  events: Array<{ type: string; timestamp: string; text: string }>
+  workspace?: Workspace
+  error?: string
+  startedAt: string
+  finishedAt?: string
+}
+
 export interface DirectoryListing {
   roots: Array<{ name: string; path: string }>
   current: string
@@ -187,6 +202,9 @@ export const api = {
   listDirectories: (path?: string) => request<DirectoryListing>('GET', `/api/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   createWorkspace: (source: WorkspaceSource, name?: string) =>
     request<{ workspace: Workspace; summary: WorkspaceSummary; action: 'adopted' | 'initialize'; initialization: { status: 'initialized' | 'unsupported'; message: string }; created: boolean }>('POST', '/api/workspaces', { source, name }),
+  startWorkspaceSetup: (source: WorkspaceSource, name?: string) =>
+    request<WorkspaceSetupJob>('POST', '/api/workspace-setup', { source, name }),
+  workspaceSetupStatus: (jobId: string) => request<WorkspaceSetupJob>('GET', `/api/workspace-setup/${encodeURIComponent(jobId)}`),
   getWorkspace: (id: string) => request<{ workspace: Workspace; summary: WorkspaceSummary }>('GET', `/api/workspaces/${id}`),
   openWorkspace: (id: string) => request<{ workspace: Workspace; summary: WorkspaceSummary }>('POST', `/api/workspaces/${id}/open`),
   deleteWorkspace: (id: string) => request<{ deleted: true }>('DELETE', `/api/workspaces/${id}`),
