@@ -150,6 +150,11 @@ function collaborationOptions(value: unknown): RuntimeComposerOptions['collabora
     return [{ name, mode: kind, label: typeof mode?.label === 'string' && mode.label.trim() ? mode.label.trim() : name, ...(typeof settings.model === 'string' && settings.model.trim() ? { model: settings.model.trim() } : {}), ...(typeof settings.reasoning_effort === 'string' ? { reasoningEffort: settings.reasoning_effort as ReasoningEffort } : {}) }]
   })
 }
+function runtimeErrorText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value instanceof Error) return value.message
+  try { return JSON.stringify(value) } catch { return String(value) }
+}
 
 /** A single service-level Codex App Server, with every thread bound to its own demand worktree policy. */
 export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
@@ -336,7 +341,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     if (notification.method === 'item/started' || notification.method === 'item/completed') { this.itemEvent(session, turnId, notification.method.endsWith('started') ? 'started' : 'completed', params.item, params); return }
     if (notification.method === 'thread/goal/updated') { this.emit(session, turnId, 'goal.updated', asRecord(params.goal) ?? params); return }
     if (notification.method === 'thread/goal/cleared') { this.emit(session, turnId, 'goal.updated', { status: 'cleared' }); return }
-    if (notification.method === 'error') { this.emit(session, turnId, 'turn.failed', { error: params.error ?? params }); session.activeTurn = undefined; const run = this.runFor(turnId); run.failed = new Error(String(params.error ?? 'Codex Runtime error')); run.reject?.(run.failed) }
+    if (notification.method === 'error') { const error = runtimeErrorText(params.error ?? params); this.emit(session, turnId, 'turn.failed', { error }); session.activeTurn = undefined; const run = this.runFor(turnId); run.failed = new Error(error || 'Codex Runtime error'); run.reject?.(run.failed) }
   }
   private itemEvent(session: CodexConversation, turnId: string, phase: 'started' | 'completed', item: unknown, params: Record<string, unknown>): void { const type = itemType(item); const id = item && typeof item === 'object' ? String((item as { id?: unknown }).id ?? '') : ''; const data = { item, nativeEvent: params }; if (type === 'agentMessage') { const text = textFromItem(item); if (text) this.emit(session, turnId, 'message.completed', { text, ...data }, id); return }; if (type === 'fileChange') { this.emit(session, turnId, phase === 'completed' ? 'diff.updated' : 'file.changed', data, id); return }; if (type === 'commandExecution' || type === 'mcpToolCall' || type === 'dynamicToolCall' || type === 'collabAgentToolCall') { this.emit(session, turnId, phase === 'completed' ? 'tool.completed' : 'tool.started', data, id); return }; if (type === 'plan') { this.emit(session, turnId, 'plan.updated', data, id); return }; if (type === 'reasoning') { const text = textFromItem(item); if (text) this.emit(session, turnId, 'reasoning.delta', { text, ...data }, id) } }
   private isApprovalRequest(method: string): boolean { return method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval' || method === 'execCommandApproval' || method === 'item/permissions/requestApproval' }
