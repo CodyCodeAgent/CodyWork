@@ -53,7 +53,7 @@ describe('conversation state', () => {
       { id: '1', type: 'tool.completed', conversationId: 'c', itemId: 'failed-tool', provider: 'codex', data: { item: { type: 'dynamicToolCall', status: 'failed', error: 'permission denied' } } },
     ]
     expect(buildTimeline(events)).toEqual([
-      expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ status: 'failed', title: 'Agent 工具' }) }),
+      expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ status: 'failed', title: '工具执行失败', summary: 'permission denied' }) }),
     ])
   })
 })

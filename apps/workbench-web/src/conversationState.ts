@@ -80,9 +80,10 @@ export function buildTimeline(events: ConversationEvent[]): TimelineEntry[] {
       continue
     }
 
-    const title = type === 'commandExecution' ? '命令执行' : type === 'fileChange' ? '文件变更' : type === 'mcpToolCall' ? 'MCP 工具' : type === 'collabAgentToolCall' ? '协作 Agent' : String(event.data.name ?? event.data.path ?? (event.type.includes('file') ? '文件变更' : 'Agent 工具'))
-    const summary = type === 'commandExecution' ? command : type === 'fileChange' ? `${String(changes.length)} 个文件变更` : type === 'mcpToolCall' ? [mcpServer, mcpTool].filter(Boolean).join('.') : String(event.data.summary ?? event.type)
     const failure = hasFailure(item.error) || hasFailure(event.data.error) || hasFailure(item.status)
+    const isKnownTool = ['commandExecution', 'fileChange', 'mcpToolCall', 'collabAgentToolCall'].includes(type)
+    const title = failure && !isKnownTool ? '工具执行失败' : type === 'commandExecution' ? '命令执行' : type === 'fileChange' ? '文件变更' : type === 'mcpToolCall' ? 'MCP 工具' : type === 'collabAgentToolCall' ? '协作 Agent' : String(event.data.name ?? event.data.path ?? (event.type.includes('file') ? '文件变更' : 'Agent 工具'))
+    const summary = failure ? String(item.error ?? event.data.error ?? '工具调用失败') : type === 'commandExecution' ? command : type === 'fileChange' ? `${String(changes.length)} 个文件变更` : type === 'mcpToolCall' ? [mcpServer, mcpTool].filter(Boolean).join('.') : String(event.data.summary ?? event.type)
     const meaningful = failure
       || (type === 'commandExecution' && Boolean(command || output))
       || (type === 'fileChange' && Boolean(changes.length || output))
@@ -95,7 +96,7 @@ export function buildTimeline(events: ConversationEvent[]): TimelineEntry[] {
     // space on empty cards.
     if (!meaningful) continue
 
-    const toolStatus = event.type.endsWith('started') ? 'running' : failure ? (status(item.status) || 'failed') : 'completed'
+    const toolStatus = failure ? 'failed' : event.type.endsWith('started') ? 'running' : 'completed'
     const tool: ConversationTool = {
       kind: type === 'mcpToolCall' ? 'mcp' : type === 'fileChange' || event.type.includes('file') || event.type.includes('diff') ? 'fileChange' : type === 'collabAgentToolCall' ? 'collabAgent' : 'command',
       title,
