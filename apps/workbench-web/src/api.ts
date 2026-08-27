@@ -118,6 +118,7 @@ export interface Demand {
   name: string
   branchName: string
   worktreeKey: string
+  path: string
   status: 'in_progress' | 'completed' | 'blocked'
   createdAt: string
   updatedAt: string

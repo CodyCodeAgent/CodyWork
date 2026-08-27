@@ -240,6 +240,7 @@ export function listDemands(db: WorkbenchDb, workspace: WorkspaceRow) {
     name: demand.name,
     branchName: demand.branch_name,
     worktreeKey: demand.worktree_key,
+    path: resolve(workspace.path, 'worktrees', demand.worktree_key),
     status: demand.status,
     createdAt: demand.created_at,
     updatedAt: demand.updated_at,

@@ -664,6 +664,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .demand-chat-page { background: #f5f6f8; }
 .chat-topbar { min-height: 78px; }
+.demand-path-link { display: inline-flex; align-items: center; gap: 7px; max-width: min(720px, 56vw); min-height: 28px; padding: 4px 8px; margin-top: 5px; color: #5e6d84; background: #f6f8fc; border: 1px solid #dfe5ef; border-radius: 7px; text-align: left; transition: color 160ms var(--ease), background 160ms var(--ease), border-color 160ms var(--ease); }
+.demand-path-link:hover { color: #405dcc; background: #f0f3ff; border-color: #bdcaf0; }
+.demand-path-link:focus-visible { outline: 3px solid rgba(91,92,240,.16); outline-offset: 2px; }
+.demand-path-link > span:first-child { flex: 0 0 auto; color: #7a879a; font-size: 10px; font-weight: 700; }
+.demand-path-link code { min-width: 0; overflow: hidden; color: inherit; font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.demand-path-action { flex: 0 0 auto; color: #5368bd; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.demand-path-link svg { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 .chat-layout { background: #f6f7f9; }
 .conversation-sidebar { width: 248px; flex-basis: 248px; padding: 15px 10px 11px; border-right-color: #e5e7eb; }
 .conversation-head strong { font-size: 15px; }
