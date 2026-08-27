@@ -48,7 +48,7 @@
         <div class="demand-grid"><button v-for="demand in demands" :key="demand.id" class="demand-card" @click="openDemand(demand)"><span :class="['demand-dot', demand.status]" /><div><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small><p>{{ demand.repositories.length }} 个 Repo · {{ demand.status === 'in_progress' ? '开发中' : demand.status }}</p></div><span>→</span></button><div v-if="demands.length === 0" class="empty-list"><strong>还没有需求</strong><span>先选择开发 Repo，再创建一个隔离的 Demand Worktree。</span><button class="btn primary" @click="showCreateDemand = true">创建需求</button></div></div>
       </section>
       <section v-else-if="activePage === 'chat' && selectedDemand" class="demand-chat-page">
-        <header class="topbar chat-topbar"><div><button class="back-link" @click="selectedDemand = null">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button></div><div class="topbar-actions"><span :class="['socket-pill', socketState]">{{ socketLabel }}</span><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" @click="createConversation">＋ 新会话</button></div></header>
+        <header class="topbar chat-topbar"><div><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div><div class="topbar-actions"><span :class="['socket-pill', socketState]">{{ socketLabel }}</span><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" @click="createConversation">＋ 新会话</button></div></header>
         <div class="chat-layout">
           <aside class="conversation-sidebar"><div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div></div><div class="conversation-demand"><strong>{{ selectedDemand.name }}</strong><small>{{ selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo' }}</small></div><div class="conversation-list" role="list" aria-label="Demand 会话"><div v-for="conversation in conversations" :key="conversation.id" class="conversation-row-wrap" role="listitem"><button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" @click="openConversation(conversation)"><span :class="['conversation-status', conversation.status]" /><span><strong>{{ conversation.title }}</strong><small>{{ statusLabel(conversation.status) }}</small></span></button><button class="conversation-delete" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg></button></div></div></aside>
           <section class="chat-main">
@@ -106,11 +106,12 @@ import { buildMessages, buildTimeline, findPendingEvent, type TimelineEntry } fr
 type RenderedEntry = { id: string; kind: 'message'; message: ConversationMessage } | TimelineEntry
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 type ThreadProject = { cwd: string; name: string; count: number; relatedToDemand: boolean }
+type HistoryMode = 'push' | 'replace' | 'none'
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null); const events = ref<ConversationEvent[]>([])
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<'queue' | 'guide'>('queue'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showDirectoryPicker = ref(false); const directoryListing = ref<DirectoryListing | null>(null); const directoryLoading = ref(false); const directoryError = ref(''); const showCreateDemand = ref(false); const creating = ref(false); const importingWorktrees = ref(false); const workspaceMode = ref<'folder' | 'git'>('folder'); const workspaceName = ref(''); const workspacePath = ref(''); const workspaceGitUrl = ref(''); const useAiWorkspaceSetup = ref(true); const workspaceSetupJob = ref<WorkspaceSetupJob | null>(null); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const questionAnswer = ref(''); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
-const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref('')
-let socket: WebSocket | null = null; let reconnectTimer: number | null = null; let copiedDemandPathTimer: number | null = null; let followBottom = true
+const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+let socket: WebSocket | null = null; let reconnectTimer: number | null = null; let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null; let followBottom = true
 const socketLabel = computed(() => socketState.value === 'open' ? '实时连接' : socketState.value === 'connecting' ? '连接中…' : '已断开')
 const isRunning = computed(() => selectedConversation.value?.status === 'running')
 const pendingApproval = computed(() => pendingOf('approval.requested', 'approval.resolved'))
@@ -175,18 +176,43 @@ function threadTitle(thread: AvailableNativeThread): string { const title = thre
 function formatThreadTime(value: string): string { const time = Date.parse(value); if (!Number.isFinite(time)) return ''; const minutes = Math.max(0, Math.round((Date.now() - time) / 60_000)); return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前` : minutes < 1_440 ? `${Math.round(minutes / 60)} 小时前` : `${Math.round(minutes / 1_440)} 天前` }
 function onScroll(): void { const node = scrollArea.value; if (node) followBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 160 }
 async function scrollToBottom(): Promise<void> { await nextTick(); if (followBottom) scrollArea.value?.scrollTo({ top: scrollArea.value.scrollHeight, behavior: 'smooth' }) }
-async function loadWorkspaces(): Promise<void> { loading.value = true; error.value = ''; try { workspaces.value = await api.listWorkspaces(); const active = workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
+function routeParams(): { workspaceId: string | null; demandId: string | null } { const params = new URLSearchParams(window.location.search); return { workspaceId: params.get('workspace'), demandId: params.get('demand') } }
+function demandFromRoute(id: string): Demand | undefined { return demands.value.find((demand) => demand.id === id || demand.worktreeKey === id || demand.branchName === id) }
+function updateRoute(demand: Demand | null, mode: HistoryMode): void {
+  if (mode === 'none') return
+  const url = new URL(window.location.href)
+  if (workspace.value) url.searchParams.set('workspace', workspace.value.id)
+  else url.searchParams.delete('workspace')
+  if (demand) url.searchParams.set('demand', demand.id)
+  else url.searchParams.delete('demand')
+  const next = `${url.pathname}${url.search}${url.hash}`
+  if (mode === 'replace') window.history.replaceState({}, '', next)
+  else window.history.pushState({}, '', next)
+}
+function demandUrl(demand: Demand): string {
+  const url = new URL(window.location.href)
+  if (workspace.value) url.searchParams.set('workspace', workspace.value.id)
+  url.searchParams.set('demand', demand.id)
+  return url.toString()
+}
+function clearConversationState(): void {
+  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+  socket?.close()
+  selectedConversation.value = null
+  events.value = []
+}
+async function loadWorkspaces(): Promise<void> { loading.value = true; error.value = ''; try { workspaces.value = await api.listWorkspaces(); const route = routeParams(); const active = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active, { demandId: route.demandId, history: 'replace' }) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
 function goTo(page: Exclude<Page, 'chat'>): void {
   activePage.value = page
   selectedDemand.value = null
-  selectedConversation.value = null
-  socket?.close()
+  clearConversationState()
+  updateRoute(null, 'push')
   if (page === 'dashboard') void refreshDashboard()
   if (page === 'knowledge') void loadKnowledge()
   if (page === 'skills') void loadSkills()
   if (page === 'settings') void loadRuntime()
 }
-async function selectWorkspace(next: Workspace): Promise<void> {
+async function selectWorkspace(next: Workspace, options: { demandId?: string | null; history?: HistoryMode } = {}): Promise<void> {
   // The list response is already authoritative enough to restore the shell.  Do
   // this before the optional "open" acknowledgement so a transient POST error
   // can never make an existing Workspace look as if it disappeared.
@@ -195,7 +221,7 @@ async function selectWorkspace(next: Workspace): Promise<void> {
   showWorkspacePicker.value = false
   activePage.value = 'dashboard'
   selectedDemand.value = null
-  selectedConversation.value = null
+  clearConversationState()
   try {
     const opened = await api.openWorkspace(next.id)
     workspace.value = opened.workspace
@@ -207,6 +233,13 @@ async function selectWorkspace(next: Workspace): Promise<void> {
     demands.value = nextDemands
     repositories.value = nextRepositories
     await refreshDashboard()
+    const requestedDemand = options.demandId ? demandFromRoute(options.demandId) : undefined
+    if (requestedDemand) await openDemand(requestedDemand, options.history ?? 'push')
+    else {
+      activePage.value = 'dashboard'
+      updateRoute(null, options.history ?? 'push')
+      if (options.demandId) error.value = '链接中的 Demand 不存在，已打开 Workspace 概览。'
+    }
   } catch (cause) {
     error.value = `Workspace 已显示，但部分数据加载失败：${cause instanceof Error ? cause.message : String(cause)}`
   }
@@ -301,7 +334,23 @@ async function addRepository(): Promise<void> {
     await refreshDashboard()
   } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { creating.value = false }
 }
-async function openDemand(demand: Demand): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; await Promise.all([loadComposerOptions(demand.id), loadSkills()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; await openConversation(conversations.value[0]!) }
+async function openDemand(demand: Demand, history: HistoryMode = 'push'): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; updateRoute(demand, history); await Promise.all([loadComposerOptions(demand.id), loadSkills()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; await openConversation(conversations.value[0]!) }
+function returnToDemandList(): void { selectedDemand.value = null; clearConversationState(); activePage.value = 'demands'; updateRoute(null, 'push') }
+async function restoreRoute(): Promise<void> {
+  const route = routeParams()
+  const nextWorkspace = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspace.value
+  if (!nextWorkspace) return
+  if (workspace.value?.id !== nextWorkspace.id) { await selectWorkspace(nextWorkspace, { demandId: route.demandId, history: 'none' }); return }
+  if (route.demandId) {
+    const demand = demandFromRoute(route.demandId)
+    if (demand && selectedDemand.value?.id !== demand.id) await openDemand(demand, 'none')
+    else if (!demand) error.value = '链接中的 Demand 不存在。'
+    return
+  }
+  selectedDemand.value = null
+  clearConversationState()
+  activePage.value = 'dashboard'
+}
 function uniqueEvents(items: ConversationEvent[]): ConversationEvent[] { const seen = new Set<string>(); return items.filter(event => !seen.has(event.id) && (seen.add(event.id), true)) }
 async function refreshNativeHistory(conversationId: string): Promise<void> { if (!workspace.value || selectedConversation.value?.id !== conversationId) return; const history = await api.conversationHistory(workspace.value.id, conversationId); events.value = uniqueEvents(history.events) }
 async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; events.value = []; error.value = ''; await refreshNativeHistory(conversation.id); connect(conversation.id); await scrollToBottom() }
@@ -352,10 +401,18 @@ async function copyDemandPath(demand: Demand): Promise<void> {
     copiedDemandPathTimer = window.setTimeout(() => { copiedDemandPath.value = '' }, 1_800)
   } catch { error.value = '复制 Worktree 路径失败，请手动选择路径。' }
 }
+async function copyDemandLink(demand: Demand): Promise<void> {
+  try {
+    await copyText(demandUrl(demand))
+    copiedDemandLink.value = demand.id
+    if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer)
+    copiedDemandLinkTimer = window.setTimeout(() => { copiedDemandLink.value = '' }, 1_800)
+  } catch { error.value = '复制需求链接失败，请从浏览器地址栏复制。' }
+}
 async function resolveApproval(outcome: 'allowed-once' | 'rejected'): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingApproval.value) return; await api.resolveApproval(workspace.value.id, selectedConversation.value.id, String(pendingApproval.value.data.approvalId ?? pendingApproval.value.data.requestId ?? ''), outcome) }
 async function resolveQuestion(): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingQuestion.value || !questionAnswer.value.trim()) return; await api.answerQuestion(workspace.value.id, selectedConversation.value.id, String(pendingQuestion.value.data.requestId ?? ''), questionAnswer.value.trim()); questionAnswer.value = '' }
 watch(() => events.value.length, () => { void scrollToBottom() })
 let dashboardTimer: number | null = null
-onMounted(() => { void loadWorkspaces(); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
-onBeforeUnmount(() => { socket?.close(); if (reconnectTimer !== null) window.clearTimeout(reconnectTimer); if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
+onMounted(() => { void loadWorkspaces(); window.addEventListener('popstate', () => { void restoreRoute() }); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
+onBeforeUnmount(() => { socket?.close(); if (reconnectTimer !== null) window.clearTimeout(reconnectTimer); if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
 </script>
