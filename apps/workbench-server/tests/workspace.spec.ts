@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
-import { checkWorkspace, inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup } from '../src/services/workspace.js'
+import { checkWorkspace, ensureWorkspaceControlPlane, inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup } from '../src/services/workspace.js'
 import { listRepositories } from '../src/services/repositories.js'
 
 describe('workspace-only server primitives', () => {
@@ -113,6 +113,17 @@ describe('workspace-only server primitives', () => {
     expect(prepared.action).toBe('initialize')
     expect(prepared.check.status).toBe('unsupported')
     expect(prepared.path).toBe(root)
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('prepares only CodyWork control-plane folders before the setup agent runs', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workspace-control-plane-'))
+    writeFileSync(join(root, 'AGENTS.md'), '# Existing Team Rules\n')
+    expect(ensureWorkspaceControlPlane(root)).toEqual(['services', 'docs', 'specs', 'worktrees', join('.agents', 'skills')])
+    expect(inspectWorkspace(root).check.status).toBe('ready')
+    expect(inspectWorkspace(root).entries).toContain('AGENTS.md')
+    expect(inspectWorkspace(root).entries).toContain('.agents')
+    expect(ensureWorkspaceControlPlane(root)).toEqual([])
     rmSync(root, { recursive: true, force: true })
   })
 

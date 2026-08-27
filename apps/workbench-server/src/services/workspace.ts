@@ -41,6 +41,11 @@ const REQUIRED_MARKER_GROUPS = [
   { label: 'specs', alternatives: ['specs', 'requirements'] },
   { label: 'worktrees', alternatives: ['worktrees'] },
 ]
+
+// These folders are CodyWork-owned control-plane containers.  Creating them is
+// deterministic and does not inspect or modify project code, so it should not
+// depend on an App Server sandbox being able to create hidden directories.
+const CONTROL_PLANE_DIRECTORIES = ['services', 'docs', 'specs', 'worktrees', join('.agents', 'skills')]
 function canonicalPath(path: string): string {
   const raw = path.trim()
   if (!isAbsolute(raw)) throw new Error('Workspace 路径必须是绝对路径')
@@ -103,6 +108,21 @@ export function prepareWorkspaceForAssistedSetup(source: WorkspaceSource): { pat
   const path = ensureDirectory(source.path)
   const check = checkWorkspace(path)
   return { path, name: basename(path) || path, check, action: check.status === 'ready' ? 'adopted' : 'initialize' }
+}
+
+export function ensureWorkspaceControlPlane(path: string): string[] {
+  const canonical = canonicalPath(path)
+  const created: string[] = []
+  for (const directory of CONTROL_PLANE_DIRECTORIES) {
+    const target = join(canonical, directory)
+    if (existsSync(target)) {
+      if (!statSync(target).isDirectory()) throw new Error(`Workspace 控制目录不是文件夹：${target}`)
+      continue
+    }
+    mkdirSync(target, { recursive: true })
+    created.push(directory)
+  }
+  return created
 }
 
 function invalidWorkspaceError(path: string, check: WorkspaceCheck): Error {

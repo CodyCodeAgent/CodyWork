@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../db/index.js'
-import { inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup, WorkspaceSource } from '../services/workspace.js'
+import { ensureWorkspaceControlPlane, inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup, WorkspaceSource } from '../services/workspace.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
 import { addRepository, listCachedRepositories } from '../services/repositories.js'
 import { DEFAULT_WORKSPACE_SETUP_PROMPT, delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
@@ -207,6 +207,8 @@ function startWorkspaceSetup(ctx: AppContext, source: WorkspaceSource, name: str
       const prepared = prepareWorkspaceForAssistedSetup(source)
       job.path = prepared.path
       job.events.push({ type: 'preflight.completed', timestamp: nowIso(), text: `${prepared.check.message} 当前状态：${prepared.check.status}` })
+      const createdDirectories = ensureWorkspaceControlPlane(prepared.path)
+      job.events.push({ type: 'control-plane.prepared', timestamp: nowIso(), text: createdDirectories.length ? `已准备控制目录：${createdDirectories.join('、')}` : '控制目录已存在，未改动。' })
       setupStage(job, 'agent', 25, 'AI 正在审阅并准备 CSR Workspace')
       let initialized: Awaited<ReturnType<typeof delegateWorkspaceInitialization>> | undefined
       for (let attempt = 1; attempt <= 3; attempt += 1) {
