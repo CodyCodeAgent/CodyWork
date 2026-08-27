@@ -56,4 +56,31 @@ describe('conversation state', () => {
       expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ status: 'failed', title: '工具执行失败', summary: 'permission denied' }) }),
     ])
   })
+
+  it('groups file changes within a turn and keeps different turns separate', () => {
+    const events = [
+      { id: '1', type: 'diff.updated', conversationId: 'c', turnId: 'turn-a', itemId: 'file-a', provider: 'codex', data: { item: { type: 'fileChange', changes: [{ path: 'src/a.ts', diff: '-old\n+new' }], status: 'completed' } } },
+      { id: '2', type: 'diff.updated', conversationId: 'c', turnId: 'turn-a', itemId: 'file-b', provider: 'codex', data: { item: { type: 'fileChange', changes: [{ path: 'src/b.ts', diff: '-before\n+after' }], status: 'completed' } } },
+      { id: '3', type: 'diff.updated', conversationId: 'c', turnId: 'turn-b', itemId: 'file-c', provider: 'codex', data: { item: { type: 'fileChange', changes: [{ path: 'README.md', diff: '+docs' }], status: 'completed' } } },
+    ]
+
+    const timeline = buildTimeline(events)
+    expect(timeline).toHaveLength(2)
+    const first = timeline[0]
+    if (first?.kind !== 'tool') throw new Error('expected a file change tool')
+    expect(first).toEqual(expect.objectContaining({ id: 'file-group:turn-a' }))
+    expect(first.tool).toEqual(expect.objectContaining({
+      kind: 'fileChange',
+      title: '文件变更 · 2 个文件',
+      status: 'completed',
+      summary: '2 个文件已更新',
+      details: expect.arrayContaining(['src/a.ts', 'src/b.ts']),
+      output: expect.stringContaining('+new'),
+    }))
+    expect(first.tool.output).toContain('+after')
+    const second = timeline[1]
+    if (second?.kind !== 'tool') throw new Error('expected a second file change tool')
+    expect(second.id).toBe('file-group:turn-b')
+    expect(second.tool.details).toEqual(['README.md'])
+  })
 })
