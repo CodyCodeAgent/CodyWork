@@ -24,4 +24,36 @@ describe('conversation state', () => {
     expect(buildTimeline(events)[0]).toEqual(expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ title: '命令执行', summary: 'npm test', status: 'running' }) }))
     expect(findPendingEvent(events, 'approval.requested', 'approval.resolved')).toBeNull()
   })
+
+  it('hides empty tool lifecycle noise and reconciles a meaningful tool into one card', () => {
+    const events = [
+      { id: '1', type: 'tool.started', conversationId: 'c', itemId: 'hidden', provider: 'codex', data: { item: { type: 'dynamicToolCall', status: 'inProgress' } } },
+      { id: '2', type: 'tool.completed', conversationId: 'c', itemId: 'hidden', provider: 'codex', data: { item: { type: 'dynamicToolCall', status: 'completed' } } },
+      { id: '3', type: 'tool.started', conversationId: 'c', itemId: 'command', provider: 'codex', data: { item: { type: 'commandExecution', command: 'pnpm test', status: 'inProgress' } } },
+      { id: '4', type: 'tool.completed', conversationId: 'c', itemId: 'command', provider: 'codex', data: { item: { type: 'commandExecution', command: 'pnpm test', status: 'completed', aggregatedOutput: 'all green' } } },
+      { id: '5', type: 'tool.completed', conversationId: 'c', itemId: 'command', provider: 'codex', data: { output: 'tests: 12 passed' } },
+    ]
+
+    const timeline = buildTimeline(events)
+    expect(timeline).toEqual([
+      expect.objectContaining({
+        id: 'tool:command',
+        kind: 'tool',
+        tool: expect.objectContaining({ title: '命令执行', status: 'completed', summary: 'pnpm test', output: expect.stringContaining('all green') }),
+      }),
+    ])
+    const command = timeline[0]
+    expect(command?.kind).toBe('tool')
+    if (command?.kind !== 'tool') throw new Error('expected a command tool')
+    expect(command.tool.output).toContain('tests: 12 passed')
+  })
+
+  it('keeps failed lifecycle events visible for diagnosis', () => {
+    const events = [
+      { id: '1', type: 'tool.completed', conversationId: 'c', itemId: 'failed-tool', provider: 'codex', data: { item: { type: 'dynamicToolCall', status: 'failed', error: 'permission denied' } } },
+    ]
+    expect(buildTimeline(events)).toEqual([
+      expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ status: 'failed', title: 'Agent 工具' }) }),
+    ])
+  })
 })
