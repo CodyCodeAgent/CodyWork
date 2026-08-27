@@ -509,6 +509,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .switcher-menu .menu-all, .switcher-menu .menu-create { min-height: 40px; }
 .switcher-menu button > span:last-child { width: auto; }
 .menu-check { width: auto !important; margin-left: auto; color: #aeb1ff !important; font-size: 9px; }
+.workspace-picker-row { display: flex; align-items: stretch; gap: 3px; }
+.switcher-menu .workspace-picker-select { width: auto; min-width: 0; flex: 1; }
+.switcher-menu .workspace-picker-remove { width: auto; min-width: 44px; min-height: 40px; padding: 0 8px; color: #a8afbd; font-size: 11px; text-align: center; }
+.switcher-menu .workspace-picker-remove:hover, .switcher-menu .workspace-picker-remove:focus-visible { color: #ffb4bd; background: rgba(196,72,87,.18); outline: none; }
+.switcher-menu .workspace-picker-remove:focus-visible { box-shadow: 0 0 0 2px rgba(255,143,155,.35); }
 
 .workspace-nav { display: grid; gap: 3px; }
 .sidebar-section-label { display: flex; align-items: baseline; justify-content: space-between; padding: 22px 10px 7px; color: #747c89; }
@@ -676,6 +681,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .delete-conversation-modal { width: min(430px, 100%); }
 .delete-conversation-modal > p { margin: 0 0 11px; color: #536071; font-size: 13px; line-height: 1.6; }
 .delete-conversation-note { padding: 10px 11px; color: #516cae !important; background: #f1f4ff; border: 1px solid #dfe4ff; border-radius: 9px; }
+.delete-workspace-modal { width: min(470px, 100%); }
+.delete-workspace-modal > p { margin: 0 0 11px; color: #536071; font-size: 13px; line-height: 1.6; }
+.delete-workspace-note { padding: 10px 11px; color: #516cae !important; background: #f1f4ff; border: 1px solid #dfe4ff; border-radius: 9px; overflow-wrap: anywhere; }
+.delete-workspace-confirm { color: #8a4a55 !important; font-weight: 650; }
 .btn.danger { color: #fff; background: #c44857; border-color: #c44857; }
 .btn.danger:hover:not(:disabled) { background: #ad3c4a; border-color: #ad3c4a; }
 .chat-toolbar { min-height: 50px; padding: 9px 18px; border-bottom-color: #e5e7eb; }
