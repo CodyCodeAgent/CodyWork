@@ -326,10 +326,27 @@ async function selectCollaborationMode(name: string): Promise<void> { const next
 function selectReasoning(value: string): void { if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)) selectedReasoning.value = value }
 async function selectPermission(value: string): Promise<void> { if (value !== 'read-only' && value !== 'workspace-write' && value !== 'yolo') return; const previous = permission.value; permission.value = value; await savePermission(); if (error.value) permission.value = previous }
 async function interrupt(): Promise<void> { if (workspace.value && selectedConversation.value) await api.interruptConversation(workspace.value.id, selectedConversation.value.id) }
-async function copyConversationText(text: string): Promise<void> { try { await navigator.clipboard.writeText(text) } catch { error.value = '复制失败，请手动选择内容。' } }
+async function copyText(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+  } catch { /* HTTP origins can deny the async Clipboard API; fall back below. */ }
+  const fallback = document.createElement('textarea')
+  fallback.value = text
+  fallback.setAttribute('readonly', '')
+  fallback.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
+  document.body.append(fallback)
+  fallback.select()
+  const copied = document.execCommand('copy')
+  fallback.remove()
+  if (!copied) throw new Error('clipboard unavailable')
+}
+async function copyConversationText(text: string): Promise<void> { try { await copyText(text) } catch { error.value = '复制失败，请手动选择内容。' } }
 async function copyDemandPath(demand: Demand): Promise<void> {
   try {
-    await navigator.clipboard.writeText(demand.path)
+    await copyText(demand.path)
     copiedDemandPath.value = demand.id
     if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer)
     copiedDemandPathTimer = window.setTimeout(() => { copiedDemandPath.value = '' }, 1_800)
