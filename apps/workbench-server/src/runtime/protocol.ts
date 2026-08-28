@@ -167,6 +167,8 @@ export interface RuntimeAdapter {
 
 /** Optional long-lived capabilities used by the CodyWork conversation facade. */
 export interface ConversationRuntimeAdapter extends RuntimeAdapter {
+  /** Bounded provider diagnostics suitable for an authenticated product surface. */
+  diagnostics?(): unknown
   resumeConversation?(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle>
   /** Lists resumable provider-native threads without attaching one to a Demand. */
   listNativeThreads?(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>

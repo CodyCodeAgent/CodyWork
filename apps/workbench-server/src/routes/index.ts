@@ -346,6 +346,8 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/runtime', async () => conversationService(ctx).manifest())
 
+  add('GET', '/api/runtime/diagnostics', () => conversationService(ctx).diagnostics())
+
   add('POST', '/api/runtime/test', async () => {
     const runtime = createDefaultRuntime(ctx.db)
     try { return await runtime.checkConnection() } finally { await runtime.close() }

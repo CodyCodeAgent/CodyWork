@@ -159,12 +159,14 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   async getManifest(): Promise<RuntimeManifest> {
     return {
-      provider: this.provider, runtimeVersion: 'cody-web-core/0.6.3', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
+      provider: this.provider, runtimeVersion: 'cody-web-core/0.6.4', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
       streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: true,
       readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'allowlist', approval: 'runtime',
       workspaceInitialize: true, workspaceRepair: false, goals: true, plans: true, questions: true,
     }
   }
+
+  diagnostics() { return this.host?.diagnostics() ?? null }
 
   async checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult> { return workspaceCheck(request.workspacePath) }
 

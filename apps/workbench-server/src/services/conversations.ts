@@ -139,6 +139,8 @@ export class ConversationService {
 
   async manifest() { return this.runtime.getManifest() }
 
+  diagnostics() { return this.runtime.diagnostics?.() ?? null }
+
   list(workspaceId: string, demandId: string): ConversationView[] {
     const rows = this.db.db.prepare('SELECT * FROM conversations WHERE workspace_id = ? AND demand_id = ? ORDER BY updated_at DESC, created_at DESC').all(workspaceId, demandId) as unknown as ConversationRow[]
     return rows.map(toView)
