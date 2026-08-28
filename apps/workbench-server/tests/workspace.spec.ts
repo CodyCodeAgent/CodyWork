@@ -8,6 +8,11 @@ import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
 import { checkWorkspace, ensureWorkspaceControlPlane, inspectWorkspace, prepareWorkspace, prepareWorkspaceForAssistedSetup } from '../src/services/workspace.js'
 import { listRepositories } from '../src/services/repositories.js'
 
+function initRepository(cwd: string, branch: string): void {
+  execFileSync('git', ['init'], { cwd })
+  execFileSync('git', ['checkout', '-b', branch], { cwd })
+}
+
 describe('workspace-only server primitives', () => {
   it('stores only workspace registration and latest open time', () => {
     const db = new WorkbenchDb(':memory:')
@@ -123,7 +128,7 @@ describe('workspace-only server primitives', () => {
     const otherRemote = join(root, 'other.git')
     const destination = join(root, 'checkout')
     mkdirSync(source)
-    execFileSync('git', ['init', '-b', 'main'], { cwd: source })
+    initRepository(source, 'main')
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: source })
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: source })
     writeFileSync(join(source, 'README.md'), '# source\n')
@@ -154,7 +159,7 @@ describe('workspace-only server primitives', () => {
 
   it('treats a Git project at the Workspace root as a baseline repository', () => {
     const root = mkdtempSync(join(tmpdir(), 'workspace-root-repo-'))
-    execFileSync('git', ['init', '-b', 'main'], { cwd: root })
+    initRepository(root, 'main')
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root })
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root })
     writeFileSync(join(root, 'README.md'), '# root repo\n')
@@ -170,7 +175,7 @@ describe('workspace-only server primitives', () => {
     expect(listRepositories(db, workspace)).toMatchObject([{ name: basename(root), baseline_path: root }])
     const service = join(root, 'services', 'service-repo')
     mkdirSync(service)
-    execFileSync('git', ['init', '-b', 'main'], { cwd: service })
+    initRepository(service, 'main')
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: service })
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: service })
     writeFileSync(join(service, 'README.md'), '# service repo\n')

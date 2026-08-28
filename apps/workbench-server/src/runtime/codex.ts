@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createAppServerHost, type AppServerHost } from '@codycodeagent/cody-web-core/runtime'
 import {
+  buildTurnUserInput,
   CodexSessionManager,
   type ExecutionContext,
   type ExecutionPolicyProvider,
@@ -249,10 +250,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     const events: RuntimeEvent[] = []
     const unsubscribe = this.listen(session.handle.id, event => { events.push(event); request.onEvent?.(event) })
     const turn: TurnInput = {
-      input: [
-        { type: 'text', text: request.prompt, text_elements: [] },
-        ...(request.settings?.skills ?? []).map(skill => ({ type: 'skill' as const, name: skill.name, path: skill.path })),
-      ],
+      input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills }),
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       runtimeWorkspaceRoots: session.context.effectivePolicy.writableRoots,

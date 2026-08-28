@@ -54,7 +54,16 @@ rl.on('line', line => {
     goal = { objective: '', status: 'complete' }
     write({ id: message.id, result: {} }); notify('thread/goal/cleared', { threadId: message.params?.threadId })
   } else if (message.method === 'turn/start') {
-    const prompt = String(message.params?.input?.[0]?.text ?? '')
+    const input = Array.isArray(message.params?.input) ? message.params.input : []
+    const prompt = String(input.find(item => item?.type === 'text')?.text ?? '')
+    if (prompt.includes('SKILL_ORDER')) {
+      const skillIndex = input.findIndex(item => item?.type === 'skill')
+      const textIndex = input.findIndex(item => item?.type === 'text')
+      if (skillIndex < 0 || textIndex < 0 || skillIndex > textIndex) {
+        write({ id: message.id, error: { code: -32602, message: 'Skill input must precede text input' } })
+        return
+      }
+    }
     const policy = message.params?.sandboxPolicy
     const invalidWritePolicy = !prompt.includes('EXPECT_READ_ONLY') && (
       policy?.type !== 'workspaceWrite'
