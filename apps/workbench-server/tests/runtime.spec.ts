@@ -73,6 +73,8 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
     const runtime = new CodexRuntimeAdapter({ command: `${process.execPath} ${fixture}` })
+    expect((await runtime.getManifest()).runtimeVersion).toBe('cody-web-core/0.6.4')
+    expect(runtime.diagnostics()).toBeNull()
     const context = {
       workspacePath: root,
       demandPath: root,
@@ -80,6 +82,7 @@ describe('generic runtime protocol', () => {
       effectivePolicy: { readableRoots: [root], writableRoots: [join(root, 'worktrees', 'demo', 'docs')], deniedRoots: [], shell: 'allowlist' as const, approval: 'workbench' as const, hash: 'policy' },
     }
     const conversation = await runtime.createConversation({ context })
+    expect(runtime.diagnostics()).toMatchObject({ status: 'running', initialized: true })
     const result = await runtime.sendTurn({ conversation, prompt: 'hello' })
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
