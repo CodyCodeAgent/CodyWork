@@ -131,4 +131,24 @@ describe('conversation websocket control plane', () => {
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
+
+  it('keeps one bounded Runtime failure reason visible after a refresh', async () => {
+    class FailingRuntime extends TestRuntimeAdapter {
+      override async sendTurn(): Promise<never> { throw new Error('response stream disconnected') }
+    }
+
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new FailingRuntime())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Show runtime failure')
+    await conversations.send(test.workspaceId, conversation.id, 'do not lose the reason')
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'turn.failed', data: { error: 'response stream disconnected' } }),
+    ]))
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
 })

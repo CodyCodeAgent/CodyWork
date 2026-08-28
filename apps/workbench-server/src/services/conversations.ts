@@ -109,6 +109,8 @@ export class ConversationService {
   private readonly listeners = new Map<string, Set<Listener>>()
   /** Serializes ordinary queue sends per conversation; steering stays attached to the active turn. */
   private readonly turnChains = new Map<string, Promise<void>>()
+  /** App Server failure notifications, held until the enclosing send settles. */
+  private readonly runtimeFailureMessages = new Map<string, string>()
 
   private runtime: ConversationRuntimeAdapter
 
@@ -152,7 +154,25 @@ export class ConversationService {
     await this.ensureHandle(row)
     if (!this.runtime.readConversation) throw new Error('当前 Runtime 不支持读取原生 Thread 历史')
     try {
-      return await this.runtime.readConversation({ conversation: this.handleFor(row), context: this.contexts.get(conversationId)! })
+      const events = await this.runtime.readConversation({ conversation: this.handleFor(row), context: this.contexts.get(conversationId)! })
+      // Native Codex Thread history remains authoritative. Retain only the
+      // current bounded failure diagnostic, so refresh does not make a visible
+      // Runtime error turn back into an unexplained failed status.
+      if (row.status === 'failed' && !events.some(event => event.type === 'turn.failed')) {
+        const failure = this.db.db.prepare("SELECT id, data_json, created_at FROM conversation_audits WHERE conversation_id = ? AND action = 'turn.failed' ORDER BY id DESC LIMIT 1").get(conversationId) as { id: number; data_json: string; created_at: string } | undefined
+        const data = failure ? parseJson(failure.data_json) : null
+        const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+        events.push({
+          id: `audit:turn.failed:${String(failure?.id ?? row.updated_at)}`,
+          type: 'turn.failed',
+          conversationId,
+          ...(typeof record.turnId === 'string' ? { turnId: record.turnId } : {}),
+          provider: row.provider,
+          timestamp: failure?.created_at ?? row.updated_at,
+          data: { error: typeof record.error === 'string' ? record.error : 'Codex 未能完成本次回复。' },
+        })
+      }
+      return events
     } catch (error) {
       // App Server cannot read a just-started native thread until its first user
       // turn materializes. Treat only an untouched local conversation as empty.
@@ -401,17 +421,22 @@ export class ConversationService {
     const data = event.data
     this.publish({ ...event, data })
     if (event.type === 'approval.requested') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('awaiting_approval', nowIso(), event.conversationId)
-    if (event.type === 'turn.failed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
+    if (event.type === 'turn.failed') {
+      this.runtimeFailureMessages.set(event.conversationId, String(event.data.error ?? 'Codex 未能完成本次回复。'))
+      this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
+    }
   }
 
   private fail(conversationId: string, provider: string, turnId: string, error: Error): void {
     const message = error.message.slice(0, 1_000)
+    const alreadyPublished = this.runtimeFailureMessages.get(conversationId) === message
+    this.runtimeFailureMessages.delete(conversationId)
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), conversationId)
     // This is a bounded diagnostic audit, not a mirrored event history. Native
     // Codex Thread history remains the only durable message timeline.
     this.audit(conversationId, 'turn.failed', { turnId, error: message })
     console.warn('[CodyWork] Codex turn failed', { conversationId, turnId, error: message })
-    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', provider, turnId, timestamp: nowIso(), data: { error: message } })
+    if (!alreadyPublished) this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', provider, turnId, timestamp: nowIso(), data: { error: message } })
   }
 
   private publish(event: ConversationEvent): void {
