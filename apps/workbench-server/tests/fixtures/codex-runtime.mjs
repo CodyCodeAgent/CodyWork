@@ -31,7 +31,14 @@ rl.on('line', line => {
   let message
   try { message = JSON.parse(line) } catch { return }
   if (message.method === 'initialize') write({ id: message.id, result: { serverInfo: { name: 'codex-fixture', version: '1' } } })
-  else if (message.method === 'thread/start') write({ id: message.id, result: { thread: { id: 'native-fixture-thread' } } })
+  else if (message.method === 'thread/start') {
+    const serialized = JSON.stringify(message.params)
+    if (serialized.includes('readOnlyAccess') || serialized.includes('persistExtendedHistory')) {
+      write({ id: message.id, error: { code: -32602, message: 'legacy Codex fields are forbidden' } })
+    } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length === 0) {
+      write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
+    } else write({ id: message.id, result: { thread: { id: 'native-fixture-thread' } } })
+  }
   else if (message.method === 'thread/resume') write({ id: message.id, result: { thread: { id: message.params?.threadId ?? 'native-fixture-thread' } } })
   else if (message.method === 'thread/read') write({ id: message.id, result: { thread: { id: message.params?.threadId, turns: [{ id: 'turn-history', status: 'completed', items: [
     { id: 'user-history', type: 'userMessage', content: [{ type: 'text', text: 'historical prompt' }] },
@@ -47,8 +54,20 @@ rl.on('line', line => {
     goal = { objective: '', status: 'complete' }
     write({ id: message.id, result: {} }); notify('thread/goal/cleared', { threadId: message.params?.threadId })
   } else if (message.method === 'turn/start') {
-    write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
     const prompt = String(message.params?.input?.[0]?.text ?? '')
+    const policy = message.params?.sandboxPolicy
+    const invalidWritePolicy = !prompt.includes('EXPECT_READ_ONLY') && (
+      policy?.type !== 'workspaceWrite'
+      || !Array.isArray(policy?.writableRoots)
+      || policy.writableRoots.length === 0
+      || Object.hasOwn(policy, 'readOnlyAccess')
+    )
+    const invalidReadPolicy = prompt.includes('EXPECT_READ_ONLY') && (policy?.type !== 'readOnly' || policy?.networkAccess !== false)
+    if (invalidWritePolicy || invalidReadPolicy) {
+      write({ id: message.id, error: { code: -32602, message: 'invalid current Codex sandbox policy' } })
+      return
+    }
+    write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
     if (prompt.includes('DISCONNECT')) setTimeout(() => process.exit(23), 5)
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(prompt), 5)
     else setTimeout(() => emitTurn(prompt), 5)

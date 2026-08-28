@@ -110,6 +110,8 @@ describe('generic runtime protocol', () => {
     const questionResult = await questionTurn
     expect(questionEvents).toContain('question.requested')
     expect(questionResult.events.some(event => event.type === 'turn.completed')).toBe(true)
+    await runtime.setPermission(conversation, 'read-only')
+    await expect(runtime.sendTurn({ conversation, prompt: 'EXPECT_READ_ONLY' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
     await runtime.setPermission(conversation, 'yolo')
 
     await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT' })).rejects.toThrow('exited')
