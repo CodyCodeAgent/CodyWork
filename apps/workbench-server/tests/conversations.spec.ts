@@ -181,4 +181,31 @@ describe('conversation websocket control plane', () => {
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
+
+  it('returns an interrupted turn to idle without recording a Runtime failure', async () => {
+    class InterruptedRuntime extends TestRuntimeAdapter {
+      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+        const timestamp = nowIso()
+        const event = {
+          id: 'turn-interrupted', type: 'turn.interrupted' as const, conversationId: request.conversation.id,
+          threadId: request.conversation.nativeId, turnId: 'turn-1', provider: this.provider,
+          timestamp, atIso: timestamp, data: { status: 'interrupted' },
+        }
+        request.onEvent?.(event)
+        return { conversation: request.conversation, finalText: '', events: [event] }
+      }
+    }
+
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new InterruptedRuntime())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Stop cleanly')
+    await conversations.send(test.workspaceId, conversation.id, 'stop this turn')
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'turn.failed'").get(conversation.id)).toBeUndefined()
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
 })

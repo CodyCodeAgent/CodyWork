@@ -447,6 +447,10 @@ export class ConversationService {
       this.runtimeFailureMessages.set(event.conversationId, String(event.data.error ?? 'Codex 未能完成本次回复。'))
       this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
     }
+    if (event.type === 'turn.interrupted') {
+      this.runtimeFailureMessages.delete(event.conversationId)
+      this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('idle', nowIso(), event.conversationId)
+    }
   }
 
   private fail(conversationId: string, provider: string, turnId: string, error: Error): void {

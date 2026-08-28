@@ -57,9 +57,7 @@
               <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
             </div>
             <div class="composer">
-              <CodyRequestCard v-if="pendingApproval" :request="pendingApproval" @resolve-approval="resolveTimelineApproval" />
-              <CodyRequestCard v-else-if="pendingQuestion" :request="pendingQuestion" @resolve-question="resolveTimelineQuestion" />
-              <template v-else><div class="composer-hint">{{ selectedConversation?.plan?.active ? 'Plan 模式：先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :placeholder="isRunning ? (selectedSubmitMode === 'guide' ? '描述引导…（Enter 发送给当前 Turn）' : '描述下一步…（Enter 排队，Shift + Enter 换行）') : '描述你希望完成的事情…（Enter 发送，Shift + Enter 换行）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'guide' ? 'guide' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @send="sendMessage" @stop="interrupt" /></template>
+              <div class="composer-hint">{{ selectedConversation?.plan?.active ? 'Plan 模式：先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :placeholder="isRunning ? (selectedSubmitMode === 'guide' ? '描述引导…（Enter 发送给当前 Turn）' : '描述下一步…（Enter 排队，Shift + Enter 换行）') : '描述你希望完成的事情…（Enter 发送，Shift + Enter 换行）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'guide' ? 'guide' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @send="sendMessage" @stop="interrupt" />
             </div>
           </section>
         </div>
@@ -80,7 +78,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createConversationState, type ConversationState } from '@codycodeagent/cody-web-core/conversation'
 import { createConversationController, createReconnectingConversationSocket, type ConversationController, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
-import { CodyComposer, CodyConversation, CodyRequestCard, conversationEntriesFromState, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
+import { CodyComposer, CodyConversation, conversationEntriesFromState, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
 import {
   api,
@@ -134,7 +132,7 @@ const composerReasoningOptions = computed<CodyComposerOption[]>(() => [{ value: 
 const composerPermissionOptions = computed<CodyComposerOption[]>(() => [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
 const composerSkills = computed<CodyComposerOption[]>(() => skills.value.filter(skill => skill.status === 'available').map(skill => ({ value: skill.name, label: skill.name, description: skill.description })))
 
-function statusLabel(status: Conversation['status']): string { return status === 'running' ? '执行中' : status === 'awaiting_approval' ? '待确认' : status === 'failed' ? '失败' : status === 'disconnected' ? '已断开' : '已完成' }
+function statusLabel(status: Conversation['status']): string { return status === 'idle' ? '就绪' : status === 'running' ? '执行中' : status === 'awaiting_approval' ? '待确认' : status === 'failed' ? '失败' : status === 'disconnected' ? '已断开' : '已完成' }
 function canDeleteConversation(conversation: Conversation): boolean { return conversations.value.length > 1 && conversation.status !== 'running' && conversation.status !== 'awaiting_approval' }
 function deleteConversationTitle(conversation: Conversation): string { return conversation.status === 'running' || conversation.status === 'awaiting_approval' ? '执行中或待确认的会话不能删除' : conversations.value.length <= 1 ? '每个 Demand 至少保留一个会话' : '删除会话' }
 function requestDeleteConversation(conversation: Conversation): void { if (!canDeleteConversation(conversation)) { error.value = deleteConversationTitle(conversation); return }; deleteConversationError.value = ''; conversationPendingDelete.value = conversation }
@@ -347,13 +345,14 @@ function applyConversationLifecycle(conversationId: string, event: ConversationE
       error.value = `Codex 本次连接中断：${sentenceReason}。原始消息已放回输入框，请确认后重试。`
     } else error.value = `Codex 本次连接中断：${reason}`
     lastSubmittedPrompt.value = null
-  } else if (event.type === 'turn.completed') lastSubmittedPrompt.value = null
+  } else if (event.type === 'turn.completed' || event.type === 'turn.interrupted') lastSubmittedPrompt.value = null
   conversations.value = conversations.value.map(item => item.id === conversationId ? {
     ...item,
     status: event.type === 'turn.started' ? 'running'
       : event.type === 'approval.requested' || event.type === 'question.requested' ? 'awaiting_approval'
         : event.type === 'turn.failed' ? 'failed'
-          : event.type === 'turn.completed' ? 'completed' : item.status,
+          : event.type === 'turn.interrupted' ? 'idle'
+            : event.type === 'turn.completed' ? 'completed' : item.status,
   } : item)
   if (selectedConversation.value?.id === conversationId) selectedConversation.value = conversations.value.find(item => item.id === conversationId) ?? selectedConversation.value
 }
