@@ -12,13 +12,22 @@ function git(cwd: string, args: string[]) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
+function initRepository(cwd: string, branch: string): void {
+  git(cwd, ['init'])
+  git(cwd, ['checkout', '-b', branch])
+}
+
+function currentBranch(cwd: string): string {
+  return git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+}
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cody-demand-'))
   for (const entry of ['services', 'docs', 'specs', 'worktrees']) mkdirSync(join(root, entry))
   for (const name of ['repo1', 'repo2']) {
     const repo = join(root, 'services', name)
     mkdirSync(repo)
-    git(repo, ['init', '-b', 'main'])
+    initRepository(repo, 'main')
     git(repo, ['config', 'user.email', 'test@example.com'])
     git(repo, ['config', 'user.name', 'Test'])
     writeFileSync(join(repo, 'README.md'), `# ${name}\n`)
@@ -35,7 +44,7 @@ function fixture() {
 describe('demand worktree construction', () => {
   it('keeps a root Git Workspace clean after creating CodyWork-owned Demand worktrees', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-root-demand-'))
-    git(root, ['init', '-b', 'main'])
+    initRepository(root, 'main')
     git(root, ['config', 'user.email', 'test@example.com'])
     git(root, ['config', 'user.name', 'Test'])
     writeFileSync(join(root, 'README.md'), '# root repository\n')
@@ -56,7 +65,7 @@ describe('demand worktree construction', () => {
     expect(git(root, ['status', '--porcelain=v1'])).toBe('')
     expect(readFileSync(excludePath, 'utf8')).toContain('# existing local rules\n.local-only\n')
     expect(readFileSync(excludePath, 'utf8')).toContain('# CodyWork-managed Demand worktrees\n/worktrees/\n')
-    expect(git(join(root, 'worktrees', 'codex__runtime-diagnostics', 'services', root.split('/').at(-1)!), ['branch', '--show-current'])).toBe('codex/runtime-diagnostics')
+    expect(currentBranch(join(root, 'worktrees', 'codex__runtime-diagnostics', 'services', root.split('/').at(-1)!))).toBe('codex/runtime-diagnostics')
     expect(listRepositories(db, workspace)[0]?.dirty).toBe(0)
     db.close()
     rmSync(root, { recursive: true, force: true })
@@ -68,8 +77,8 @@ describe('demand worktree construction', () => {
     const result = createDemand(db, workspace, { name: 'Coupon rule', repositoryIds: repositories.map(repository => repository.id) })
     expect(result.demand.worktreeKey).toBe('coupon-rule')
     expect(listDemands(db, workspace)[0]?.repositories).toHaveLength(2)
-    expect(git(join(root, 'services', 'repo1'), ['branch', '--show-current'])).toBe('main')
-    expect(git(join(root, 'worktrees', 'coupon-rule', 'services', 'repo1'), ['branch', '--show-current'])).toBe('coupon-rule')
+    expect(currentBranch(join(root, 'services', 'repo1'))).toBe('main')
+    expect(currentBranch(join(root, 'worktrees', 'coupon-rule', 'services', 'repo1'))).toBe('coupon-rule')
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
@@ -106,7 +115,7 @@ describe('demand worktree construction', () => {
     const { root, db, workspace } = fixture()
     const impostor = join(root, 'worktrees', 'impostor', 'services', 'repo1')
     mkdirSync(impostor, { recursive: true })
-    git(impostor, ['init', '-b', 'feature/impostor'])
+    initRepository(impostor, 'feature/impostor')
     git(impostor, ['config', 'user.email', 'test@example.com'])
     git(impostor, ['config', 'user.name', 'Test'])
     writeFileSync(join(impostor, 'README.md'), '# unrelated\n')
@@ -120,7 +129,7 @@ describe('demand worktree construction', () => {
   it('rejects an empty repository selection before mutating the filesystem', () => {
     const { root, db, workspace } = fixture()
     expect(() => createDemand(db, workspace, { name: 'No repo', repositoryIds: [] })).toThrow('至少选择一个 Repo')
-    expect(git(join(root, 'services', 'repo1'), ['branch', '--show-current'])).toBe('main')
+    expect(currentBranch(join(root, 'services', 'repo1'))).toBe('main')
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
@@ -173,7 +182,7 @@ describe('demand worktree construction', () => {
     const demand = createDemand(db, workspace, { name: 'Attach later', repositoryIds: [repo1.id] })
     const updated = addRepositoryToDemand(db, workspace, demand.demand.id, added.id)!
     expect(updated?.repositories.map(repository => repository.name)).toEqual(['repo1', 'repo3'])
-    expect(git(join(root, 'worktrees', 'attach-later', 'services', 'repo3'), ['branch', '--show-current'])).toBe('attach-later')
+    expect(currentBranch(join(root, 'worktrees', 'attach-later', 'services', 'repo3'))).toBe('attach-later')
     expect(readFileSync(join(root, 'worktrees', 'attach-later', 'docs', 'context.md'), 'utf8')).toContain('- repo3:')
     db.close()
     rmSync(root, { recursive: true, force: true })

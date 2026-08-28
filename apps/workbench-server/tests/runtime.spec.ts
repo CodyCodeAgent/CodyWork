@@ -88,6 +88,12 @@ describe('generic runtime protocol', () => {
     expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'user.completed', 'tool.completed', 'assistant.completed', 'turn.completed'])
     expect(nativeHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
 
+    await expect(runtime.sendTurn({
+      conversation,
+      prompt: 'SKILL_ORDER',
+      settings: { skills: [{ name: 'e2e-sample', path: '/skills/e2e-sample/SKILL.md' }] },
+    })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
+
     await runtime.sendCommand({ conversation, prompt: '/plan on' })
     const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL' })
     expect(planResult.finalText).toBe('CODEX_FIXTURE_REAL')
