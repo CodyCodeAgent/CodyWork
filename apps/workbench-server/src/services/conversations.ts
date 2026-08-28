@@ -43,6 +43,18 @@ export interface AvailableNativeThread extends NativeThreadSummary {
 
 type Listener = (event: ConversationEvent) => void
 
+type ConversationSendSettings = {
+  model?: string
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  skills?: string[]
+}
+
+type RuntimeTurnSettings = {
+  model?: string
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  skills?: Array<{ name: string; path: string }>
+}
+
 type DemandContext = {
   id: string
   name: string
@@ -274,14 +286,26 @@ export class ConversationService {
     return this.runtime.getComposerOptions(this.contextFor(demand, 'workspace-write'))
   }
 
-  async send(workspaceId: string, conversationId: string, prompt: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'; skills?: string[] }): Promise<{ accepted: true; turnId: string }> {
+  async send(workspaceId: string, conversationId: string, prompt: string, mode: 'queue' | 'steer' = 'queue', settings?: ConversationSendSettings): Promise<{ accepted: true; turnId: string }> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
     const text = prompt.trim()
     if (!text) throw new Error('消息不能为空')
     const turnId = `turn-${randomUUID()}`
     const requestedSkills = (settings?.skills ?? []).filter(skill => typeof skill === 'string' && skill.trim()).map(skill => skill.trim()).slice(0, 20)
-    const promptWithSkills = requestedSkills.length ? `Use these explicitly selected Workspace Skills when relevant: ${requestedSkills.map(skill => `$${skill}`).join(', ')}.\n\n${text}` : text
+    const context = this.contexts.get(conversationId)
+    if (!context) throw new Error('会话 Runtime 上下文不可用')
+    const skillsByName = new Map(context.instructionBundle.skills.map(skill => [skill.name, skill]))
+    const selectedSkills = requestedSkills.map(name => {
+      const skill = skillsByName.get(name)
+      if (!skill) throw new Error(`Skill 不存在或不可用于当前 Workspace：${name}`)
+      return { name: skill.name, path: skill.path }
+    })
+    const runtimeSettings: RuntimeTurnSettings = {
+      ...(settings?.model ? { model: settings.model } : {}),
+      ...(settings?.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
+      ...(selectedSkills.length ? { skills: selectedSkills } : {}),
+    }
     if (text === '/plan' || text === '/plan on' || text === '/plan off' || text === '/plan approve' || text === '/plan reject') {
       await this.runtime.sendCommand?.({ conversation: this.handleFor(row), prompt: text, mode })
       const current = parseJson(row.plan_json) as { active?: boolean } | null
@@ -301,7 +325,7 @@ export class ConversationService {
       return { accepted: true, turnId }
     }
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
-    const run = () => this.runTurn(row, promptWithSkills, turnId, settings)
+    const run = () => this.runTurn(row, text, turnId, mode, runtimeSettings)
     const previous = this.turnChains.get(conversationId) ?? Promise.resolve()
     const scheduled = mode === 'queue' ? previous.catch(() => undefined).then(run) : run()
     this.turnChains.set(conversationId, scheduled)
@@ -374,24 +398,23 @@ export class ConversationService {
     return { deleted: true }
   }
 
-  private async runTurn(row: ConversationRow, prompt: string, turnId: string, settings?: { model?: string; reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' }): Promise<void> {
-    const mode = row.permission_mode
+  private async runTurn(row: ConversationRow, prompt: string, turnId: string, submissionMode: 'queue' | 'steer', settings?: RuntimeTurnSettings): Promise<void> {
     try {
-      await this.sendRuntimeTurn(row, prompt, settings)
+      await this.sendRuntimeTurn(row, prompt, submissionMode, settings)
       const current = this.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(row.id) as { status?: string } | undefined
       if (current?.status !== 'idle') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), row.id)
     } catch (error) {
       this.fail(row.id, row.provider, turnId, error instanceof Error ? error : new Error(String(error)))
     }
     this.onTurnFinished?.(row.workspace_id)
-    void mode
   }
 
-  private async sendRuntimeTurn(row: ConversationRow, prompt: string, settings?: { model?: string; reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' }): Promise<void> {
+  private async sendRuntimeTurn(row: ConversationRow, prompt: string, submissionMode: 'queue' | 'steer', settings?: RuntimeTurnSettings): Promise<void> {
     const send = async (): Promise<void> => {
       await this.runtime.sendTurn({
         conversation: this.handleFor(row),
         prompt,
+        mode: submissionMode,
         ...(settings ? { settings } : {}),
         onEvent: event => this.appendRuntimeEvent(event),
       })

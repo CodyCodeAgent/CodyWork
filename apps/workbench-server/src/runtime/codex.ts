@@ -48,8 +48,11 @@ function workspaceCheck(path: string): WorkspaceCheckResult {
   return { status: 'ready', present: [path], missing: [], message: 'Codex App Server uses the CodyWork Workspace' }
 }
 
-function approvalPolicy(mode: RuntimePermissionMode): 'never' | 'on-request' {
-  return mode === 'yolo' || mode === 'read-only' ? 'never' : 'on-request'
+function approvalPolicy(mode: RuntimePermissionMode): 'never' | 'untrusted' {
+  // `on-request` lets the model decide whether to ask and therefore does not
+  // guarantee a prompt for destructive shell commands. Workspace-write uses
+  // Codex's untrusted-command gate; CodyWork's broker still makes the decision.
+  return mode === 'yolo' || mode === 'read-only' ? 'never' : 'untrusted'
 }
 
 function sandboxPolicy(context: RuntimeContext, mode: RuntimePermissionMode): TurnInput['sandboxPolicy'] {
@@ -155,7 +158,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   async getManifest(): Promise<RuntimeManifest> {
     return {
-      provider: this.provider, runtimeVersion: 'cody-web-core/0.6.1', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
+      provider: this.provider, runtimeVersion: 'cody-web-core/0.6.3', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
       streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: true,
       readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'allowlist', approval: 'runtime',
       workspaceInitialize: true, workspaceRepair: false, goals: true, plans: true, questions: true,
@@ -246,7 +249,10 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
     const events: RuntimeEvent[] = []
     const unsubscribe = this.listen(session.handle.id, event => { events.push(event); request.onEvent?.(event) })
     const turn: TurnInput = {
-      input: [{ type: 'text', text: request.prompt, text_elements: [] }],
+      input: [
+        { type: 'text', text: request.prompt, text_elements: [] },
+        ...(request.settings?.skills ?? []).map(skill => ({ type: 'skill' as const, name: skill.name, path: skill.path })),
+      ],
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       runtimeWorkspaceRoots: session.context.effectivePolicy.writableRoots,
@@ -280,7 +286,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   private async ensureRuntime(context: RuntimeContext): Promise<CodexSessionManager> {
     if (this.manager) return this.manager
-    this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.1' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
+    this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
     const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
       const session = this.sessions.get(binding.id)
       if (!session) return { action: 'deny', reason: 'CodyWork session is not attached.' }

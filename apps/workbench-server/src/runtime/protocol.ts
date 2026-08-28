@@ -124,6 +124,8 @@ export interface SendTurnRequest {
   settings?: {
     model?: string
     reasoningEffort?: ReasoningEffort
+    /** Provider-native structured skill inputs; never concatenate these into user text. */
+    skills?: Array<{ name: string; path: string }>
   }
   onEvent?: (event: RuntimeEvent) => void
 }

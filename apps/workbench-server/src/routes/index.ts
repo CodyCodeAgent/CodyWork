@@ -80,6 +80,22 @@ export interface AppContext {
   dashboards?: DashboardCache
 }
 
+export function normalizeRepositoryInput(body: Record<string, unknown>): {
+  source: 'git' | 'folder'
+  url?: string
+  path?: string
+  name?: string
+} {
+  const rawType = body.source
+  if (rawType !== 'folder' && rawType !== 'git') throw new Error('Repo source 必须是 folder 或 git')
+  return {
+    source: rawType,
+    ...(typeof body.url === 'string' ? { url: body.url } : {}),
+    ...(typeof body.path === 'string' ? { path: body.path } : {}),
+    ...(typeof body.name === 'string' ? { name: body.name } : {}),
+  }
+}
+
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:3211', 'http://localhost:3211'])
 const publicOrigin = process.env.CODYWORK_PUBLIC_ORIGIN?.trim()
 if (publicOrigin) ALLOWED_ORIGINS.add(publicOrigin)
@@ -471,15 +487,7 @@ function buildRoutes(ctx: AppContext) {
 
   add('POST', '/api/workspaces/:id/repositories', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    const sourceValue = c.body.source
-    const source = sourceValue && typeof sourceValue === 'object' ? sourceValue as Record<string, unknown> : c.body
-    const type = source.type === 'folder' ? 'folder' : 'git'
-    const repository = addRepository(ctx.db, row, {
-      source: type,
-      ...(typeof source.url === 'string' ? { url: source.url } : {}),
-      ...(typeof source.path === 'string' ? { path: source.path } : {}),
-      ...(typeof source.name === 'string' ? { name: source.name } : typeof c.body.name === 'string' ? { name: c.body.name } : {}),
-    })
+    const repository = addRepository(ctx.db, row, normalizeRepositoryInput(c.body))
     void dashboardCache(ctx).refresh(row)
     return { id: repository.id, name: repository.name, path: repository.baseline_path, originUrl: repository.origin_url, defaultRef: repository.default_ref, syncStatus: repository.sync_status, dirty: Boolean(repository.dirty) }
   })
