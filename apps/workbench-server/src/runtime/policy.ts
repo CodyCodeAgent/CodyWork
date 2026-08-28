@@ -13,8 +13,9 @@ import type {
 const hash = (value: string): string => createHash('sha256').update(value).digest('hex')
 
 // The App Server rejects instructions above 1 MiB. Keep a margin for its own
-// generated policy/developer instructions and never inline every SKILL.md: the
-// workspace remains readable, so Codex can load a selected skill from disk.
+// generated policy/developer instructions. Skills are intentionally absent from
+// this default payload: CodyWork exposes them in the composer and adds only the
+// user-selected skills to an individual turn.
 const MAX_SYSTEM_INSTRUCTIONS_CHARS = 800_000
 const MAX_NON_SKILL_SOURCE_CHARS = 120_000
 
@@ -58,7 +59,7 @@ function clipped(value: string, limit: number): string {
   return `${value.slice(0, Math.max(0, limit - 96))}\n\n[内容已截断；请在对应 Workspace 文件中读取完整内容。]`
 }
 
-function instructionText(sources: RuntimeInstructionSource[], skills: InstructionBundle['skills']): string {
+function instructionText(sources: RuntimeInstructionSource[]): string {
   const sections: string[] = []
   let remaining = MAX_SYSTEM_INSTRUCTIONS_CHARS
   for (const item of sources) {
@@ -75,10 +76,6 @@ function instructionText(sources: RuntimeInstructionSource[], skills: Instructio
     }
   }
 
-  if (skills.length && remaining > 0) {
-    const catalog = `## Workspace skills\n\nAvailable skills are listed below. Their full SKILL.md files are intentionally not inlined; read the relevant file from the Workspace when a skill is selected or needed.\n\n${skills.map(skill => `- ${skill.name}: ${skill.path}`).join('\n')}`
-    sections.push(clipped(catalog, remaining))
-  }
   return sections.join('\n\n')
 }
 
@@ -120,7 +117,7 @@ export function resolveInstructionBundle(input: InstructionBundleInput): Instruc
     const content = readFileSync(skill.path, 'utf8')
     sources.push({ kind: 'skill', path: skill.path, label: `skill:${skill.name}`, sha256: skill.sha256, content })
   }
-  const systemInstructions = instructionText(sources, skills)
+  const systemInstructions = instructionText(sources)
   return {
     systemInstructions,
     sources,

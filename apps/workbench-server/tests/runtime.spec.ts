@@ -19,8 +19,8 @@ describe('generic runtime protocol', () => {
     const bundle = resolveInstructionBundle({ workspacePath: root })
     expect(bundle.sources.map(source => source.kind)).toEqual(['charter', 'workspace', 'skill'])
     expect(bundle.skills[0]?.name).toBe('csr')
-    expect(bundle.systemInstructions).toContain('## Workspace skills')
-    expect(bundle.systemInstructions).toContain('csr:')
+    expect(bundle.systemInstructions).not.toContain('## Workspace skills')
+    expect(bundle.systemInstructions).not.toContain('csr:')
     const policy = resolveEffectivePolicy({ workspacePath: root, writableRoots: [join(root, 'worktrees', 'coupon', 'docs')] })
     expect(policy.shell).toBe('disabled')
     expect(policy.writableRoots[0]).toContain('worktrees/coupon/docs')
@@ -30,14 +30,14 @@ describe('generic runtime protocol', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('keeps App Server instructions below its payload limit while retaining a skill catalog', () => {
+  it('keeps App Server instructions below its payload limit without adding a skill catalog', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-instruction-limit-'))
     mkdirSync(join(root, '.agents', 'skills', 'large'), { recursive: true })
     writeFileSync(join(root, '.agents', 'skills', 'large', 'SKILL.md'), `# Large skill\n${'x'.repeat(1_200_000)}`)
     const bundle = resolveInstructionBundle({ workspacePath: root })
     expect(bundle.sources.find(source => source.kind === 'skill')?.content.length).toBeGreaterThan(1_000_000)
     expect(bundle.systemInstructions.length).toBeLessThan(800_000)
-    expect(bundle.systemInstructions).toContain('large:')
+    expect(bundle.systemInstructions).not.toContain('large:')
     expect(bundle.systemInstructions).not.toContain('x'.repeat(10_000))
     rmSync(root, { recursive: true, force: true })
   })
