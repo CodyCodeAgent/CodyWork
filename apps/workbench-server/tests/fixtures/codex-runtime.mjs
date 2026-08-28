@@ -10,9 +10,10 @@ function notify(method, params) { write({ method, params }) }
 function emitTurn(prompt) {
   const turnId = `turn-${++turnSequence}`
   const itemId = `item-${turnSequence}`
-  notify('turn/started', { turn: { id: turnId } })
+  const threadId = 'native-fixture-thread'
+  notify('turn/started', { threadId, turnId, turn: { id: turnId } })
   if (prompt.includes('APPROVAL')) {
-    write({ id: 900 + turnSequence, method: 'item/commandExecution/requestApproval', params: { approvalId: `approval-${turnSequence}`, reason: 'fixture approval', command: ['touch', 'fixture.txt'], cwd: process.cwd() } })
+    write({ id: 900 + turnSequence, method: 'item/commandExecution/requestApproval', params: { threadId, turnId, itemId, approvalId: `approval-${turnSequence}`, reason: 'fixture approval', command: ['touch', 'fixture.txt'], cwd: process.cwd() } })
     return
   }
   if (prompt.includes('QUESTION')) {
@@ -20,17 +21,24 @@ function emitTurn(prompt) {
     return
   }
   const text = prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
-  notify('item/agentMessage/delta', { itemId, delta: text.slice(0, 5) })
-  notify('item/agentMessage/delta', { itemId, delta: text.slice(5) })
-  notify('item/completed', { item: { id: itemId, type: 'agentMessage', text } })
-  notify('turn/completed', { turn: { id: turnId }, status: 'completed' })
+  notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(0, 5) })
+  notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(5) })
+  notify('item/completed', { threadId, turnId, item: { id: itemId, type: 'agentMessage', text } })
+  notify('turn/completed', { threadId, turnId, turn: { id: turnId, status: 'completed' } })
 }
 
 rl.on('line', line => {
   let message
   try { message = JSON.parse(line) } catch { return }
   if (message.method === 'initialize') write({ id: message.id, result: { serverInfo: { name: 'codex-fixture', version: '1' } } })
-  else if (message.method === 'thread/start') write({ id: message.id, result: { thread: { id: 'native-fixture-thread' } } })
+  else if (message.method === 'thread/start') {
+    const serialized = JSON.stringify(message.params)
+    if (serialized.includes('readOnlyAccess') || serialized.includes('persistExtendedHistory')) {
+      write({ id: message.id, error: { code: -32602, message: 'legacy Codex fields are forbidden' } })
+    } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length === 0) {
+      write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
+    } else write({ id: message.id, result: { thread: { id: 'native-fixture-thread' } } })
+  }
   else if (message.method === 'thread/resume') write({ id: message.id, result: { thread: { id: message.params?.threadId ?? 'native-fixture-thread' } } })
   else if (message.method === 'thread/read') write({ id: message.id, result: { thread: { id: message.params?.threadId, turns: [{ id: 'turn-history', status: 'completed', items: [
     { id: 'user-history', type: 'userMessage', content: [{ type: 'text', text: 'historical prompt' }] },
@@ -46,8 +54,20 @@ rl.on('line', line => {
     goal = { objective: '', status: 'complete' }
     write({ id: message.id, result: {} }); notify('thread/goal/cleared', { threadId: message.params?.threadId })
   } else if (message.method === 'turn/start') {
-    write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
     const prompt = String(message.params?.input?.[0]?.text ?? '')
+    const policy = message.params?.sandboxPolicy
+    const invalidWritePolicy = !prompt.includes('EXPECT_READ_ONLY') && (
+      policy?.type !== 'workspaceWrite'
+      || !Array.isArray(policy?.writableRoots)
+      || policy.writableRoots.length === 0
+      || Object.hasOwn(policy, 'readOnlyAccess')
+    )
+    const invalidReadPolicy = prompt.includes('EXPECT_READ_ONLY') && (policy?.type !== 'readOnly' || policy?.networkAccess !== false)
+    if (invalidWritePolicy || invalidReadPolicy) {
+      write({ id: message.id, error: { code: -32602, message: 'invalid current Codex sandbox policy' } })
+      return
+    }
+    write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
     if (prompt.includes('DISCONNECT')) setTimeout(() => process.exit(23), 5)
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(prompt), 5)
     else setTimeout(() => emitTurn(prompt), 5)
@@ -56,13 +76,13 @@ rl.on('line', line => {
     write({ id: message.id, result: { decision: 'approved' } })
     const turnId = `turn-${turnSequence}`
     const itemId = `item-${turnSequence}`
-    notify('item/agentMessage/delta', { itemId, delta: 'APPROVED' })
-    notify('item/completed', { item: { id: itemId, type: 'agentMessage', text: 'APPROVED' } })
-    notify('turn/completed', { turn: { id: turnId }, status: 'completed' })
+    notify('item/agentMessage/delta', { threadId: 'native-fixture-thread', turnId, itemId, delta: 'APPROVED' })
+    notify('item/completed', { threadId: 'native-fixture-thread', turnId, item: { id: itemId, type: 'agentMessage', text: 'APPROVED' } })
+    notify('turn/completed', { threadId: 'native-fixture-thread', turnId, turn: { id: turnId, status: 'completed' } })
   } else if (message.id === 800 + turnSequence) {
     write({ id: message.id, result: {} })
     const turnId = `turn-${turnSequence}`
-    notify('item/agentMessage/delta', { itemId: `item-${turnSequence}`, delta: 'ANSWERED' })
-    notify('turn/completed', { turn: { id: turnId }, status: 'completed' })
+    notify('item/agentMessage/delta', { threadId: 'native-fixture-thread', turnId, itemId: `item-${turnSequence}`, delta: 'ANSWERED' })
+    notify('turn/completed', { threadId: 'native-fixture-thread', turnId, turn: { id: turnId, status: 'completed' } })
   }
 })

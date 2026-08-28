@@ -56,7 +56,7 @@ describe('generic runtime protocol', () => {
     })
     const result = await runtime.sendTurn({ conversation, prompt: 'hello' })
     expect(result.finalText).toContain('hello')
-    expect(result.events.map(event => event.type)).toEqual(['turn.started', 'item.started', 'message.delta', 'item.completed', 'turn.completed'])
+    expect(result.events.map(event => event.type)).toEqual(['user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
     await runtime.close()
   })
 
@@ -82,10 +82,10 @@ describe('generic runtime protocol', () => {
     const conversation = await runtime.createConversation({ context })
     const result = await runtime.sendTurn({ conversation, prompt: 'hello' })
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
-    expect(result.events.map(event => event.type)).toContain('message.delta')
+    expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
     const nativeHistory = await runtime.readConversation({ conversation, context })
-    expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'message.user', 'tool.completed', 'message.completed', 'turn.completed'])
+    expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'user.completed', 'tool.completed', 'assistant.completed', 'turn.completed'])
     expect(nativeHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
 
     await runtime.sendCommand({ conversation, prompt: '/plan on' })
@@ -110,6 +110,8 @@ describe('generic runtime protocol', () => {
     const questionResult = await questionTurn
     expect(questionEvents).toContain('question.requested')
     expect(questionResult.events.some(event => event.type === 'turn.completed')).toBe(true)
+    await runtime.setPermission(conversation, 'read-only')
+    await expect(runtime.sendTurn({ conversation, prompt: 'EXPECT_READ_ONLY' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
     await runtime.setPermission(conversation, 'yolo')
 
     await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT' })).rejects.toThrow('exited')
