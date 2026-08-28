@@ -105,6 +105,21 @@ export function buildTimeline(events: ConversationEvent[]): TimelineEntry[] {
   const timeline: TimelineEntry[] = []
 
   for (const event of events) {
+    if (event.type === 'turn.failed' || event.type === 'runtime.disconnected') {
+      const error = String(event.data.error ?? (event.type === 'runtime.disconnected' ? 'Codex Runtime 连接已断开，请重新发送。' : 'Codex 未能完成本次回复。'))
+      timeline.push({
+        id: `runtime:${event.id}`,
+        kind: 'tool',
+        tool: {
+          kind: 'command',
+          title: event.type === 'runtime.disconnected' ? 'Codex Runtime 已断开' : '本次回复失败',
+          status: 'failed',
+          summary: error,
+          details: [],
+        },
+      })
+      continue
+    }
     if (event.type === 'reasoning.delta') {
       const text = String(event.data.text ?? '')
       if (text) timeline.push({ id: `reasoning:${event.itemId ?? event.id}`, kind: 'reasoning', text })

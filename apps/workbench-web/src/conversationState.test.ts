@@ -57,6 +57,17 @@ describe('conversation state', () => {
     ])
   })
 
+  it('renders runtime failures instead of leaving a sent message without feedback', () => {
+    const timeline = buildTimeline([
+      { id: 'failed-turn', type: 'turn.failed', conversationId: 'c', provider: 'codex', data: { error: 'Codex conversation runtime is not available' } },
+      { id: 'disconnected', type: 'runtime.disconnected', conversationId: 'c', provider: 'codex', data: { error: 'Codex App Server exited (1)' } },
+    ])
+    expect(timeline).toEqual([
+      expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ title: '本次回复失败', status: 'failed', summary: 'Codex conversation runtime is not available' }) }),
+      expect.objectContaining({ kind: 'tool', tool: expect.objectContaining({ title: 'Codex Runtime 已断开', status: 'failed', summary: 'Codex App Server exited (1)' }) }),
+    ])
+  })
+
   it('groups file changes within a turn and keeps different turns separate', () => {
     const events = [
       { id: '1', type: 'diff.updated', conversationId: 'c', turnId: 'turn-a', itemId: 'file-a', provider: 'codex', data: { item: { type: 'fileChange', changes: [{ path: 'src/a.ts', diff: '-old\n+new' }], status: 'completed' } } },

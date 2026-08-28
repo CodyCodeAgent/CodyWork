@@ -60,6 +60,15 @@ function parseJson(value: string | null): unknown {
   try { return JSON.parse(value) as unknown } catch { return null }
 }
 
+/**
+ * A shared App Server process can exit independently of CodyWork's durable
+ * conversation metadata. This error is raised before `turn/start` is sent, so
+ * re-attaching the native Thread and retrying the same request is safe.
+ */
+function isMissingRuntimeAttachment(error: Error): boolean {
+  return error.message.includes('Codex conversation runtime is not available')
+}
+
 function toView(row: ConversationRow): ConversationView {
   return {
     id: row.id,
@@ -349,20 +358,9 @@ export class ConversationService {
   }
 
   private async runTurn(row: ConversationRow, prompt: string, turnId: string, settings?: { model?: string; reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' }): Promise<void> {
-    const handle = this.handles.get(row.id)
-    const context = this.contexts.get(row.id)
-    if (!handle || !context) {
-      this.fail(row.id, row.provider, turnId, new Error('会话运行上下文已失效，请重新创建会话'))
-      return
-    }
     const mode = row.permission_mode
     try {
-      await this.runtime.sendTurn({
-        conversation: handle,
-        prompt,
-        ...(settings ? { settings } : {}),
-        onEvent: event => this.appendRuntimeEvent(event),
-      })
+      await this.sendRuntimeTurn(row, prompt, settings)
       const current = this.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(row.id) as { status?: string } | undefined
       if (current?.status !== 'idle') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), row.id)
     } catch (error) {
@@ -370,6 +368,33 @@ export class ConversationService {
     }
     this.onTurnFinished?.(row.workspace_id)
     void mode
+  }
+
+  private async sendRuntimeTurn(row: ConversationRow, prompt: string, settings?: { model?: string; reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' }): Promise<void> {
+    const send = async (): Promise<void> => {
+      await this.runtime.sendTurn({
+        conversation: this.handleFor(row),
+        prompt,
+        ...(settings ? { settings } : {}),
+        onEvent: event => this.appendRuntimeEvent(event),
+      })
+    }
+    try {
+      await send()
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause))
+      if (!isMissingRuntimeAttachment(error)) throw error
+
+      // The App Server owns transient thread attachments. Drop only CodyWork's
+      // stale in-memory references, resume the provider-native Thread under the
+      // existing Demand policy, then retry the request once. Do not retry any
+      // other failure: a remote turn may already have started in that case.
+      this.handles.delete(row.id)
+      this.contexts.delete(row.id)
+      await this.ensureHandle(row)
+      this.audit(row.id, 'runtime.resumed', { reason: 'runtime attachment was unavailable' })
+      await send()
+    }
   }
 
   private appendRuntimeEvent(event: RuntimeEvent): void {
@@ -380,8 +405,13 @@ export class ConversationService {
   }
 
   private fail(conversationId: string, provider: string, turnId: string, error: Error): void {
+    const message = error.message.slice(0, 1_000)
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), conversationId)
-    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', provider, turnId, timestamp: nowIso(), data: { error: error.message } })
+    // This is a bounded diagnostic audit, not a mirrored event history. Native
+    // Codex Thread history remains the only durable message timeline.
+    this.audit(conversationId, 'turn.failed', { turnId, error: message })
+    console.warn('[CodyWork] Codex turn failed', { conversationId, turnId, error: message })
+    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', provider, turnId, timestamp: nowIso(), data: { error: message } })
   }
 
   private publish(event: ConversationEvent): void {

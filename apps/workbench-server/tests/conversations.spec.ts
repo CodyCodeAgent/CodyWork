@@ -100,4 +100,35 @@ describe('conversation websocket control plane', () => {
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
+
+  it('resumes a stale Runtime attachment once before sending the same turn', async () => {
+    class RecoveringRuntime extends TestRuntimeAdapter {
+      private failOnce = true
+
+      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+        if (this.failOnce) {
+          this.failOnce = false
+          throw new Error('Codex conversation runtime is not available')
+        }
+        return super.sendTurn(request)
+      }
+    }
+
+    const test = await fixture()
+    const runtime = new RecoveringRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Reconnect safely')
+
+    await conversations.send(test.workspaceId, conversation.id, 'continue after reconnect')
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('completed')
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'message.delta', data: expect.objectContaining({ text: expect.stringContaining('continue after reconnect') }) }),
+    ]))
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toEqual({ action: 'runtime.resumed' })
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
 })
