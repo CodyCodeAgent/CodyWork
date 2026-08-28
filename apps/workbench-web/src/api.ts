@@ -1,3 +1,5 @@
+import type { CodexEvent } from '@codycodeagent/cody-web-core/conversation'
+
 export interface WorkspaceSummary {
   entries: string[]
   isGit: boolean
@@ -149,15 +151,10 @@ export interface Conversation {
   updatedAt: string
 }
 
-export interface ConversationEvent {
-  id: string
-  type: string
+export interface ConversationEvent extends CodexEvent {
   conversationId: string
-  turnId?: string
-  itemId?: string
   provider: string
   timestamp?: string
-  data: Record<string, unknown>
 }
 
 export interface AvailableNativeThread {

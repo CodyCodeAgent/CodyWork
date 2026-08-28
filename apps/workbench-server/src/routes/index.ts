@@ -144,18 +144,15 @@ function getWorkspace(ctx: AppContext, id: string): WorkspaceRow {
 
 function normalizeSource(body: Record<string, unknown>): WorkspaceSource {
   const source = body.source
-  if (typeof source === 'object' && source !== null) {
-    const value = source as Record<string, unknown>
-    const normalized: WorkspaceSource = {
-      type: value.type === 'git' ? 'git' : 'folder',
-    }
-    if (typeof value.path === 'string') normalized.path = value.path
-    if (typeof value.url === 'string') normalized.url = value.url
-    if (typeof value.destination === 'string') normalized.destination = value.destination
-    return normalized
+  if (typeof source !== 'object' || source === null) throw new Error('缺少 Workspace source')
+  const value = source as Record<string, unknown>
+  const normalized: WorkspaceSource = {
+    type: value.type === 'git' ? 'git' : 'folder',
   }
-  // Keep one small compatibility path for callers from the previous prototype.
-  return typeof body.path === 'string' ? { type: 'folder', path: body.path } : { type: 'folder' }
+  if (typeof value.path === 'string') normalized.path = value.path
+  if (typeof value.url === 'string') normalized.url = value.url
+  if (typeof value.destination === 'string') normalized.destination = value.destination
+  return normalized
 }
 
 function setupStage(job: WorkspaceSetupJob, stage: WorkspaceSetupStage, progress: number, title: string) {
@@ -174,7 +171,7 @@ function appendSetupEvent(job: WorkspaceSetupJob, event: RuntimeEvent) {
   const text = setupEventText(event)
   if (text) job.events.push({ type: event.type, timestamp: event.timestamp, text })
   if (job.events.length > 120) job.events.splice(0, job.events.length - 120)
-  if (event.type === 'message.delta' || event.type === 'message.completed') {
+  if (event.type === 'assistant.delta' || event.type === 'assistant.completed') {
     const chunk = typeof event.data.text === 'string' ? event.data.text : ''
     if (chunk) job.response = `${job.response}${chunk}`.slice(-24_000)
   }

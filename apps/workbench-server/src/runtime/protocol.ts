@@ -1,9 +1,6 @@
-/**
- * Vendor-neutral contract between CodyWork and an Agent Runtime.
- *
- * Codex App Server is the only shipping adapter. Product code depends on
- * these types and standard events so the boundary stays explicit.
- */
+import type { CodexEvent, CodexEventType } from '@codycodeagent/cody-web-core/conversation'
+
+/** CodyWork product policy and metadata around the shared Codex runtime. */
 
 export const WORKBENCH_RUNTIME_PROTOCOL_VERSION = '1.0'
 
@@ -93,40 +90,12 @@ export interface ConversationHandle {
   createdAt: string
 }
 
-export type RuntimeEventType =
-  | 'conversation.created'
-  | 'conversation.bound'
-  | 'turn.started'
-  | 'turn.completed'
-  | 'turn.failed'
-  | 'message.delta'
-  | 'message.user'
-  | 'message.completed'
-  | 'reasoning.delta'
-  | 'tool.started'
-  | 'tool.completed'
-  | 'item.started'
-  | 'item.completed'
-  | 'approval.requested'
-  | 'approval.resolved'
-  | 'question.requested'
-  | 'question.resolved'
-  | 'goal.updated'
-  | 'plan.updated'
-  | 'file.changed'
-  | 'diff.updated'
-  | 'runtime.disconnected'
-  | 'provider.extension'
+export type RuntimeEventType = CodexEventType
 
-export interface RuntimeEvent {
-  id: string
-  type: RuntimeEventType
+export interface RuntimeEvent extends CodexEvent {
   conversationId: string
-  turnId?: string
-  itemId?: string
   provider: string
   timestamp: string
-  data: Record<string, unknown>
 }
 
 export interface CreateConversationRequest {

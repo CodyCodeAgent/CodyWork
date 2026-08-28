@@ -66,14 +66,16 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
     const turnId = `turn-${randomUUID()}`
     const events: RuntimeEvent[] = []
     const emit = (type: RuntimeEvent['type'], data: Record<string, unknown>): void => {
-      const event: RuntimeEvent = { id: randomUUID(), type, conversationId: request.conversation.id, turnId, provider: this.provider, timestamp: nowIso(), data }
+      const timestamp = nowIso()
+      const event: RuntimeEvent = { id: randomUUID(), type, conversationId: request.conversation.id, threadId: request.conversation.nativeId, turnId, provider: this.provider, timestamp, atIso: timestamp, data }
       events.push(event); request.onEvent?.(event)
     }
+    emit('user.completed', { text: request.prompt, optimistic: true })
     emit('turn.started', { prompt: request.prompt })
-    emit('item.started', { name: 'csr.policy.check', status: 'running' })
+    emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
     const context = this.contexts.get(request.conversation.id)
-    emit('message.delta', { text: `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}` })
-    emit('item.completed', { name: 'csr.policy.check', status: 'completed' })
+    emit('assistant.delta', { text: `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}` })
+    emit('tool.completed', { tool: { kind: 'command', title: 'Policy check', status: 'completed', summary: 'csr.policy.check', details: [] } })
     emit('turn.completed', { status: 'completed' })
     this.history.set(request.conversation.nativeId, events)
     return { conversation: request.conversation, finalText: `Test runtime received: ${request.prompt}`, events }

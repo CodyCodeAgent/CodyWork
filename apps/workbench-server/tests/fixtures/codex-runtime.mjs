@@ -10,9 +10,10 @@ function notify(method, params) { write({ method, params }) }
 function emitTurn(prompt) {
   const turnId = `turn-${++turnSequence}`
   const itemId = `item-${turnSequence}`
-  notify('turn/started', { turn: { id: turnId } })
+  const threadId = 'native-fixture-thread'
+  notify('turn/started', { threadId, turnId, turn: { id: turnId } })
   if (prompt.includes('APPROVAL')) {
-    write({ id: 900 + turnSequence, method: 'item/commandExecution/requestApproval', params: { approvalId: `approval-${turnSequence}`, reason: 'fixture approval', command: ['touch', 'fixture.txt'], cwd: process.cwd() } })
+    write({ id: 900 + turnSequence, method: 'item/commandExecution/requestApproval', params: { threadId, turnId, itemId, approvalId: `approval-${turnSequence}`, reason: 'fixture approval', command: ['touch', 'fixture.txt'], cwd: process.cwd() } })
     return
   }
   if (prompt.includes('QUESTION')) {
@@ -20,10 +21,10 @@ function emitTurn(prompt) {
     return
   }
   const text = prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
-  notify('item/agentMessage/delta', { itemId, delta: text.slice(0, 5) })
-  notify('item/agentMessage/delta', { itemId, delta: text.slice(5) })
-  notify('item/completed', { item: { id: itemId, type: 'agentMessage', text } })
-  notify('turn/completed', { turn: { id: turnId }, status: 'completed' })
+  notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(0, 5) })
+  notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(5) })
+  notify('item/completed', { threadId, turnId, item: { id: itemId, type: 'agentMessage', text } })
+  notify('turn/completed', { threadId, turnId, turn: { id: turnId, status: 'completed' } })
 }
 
 rl.on('line', line => {
@@ -56,13 +57,13 @@ rl.on('line', line => {
     write({ id: message.id, result: { decision: 'approved' } })
     const turnId = `turn-${turnSequence}`
     const itemId = `item-${turnSequence}`
-    notify('item/agentMessage/delta', { itemId, delta: 'APPROVED' })
-    notify('item/completed', { item: { id: itemId, type: 'agentMessage', text: 'APPROVED' } })
-    notify('turn/completed', { turn: { id: turnId }, status: 'completed' })
+    notify('item/agentMessage/delta', { threadId: 'native-fixture-thread', turnId, itemId, delta: 'APPROVED' })
+    notify('item/completed', { threadId: 'native-fixture-thread', turnId, item: { id: itemId, type: 'agentMessage', text: 'APPROVED' } })
+    notify('turn/completed', { threadId: 'native-fixture-thread', turnId, turn: { id: turnId, status: 'completed' } })
   } else if (message.id === 800 + turnSequence) {
     write({ id: message.id, result: {} })
     const turnId = `turn-${turnSequence}`
-    notify('item/agentMessage/delta', { itemId: `item-${turnSequence}`, delta: 'ANSWERED' })
-    notify('turn/completed', { turn: { id: turnId }, status: 'completed' })
+    notify('item/agentMessage/delta', { threadId: 'native-fixture-thread', turnId, itemId: `item-${turnSequence}`, delta: 'ANSWERED' })
+    notify('turn/completed', { threadId: 'native-fixture-thread', turnId, turn: { id: turnId, status: 'completed' } })
   }
 })

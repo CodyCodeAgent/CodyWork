@@ -90,9 +90,9 @@ describe('conversation websocket control plane', () => {
     await once(socket, 'open')
     await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })
     await new Promise(resolve => setTimeout(resolve, 50))
-    expect(events).toEqual(['message.user', 'turn.started', 'item.started', 'message.delta', 'item.completed', 'turn.completed'])
+    expect(events).toEqual(['user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
     const history = await (await fetch(`${base}/conversations/${first.data.id}/history`)).json() as { data: { events: { type: string }[] } }
-    expect(history.data.events.some(event => event.type === 'message.delta')).toBe(true)
+    expect(history.data.events.some(event => event.type === 'assistant.delta')).toBe(true)
     const deletion = await (await fetch(`${base}/conversations/${second.data.id}`, { method: 'DELETE' })).json() as { data: { deleted: boolean } }
     expect(deletion.data).toEqual({ deleted: true })
     socket.close()
@@ -124,7 +124,7 @@ describe('conversation websocket control plane', () => {
 
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('completed')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'message.delta', data: expect.objectContaining({ text: expect.stringContaining('continue after reconnect') }) }),
+      expect.objectContaining({ type: 'assistant.delta', data: expect.objectContaining({ text: expect.stringContaining('continue after reconnect') }) }),
     ]))
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toEqual({ action: 'runtime.resumed' })
 

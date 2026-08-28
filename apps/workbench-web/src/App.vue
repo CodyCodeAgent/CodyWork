@@ -54,12 +54,11 @@
           <section class="chat-main">
             <div v-if="selectedConversation?.goal?.objective" class="chat-toolbar"><span class="goal-chip">Goal · {{ selectedConversation.goal.objective }}</span></div>
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
-              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText"><template #empty><div v-if="!boundThreadNotice" class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
-              <article v-if="boundThreadNotice" class="bound-thread-note"><div><strong>已绑定已有 Thread</strong><code>{{ boundThreadNotice }}</code></div><p>后续消息会继续该 Thread 的上下文；所有新工具调用仍受当前 Demand 的 Worktree policy 限制。历史消息不会自动导入。</p></article>
+              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
               <article v-if="liveStatus" class="live-overlay-inline"><strong>{{ liveStatus }}</strong><span>{{ socketState === 'open' ? '实时更新中' : '等待恢复连接' }}</span></article>
             </div>
             <div class="composer">
-              <section v-if="pendingApproval" class="approval-takeover"><div class="approval-takeover-head"><strong>需要你的确认</strong><span>Agent 暂停等待</span></div><p>{{ String(pendingApproval.data.reason ?? 'Codex 请求执行一项受保护操作。') }}</p><code v-if="pendingApproval.data.command">{{ String(pendingApproval.data.command) }}</code><div class="approval-actions"><button class="btn primary" @click="resolveApproval('allowed-once')">允许一次</button><button class="btn" @click="resolveApproval('rejected')">拒绝</button></div></section>
+              <section v-if="pendingApproval" class="approval-takeover"><div class="approval-takeover-head"><strong>需要你的确认</strong><span>Agent 暂停等待</span></div><p>{{ approvalText }}</p><div class="approval-actions"><button class="btn primary" @click="resolveApproval('allowed-once')">允许一次</button><button class="btn" @click="resolveApproval('rejected')">拒绝</button></div></section>
               <section v-else-if="pendingQuestion" class="approval-takeover"><div class="approval-takeover-head"><strong>Agent 需要补充信息</strong><span>回答后继续</span></div><p>{{ questionText }}</p><div class="question-actions"><input v-model="questionAnswer" class="input" placeholder="输入回答…" @keyup.enter="resolveQuestion" /><button class="btn primary" :disabled="!questionAnswer.trim()" @click="resolveQuestion">提交回答</button></div></section>
               <template v-else><div class="composer-hint">{{ selectedConversation?.plan?.active ? 'Plan 模式：先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :placeholder="isRunning ? (selectedSubmitMode === 'guide' ? '描述引导…（Enter 发送给当前 Turn）' : '描述下一步…（Enter 排队，Shift + Enter 换行）') : '描述你希望完成的事情…（Enter 发送，Shift + Enter 换行）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'guide' ? 'guide' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @send="sendMessage" @stop="interrupt" /></template>
             </div>
@@ -80,8 +79,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { type ConversationMessage } from '@codycodeagent/cody-web-core/conversation'
-import { CodyComposer, CodyConversation, type CodyComposerOption, type CodyConversationEntry } from '@codycodeagent/cody-web-core/vue'
+import { createConversationState, type ConversationState } from '@codycodeagent/cody-web-core/conversation'
+import { createConversationController, createReconnectingConversationSocket, type ConversationController, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
+import { CodyComposer, CodyConversation, conversationEntriesFromState, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
 import {
   api,
@@ -101,29 +101,23 @@ import {
   type WorkspaceSkill,
   type WorkspaceSource,
 } from './api'
-import { buildMessages, buildTimeline, findPendingEvent, type TimelineEntry } from './conversationState'
-
-type RenderedEntry = { id: string; kind: 'message'; message: ConversationMessage } | TimelineEntry
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 type ThreadProject = { cwd: string; name: string; count: number; relatedToDemand: boolean }
 type HistoryMode = 'push' | 'replace' | 'none'
 
-const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null); const events = ref<ConversationEvent[]>([])
+const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null); const conversationState = ref<ConversationState>(createConversationState())
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<'queue' | 'guide'>('queue'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showDirectoryPicker = ref(false); const directoryListing = ref<DirectoryListing | null>(null); const directoryLoading = ref(false); const directoryError = ref(''); const showCreateDemand = ref(false); const creating = ref(false); const importingWorktrees = ref(false); const workspaceMode = ref<'folder' | 'git'>('folder'); const workspaceName = ref(''); const workspacePath = ref(''); const workspaceGitUrl = ref(''); const useAiWorkspaceSetup = ref(true); const workspaceSetupJob = ref<WorkspaceSetupJob | null>(null); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const questionAnswer = ref(''); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 const lastSubmittedPrompt = ref<string | null>(null)
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
-let socket: WebSocket | null = null; let reconnectTimer: number | null = null; let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null; let followBottom = true
+let conversationController: ConversationController | null = null; let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null; let followBottom = true
 const socketLabel = computed(() => socketState.value === 'open' ? '实时连接' : socketState.value === 'connecting' ? '连接中…' : '已断开')
-const isRunning = computed(() => selectedConversation.value?.status === 'running')
-const pendingApproval = computed(() => pendingOf('approval.requested', 'approval.resolved'))
-const pendingQuestion = computed(() => pendingOf('question.requested', 'question.resolved'))
-const questionText = computed(() => { const questions = pendingQuestion.value?.data.questions; return Array.isArray(questions) ? String((questions[0] as { question?: unknown; detail?: unknown } | undefined)?.question ?? (questions[0] as { detail?: unknown } | undefined)?.detail ?? '请回答 Agent 的问题。') : '请回答 Agent 的问题。' })
-const messages = computed<ConversationMessage[]>(() => buildMessages(events.value))
-const timeline = computed<TimelineEntry[]>(() => buildTimeline(events.value))
-const renderedEntries = computed<RenderedEntry[]>(() => { const items: RenderedEntry[] = []; for (const message of messages.value) items.push({ id: message.id, kind: 'message', message }); for (const entry of timeline.value) items.push(entry); return items })
-const sharedConversationEntries = computed<CodyConversationEntry[]>(() => renderedEntries.value.map((entry) => entry.kind === 'message' ? { id: entry.id, kind: 'message', message: entry.message } : entry.kind === 'tool' ? { id: entry.id, kind: 'tool', tool: entry.tool } : { id: entry.id, kind: 'reasoning', text: entry.text }))
+const isRunning = computed(() => Boolean(conversationState.value.activeTurnId))
+const pendingApproval = computed(() => conversationState.value.pendingRequests.find(request => request.kind === 'approval') ?? null)
+const pendingQuestion = computed(() => conversationState.value.pendingRequests.find(request => request.kind === 'question') ?? null)
+const questionText = computed(() => requestText(pendingQuestion.value?.params, '请回答 Agent 的问题。'))
+const approvalText = computed(() => requestText(pendingApproval.value?.params, 'Codex 请求执行一项受保护操作。'))
+const sharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
 const liveStatus = computed(() => isRunning.value ? (pendingApproval.value ? '等待审批' : pendingQuestion.value ? '等待回答' : 'Codex 正在工作') : '')
-const boundThreadNotice = computed(() => { const event = events.value.find(item => item.type === 'conversation.bound'); const nativeId = event?.data.nativeId; return typeof nativeId === 'string' ? nativeId : '' })
 const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.trim().toLowerCase(); return query ? knowledge.value.filter(doc => `${doc.name} ${doc.relativePath}`.toLowerCase().includes(query)) : knowledge.value })
 const dashboardCacheLabel = computed(() => { const cache = dashboard.value?.cache; if (!cache) return ''; if (cache.state === 'refreshing') return cache.generatedAt ? '后台刷新中' : '首次统计中'; if (cache.state === 'empty') return '等待首次统计'; if (cache.state === 'stale') return `更新于 ${cache.ageSeconds ?? 0}s 前`; return `更新于 ${cache.ageSeconds ?? 0}s 前` })
 const threadProjects = computed<ThreadProject[]>(() => { const projects = new Map<string, ThreadProject>(); const demandPaths = selectedDemand.value?.repositories.map(repo => repo.worktreePath) ?? []; for (const thread of nativeThreads.value) { const cwd = thread.cwd?.trim() || '未记录项目路径'; const existing = projects.get(cwd); const relatedToDemand = demandPaths.some(path => path === cwd || path.startsWith(`${cwd}/`) || cwd.startsWith(`${path}/`)); projects.set(cwd, existing ? { ...existing, count: existing.count + 1 } : { cwd, name: projectName(cwd), count: 1, relatedToDemand }); } return [...projects.values()].sort((left, right) => Number(right.relatedToDemand) - Number(left.relatedToDemand) || right.count - left.count || left.name.localeCompare(right.name)) })
@@ -144,7 +138,7 @@ const composerReasoningOptions = computed<CodyComposerOption[]>(() => [{ value: 
 const composerPermissionOptions = computed<CodyComposerOption[]>(() => [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
 const composerSkills = computed<CodyComposerOption[]>(() => skills.value.filter(skill => skill.status === 'available').map(skill => ({ value: skill.name, label: skill.name, description: skill.description })))
 
-function pendingOf(requestType: string, resolvedType: string): ConversationEvent | null { return findPendingEvent(events.value, requestType, resolvedType) }
+function requestText(value: unknown, fallback: string): string { const row = value && typeof value === 'object' ? value as Record<string, unknown> : {}; const direct = row.reason ?? row.question ?? row.command; if (typeof direct === 'string' && direct.trim()) return direct; const questions = Array.isArray(row.questions) ? row.questions : []; const first = questions[0] && typeof questions[0] === 'object' ? questions[0] as Record<string, unknown> : {}; const text = first.question ?? first.detail; return typeof text === 'string' && text.trim() ? text : fallback }
 function statusLabel(status: Conversation['status']): string { return status === 'running' ? '执行中' : status === 'awaiting_approval' ? '待确认' : status === 'failed' ? '失败' : status === 'disconnected' ? '已断开' : '已完成' }
 function canDeleteConversation(conversation: Conversation): boolean { return conversations.value.length > 1 && conversation.status !== 'running' && conversation.status !== 'awaiting_approval' }
 function deleteConversationTitle(conversation: Conversation): string { return conversation.status === 'running' || conversation.status === 'awaiting_approval' ? '执行中或待确认的会话不能删除' : conversations.value.length <= 1 ? '每个 Demand 至少保留一个会话' : '删除会话' }
@@ -162,10 +156,9 @@ async function deleteConversation(): Promise<void> {
     conversationPendingDelete.value = null
     if (selectedConversation.value?.id === target.id) {
       selectedConversation.value = null
-      events.value = []
+      conversationState.value = createConversationState()
       draft.value = ''
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
-      socket?.close()
+      conversationController?.dispose()
       await openConversation(remaining[0]!)
     }
   } catch (cause) { deleteConversationError.value = cause instanceof Error ? cause.message : String(cause) } finally { deletingConversation.value = false }
@@ -197,10 +190,9 @@ function demandUrl(demand: Demand): string {
   return url.toString()
 }
 function clearConversationState(): void {
-  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
-  socket?.close()
+  conversationController?.dispose()
   selectedConversation.value = null
-  events.value = []
+  conversationState.value = createConversationState()
 }
 async function loadWorkspaces(): Promise<void> { loading.value = true; error.value = ''; try { workspaces.value = await api.listWorkspaces(); const route = routeParams(); const active = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active, { demandId: route.demandId, history: 'replace' }) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
 function goTo(page: Exclude<Page, 'chat'>): void {
@@ -268,15 +260,14 @@ async function deleteWorkspace(): Promise<void> {
     workspaces.value = remaining
     workspacePendingDelete.value = null
     if (!removedActiveWorkspace) return
-    if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
-    socket?.close()
+    conversationController?.dispose()
     workspace.value = null
     demands.value = []
     repositories.value = []
     conversations.value = []
     selectedDemand.value = null
     selectedConversation.value = null
-    events.value = []
+    conversationState.value = createConversationState()
     dashboard.value = null
     const next = remaining.find(item => item.active) ?? remaining[0]
     if (next) await selectWorkspace(next)
@@ -352,10 +343,56 @@ async function restoreRoute(): Promise<void> {
   clearConversationState()
   activePage.value = 'dashboard'
 }
-function uniqueEvents(items: ConversationEvent[]): ConversationEvent[] { const seen = new Set<string>(); return items.filter(event => !seen.has(event.id) && (seen.add(event.id), true)) }
-async function refreshNativeHistory(conversationId: string): Promise<void> { if (!workspace.value || selectedConversation.value?.id !== conversationId) return; const history = await api.conversationHistory(workspace.value.id, conversationId); events.value = uniqueEvents(history.events) }
-async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; events.value = []; lastSubmittedPrompt.value = null; error.value = ''; await refreshNativeHistory(conversation.id); connect(conversation.id); await scrollToBottom() }
-function connect(conversationId: string): void { socket?.close(); if (reconnectTimer !== null) window.clearTimeout(reconnectTimer); const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'; const host = window.location.host || '127.0.0.1:3211'; socketState.value = 'connecting'; const nextSocket = new WebSocket(`${protocol}://${host}/api/workspaces/${encodeURIComponent(workspace.value!.id)}/conversations/${encodeURIComponent(conversationId)}/events`); socket = nextSocket; nextSocket.onopen = () => { if (socket !== nextSocket) return; socketState.value = 'open'; nextSocket.send(JSON.stringify({ type: 'ping' })) }; nextSocket.onmessage = (message) => { if (socket !== nextSocket) return; try { const payload = JSON.parse(String(message.data)) as { type?: string; event?: ConversationEvent }; const event = payload.event; if (payload.type !== 'event' || !event || events.value.some(item => item.id === event.id)) return; events.value = [...events.value, event]; if (event.type === 'turn.failed') { const reason = String(event.data.error ?? 'Codex 未能完成本次回复。'); if (lastSubmittedPrompt.value && !draft.value.trim()) { draft.value = lastSubmittedPrompt.value; error.value = `Codex 本次连接中断：${reason}。原始消息已放回输入框，请确认后重试。` } else error.value = `Codex 本次连接中断：${reason}`; lastSubmittedPrompt.value = null } else if (event.type === 'turn.completed') lastSubmittedPrompt.value = null; conversations.value = conversations.value.map((item) => item.id === conversationId ? { ...item, status: event.type === 'turn.started' ? 'running' : event.type === 'approval.requested' || event.type === 'question.requested' ? 'awaiting_approval' : event.type === 'turn.failed' ? 'failed' : event.type === 'turn.completed' ? 'completed' : item.status } : item); if (selectedConversation.value?.id === conversationId) selectedConversation.value = conversations.value.find((item) => item.id === conversationId) ?? selectedConversation.value; void scrollToBottom() } catch { error.value = '收到无法识别的 Runtime 事件' } }; nextSocket.onclose = () => { if (socket !== nextSocket || selectedConversation.value?.id !== conversationId) return; socketState.value = 'closed'; reconnectTimer = window.setTimeout(() => { void refreshNativeHistory(conversationId).catch(() => undefined).finally(() => connect(conversationId)) }, 1_000) }; nextSocket.onerror = () => { if (socket === nextSocket) socketState.value = 'closed' } }
+function applyConversationLifecycle(conversationId: string, event: ConversationEvent): void {
+  if (event.type === 'turn.failed') {
+    const reason = String(event.data.error ?? 'Codex 未能完成本次回复。')
+    if (lastSubmittedPrompt.value && !draft.value.trim()) {
+      draft.value = lastSubmittedPrompt.value
+      error.value = `Codex 本次连接中断：${reason}。原始消息已放回输入框，请确认后重试。`
+    } else error.value = `Codex 本次连接中断：${reason}`
+    lastSubmittedPrompt.value = null
+  } else if (event.type === 'turn.completed') lastSubmittedPrompt.value = null
+  conversations.value = conversations.value.map(item => item.id === conversationId ? {
+    ...item,
+    status: event.type === 'turn.started' ? 'running'
+      : event.type === 'approval.requested' || event.type === 'question.requested' ? 'awaiting_approval'
+        : event.type === 'turn.failed' ? 'failed'
+          : event.type === 'turn.completed' ? 'completed' : item.status,
+  } : item)
+  if (selectedConversation.value?.id === conversationId) selectedConversation.value = conversations.value.find(item => item.id === conversationId) ?? selectedConversation.value
+}
+async function connect(conversation: Conversation): Promise<void> {
+  conversationController?.dispose()
+  conversationState.value = createConversationState(conversation.nativeId)
+  const workspaceId = workspace.value!.id
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const host = window.location.host || '127.0.0.1:3211'
+  conversationController = createConversationController(conversation.nativeId, {
+    read: async () => (await api.conversationHistory(workspaceId, conversation.id)).events,
+    subscribe: (_threadId, listener) => {
+      const realtime = createReconnectingConversationSocket({
+        url: `${protocol}://${host}/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversation.id)}/events`,
+        parse(data): ConversationSubscriptionEvent | null {
+          try {
+            const payload = JSON.parse(String(data)) as { type?: string; event?: ConversationEvent }
+            if (payload.type !== 'event' || !payload.event) return null
+            applyConversationLifecycle(conversation.id, payload.event)
+            return { type: 'event', event: payload.event }
+          } catch { error.value = '收到无法识别的 Runtime 事件'; return null }
+        },
+        listener(value) {
+          socketState.value = value.type === 'connected' ? 'open' : value.type === 'disconnected' ? 'closed' : socketState.value
+          listener(value)
+        },
+      })
+      socketState.value = 'connecting'
+      return () => realtime.close()
+    },
+  })
+  conversationController.subscribe(state => { conversationState.value = state })
+  await conversationController.start()
+}
+async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; lastSubmittedPrompt.value = null; error.value = ''; await connect(conversation); await scrollToBottom() }
 async function browseDirectories(path?: string): Promise<void> { directoryLoading.value = true; directoryError.value = ''; try { directoryListing.value = await api.listDirectories(path) } catch (cause) { directoryError.value = cause instanceof Error ? cause.message : String(cause) } finally { directoryLoading.value = false } }
 async function openDirectoryPicker(): Promise<void> { showDirectoryPicker.value = true; await browseDirectories(workspacePath.value.trim() || undefined) }
 function useSelectedDirectory(): void { if (!directoryListing.value) return; workspacePath.value = directoryListing.value.current; showDirectoryPicker.value = false }
@@ -410,10 +447,10 @@ async function copyDemandLink(demand: Demand): Promise<void> {
     copiedDemandLinkTimer = window.setTimeout(() => { copiedDemandLink.value = '' }, 1_800)
   } catch { error.value = '复制需求链接失败，请从浏览器地址栏复制。' }
 }
-async function resolveApproval(outcome: 'allowed-once' | 'rejected'): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingApproval.value) return; await api.resolveApproval(workspace.value.id, selectedConversation.value.id, String(pendingApproval.value.data.approvalId ?? pendingApproval.value.data.requestId ?? ''), outcome) }
-async function resolveQuestion(): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingQuestion.value || !questionAnswer.value.trim()) return; await api.answerQuestion(workspace.value.id, selectedConversation.value.id, String(pendingQuestion.value.data.requestId ?? ''), questionAnswer.value.trim()); questionAnswer.value = '' }
-watch(() => events.value.length, () => { void scrollToBottom() })
+async function resolveApproval(outcome: 'allowed-once' | 'rejected'): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingApproval.value) return; await api.resolveApproval(workspace.value.id, selectedConversation.value.id, pendingApproval.value.id, outcome) }
+async function resolveQuestion(): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingQuestion.value || !questionAnswer.value.trim()) return; await api.answerQuestion(workspace.value.id, selectedConversation.value.id, pendingQuestion.value.id, questionAnswer.value.trim()); questionAnswer.value = '' }
+watch(() => conversationState.value.appliedEventIds.length, () => { void scrollToBottom() })
 let dashboardTimer: number | null = null
 onMounted(() => { void loadWorkspaces(); window.addEventListener('popstate', () => { void restoreRoute() }); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
-onBeforeUnmount(() => { socket?.close(); if (reconnectTimer !== null) window.clearTimeout(reconnectTimer); if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
+onBeforeUnmount(() => { conversationController?.dispose(); if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
 </script>

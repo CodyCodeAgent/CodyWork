@@ -165,10 +165,12 @@ export class ConversationService {
         events.push({
           id: `audit:turn.failed:${String(failure?.id ?? row.updated_at)}`,
           type: 'turn.failed',
+          threadId: row.native_id,
           conversationId,
           ...(typeof record.turnId === 'string' ? { turnId: record.turnId } : {}),
           provider: row.provider,
           timestamp: failure?.created_at ?? row.updated_at,
+          atIso: failure?.created_at ?? row.updated_at,
           data: { error: typeof record.error === 'string' ? record.error : 'Codex 未能完成本次回复。' },
         })
       }
@@ -280,7 +282,6 @@ export class ConversationService {
     const turnId = `turn-${randomUUID()}`
     const requestedSkills = (settings?.skills ?? []).filter(skill => typeof skill === 'string' && skill.trim()).map(skill => skill.trim()).slice(0, 20)
     const promptWithSkills = requestedSkills.length ? `Use these explicitly selected Workspace Skills when relevant: ${requestedSkills.map(skill => `$${skill}`).join(', ')}.\n\n${text}` : text
-    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'message.user', provider: row.provider, turnId, timestamp: nowIso(), data: { text, mode, ...(settings?.model ? { model: settings.model } : {}), ...(settings?.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}), ...(requestedSkills.length ? { skills: requestedSkills } : {}) } })
     if (text === '/plan' || text === '/plan on' || text === '/plan off' || text === '/plan approve' || text === '/plan reject') {
       await this.runtime.sendCommand?.({ conversation: this.handleFor(row), prompt: text, mode })
       const current = parseJson(row.plan_json) as { active?: boolean } | null
@@ -288,7 +289,6 @@ export class ConversationService {
       const status = text === '/plan approve' ? 'approved' : text === '/plan reject' ? 'rejected' : active ? 'planning' : 'inactive'
       const plan = { active, status, updatedAt: nowIso() }
       this.db.db.prepare('UPDATE conversations SET plan_json = ?, status = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(plan), 'idle', nowIso(), conversationId)
-      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'plan.updated', provider: row.provider, turnId, timestamp: nowIso(), data: plan })
       return { accepted: true, turnId }
     }
     if (text.startsWith('/goal')) {
@@ -298,7 +298,6 @@ export class ConversationService {
       const commandStatus = objective === 'pause' || objective === '暂停' ? 'paused' : objective === 'resume' || objective === '恢复' ? 'active' : objective === 'complete' || objective === '完成' ? 'completed' : objective === 'clear' || objective === '清除' ? 'cleared' : null
       const goal = commandStatus === 'cleared' ? null : commandStatus ? { objective: current?.objective ?? '', status: commandStatus, updatedAt: nowIso() } : objective ? { objective, status: 'active', updatedAt: nowIso() } : null
       this.db.db.prepare('UPDATE conversations SET goal_json = ?, status = ?, updated_at = ? WHERE id = ?').run(goal ? JSON.stringify(goal) : null, 'idle', nowIso(), conversationId)
-      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'goal.updated', provider: row.provider, turnId, timestamp: nowIso(), data: goal ? { ...goal } : { status: 'cleared' } })
       return { accepted: true, turnId }
     }
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
@@ -340,7 +339,6 @@ export class ConversationService {
     await this.ensureHandle(row)
     await this.runtime.respondApproval?.(this.handleFor(row), approvalId, outcome)
     this.audit(conversationId, 'approval.resolved', { approvalId, outcome })
-    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'approval.resolved', provider: row.provider, timestamp: nowIso(), data: { approvalId, outcome } })
   }
 
   async answer(workspaceId: string, conversationId: string, requestId: string, answer: unknown): Promise<void> {
@@ -348,7 +346,6 @@ export class ConversationService {
     await this.ensureHandle(row)
     await this.runtime.respondQuestion?.(this.handleFor(row), requestId, answer)
     this.audit(conversationId, 'question.resolved', { requestId, answer })
-    this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'question.resolved', provider: row.provider, timestamp: nowIso(), data: { requestId, answer } })
   }
 
   rename(workspaceId: string, conversationId: string, title: string): ConversationView {
@@ -436,7 +433,11 @@ export class ConversationService {
     // Codex Thread history remains the only durable message timeline.
     this.audit(conversationId, 'turn.failed', { turnId, error: message })
     console.warn('[CodyWork] Codex turn failed', { conversationId, turnId, error: message })
-    if (!alreadyPublished) this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', provider, turnId, timestamp: nowIso(), data: { error: message } })
+    if (!alreadyPublished) {
+      const row = this.db.db.prepare('SELECT native_id FROM conversations WHERE id = ?').get(conversationId) as { native_id?: string } | undefined
+      const timestamp = nowIso()
+      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', threadId: row?.native_id ?? '', provider, turnId, timestamp, atIso: timestamp, data: { error: message } })
+    }
   }
 
   private publish(event: ConversationEvent): void {
