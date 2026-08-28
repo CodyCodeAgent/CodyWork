@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import WebSocket from 'ws'
@@ -28,6 +28,36 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('passes clean text, structured selected skills and steer mode to the Runtime', async () => {
+    class CapturingRuntime extends TestRuntimeAdapter {
+      requests: Parameters<TestRuntimeAdapter['sendTurn']>[0][] = []
+      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+        this.requests.push(request)
+        return super.sendTurn(request)
+      }
+    }
+    const test = await fixture()
+    const skillPath = join(test.root, '.agents', 'skills', 'e2e-sample', 'SKILL.md')
+    mkdirSync(join(test.root, '.agents', 'skills', 'e2e-sample'), { recursive: true })
+    writeFileSync(skillPath, '# E2E sample')
+    const runtime = new CapturingRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Structured skill')
+
+    await conversations.send(test.workspaceId, conversation.id, 'Keep this user message clean', 'steer', { skills: ['e2e-sample'] })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(runtime.requests[0]).toMatchObject({
+      prompt: 'Keep this user message clean',
+      mode: 'steer',
+      settings: { skills: [{ name: 'e2e-sample', path: realpathSync(skillPath) }] },
+    })
+    await expect(conversations.send(test.workspaceId, conversation.id, 'unknown skill', 'queue', { skills: ['missing'] })).rejects.toThrow('Skill 不存在')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('binds an existing provider thread to one Demand and persists the policy-scoped mapping', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
