@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { WorkbenchDb, RepositoryRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
 
 function runGit(cwd: string, args: string[]): string {
@@ -19,6 +19,32 @@ function isGitRepository(path: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * A single-project Workspace may itself be the baseline Git repository. CodyWork
+ * keeps Demand worktrees below `<workspace>/worktrees`, so hide only that
+ * CodyWork-owned container through Git's local metadata. This deliberately does
+ * not edit the project's tracked `.gitignore` or hide any business-code path.
+ */
+export function ensureCodyWorkControlPlaneIgnored(path: string): boolean {
+  if (!isGitRepository(path)) return false
+  try {
+    execFileSync('git', ['check-ignore', '--quiet', '--', 'worktrees/'], { cwd: path, stdio: 'ignore' })
+    return false
+  } catch {
+    // A non-zero exit means no existing ignore rule covers the container.
+  }
+
+  const excludeValue = runGit(path, ['rev-parse', '--git-path', 'info/exclude'])
+  const excludePath = isAbsolute(excludeValue) ? excludeValue : resolve(path, excludeValue)
+  const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : ''
+  const rule = '/worktrees/'
+  if (existing.split(/\r?\n/u).some(line => line.trim() === rule)) return false
+  mkdirSync(dirname(excludePath), { recursive: true })
+  const separator = existing.length === 0 || existing.endsWith('\n') ? '' : '\n'
+  writeFileSync(excludePath, `${existing}${separator}# CodyWork-managed Demand worktrees\n${rule}\n`, 'utf8')
+  return true
 }
 
 function repositoryOrigin(path: string): string | null {
@@ -63,7 +89,10 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
   // use CodyWork. It is a baseline only for a single-project Workspace. In a
   // normal CSR Workspace the root may also be a Git repository, but services/
   // remains the authoritative multi-repository inventory.
-  if (candidates.length === 0 && isGitRepository(workspace.path)) candidates.push({ name: basename(workspace.path), path: workspace.path })
+  if (candidates.length === 0 && isGitRepository(workspace.path)) {
+    ensureCodyWorkControlPlaneIgnored(workspace.path)
+    candidates.push({ name: basename(workspace.path), path: workspace.path })
+  }
   const seen = new Set<string>()
   const now = nowIso()
   // Reconciliation is authoritative for this scan. Mark prior inventory rows

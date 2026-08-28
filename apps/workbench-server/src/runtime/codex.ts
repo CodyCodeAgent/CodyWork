@@ -155,7 +155,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   async getManifest(): Promise<RuntimeManifest> {
     return {
-      provider: this.provider, runtimeVersion: 'cody-web-core/0.5.1', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
+      provider: this.provider, runtimeVersion: 'cody-web-core/0.6.0', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
       streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: true,
       readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'allowlist', approval: 'runtime',
       workspaceInitialize: true, workspaceRepair: false, goals: true, plans: true, questions: true,
@@ -280,7 +280,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   private async ensureRuntime(context: RuntimeContext): Promise<CodexSessionManager> {
     if (this.manager) return this.manager
-    this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.5.1' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
+    this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.0' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
     const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
       const session = this.sessions.get(binding.id)
       if (!session) return { action: 'deny', reason: 'CodyWork session is not attached.' }

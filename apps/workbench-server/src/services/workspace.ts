@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
 export interface WorkspaceSource {
@@ -61,13 +61,45 @@ function ensureDirectory(path: string): string {
   return canonical
 }
 
+function normalizedGitRemote(remote: string): string {
+  const value = remote.trim().replace(/\/+$/u, '').replace(/\.git$/iu, '')
+  const url = value.match(/^(?:https?|git|ssh):\/\/(?:[^@/]+@)?([^/]+)\/(.+)$/iu)
+  if (url) return `${url[1]!.toLowerCase()}/${url[2]!}`
+  const scp = value.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/u)
+  if (scp) return `${scp[1]!.toLowerCase()}/${scp[2]!}`
+  return value
+}
+
+function isGitRepositoryRoot(path: string): boolean {
+  try {
+    const root = execFileSync('git', ['-C', path, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    return realpathSync(root) === realpathSync(path)
+  } catch {
+    return false
+  }
+}
+
+function isReusableClone(path: string, source: string): boolean {
+  if (!isGitRepositoryRoot(path)) return false
+  try {
+    const origin = execFileSync('git', ['-C', path, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    return normalizedGitRemote(origin) === normalizedGitRemote(source)
+  } catch {
+    return false
+  }
+}
+
 function cloneWorkspace(url: string, destination: string): string {
   const source = url.trim()
   if (!source) throw new Error('Git 地址不能为空')
   const target = canonicalPath(destination)
   if (existsSync(target)) {
+    if (!statSync(target).isDirectory()) throw new Error(`clone 目标不是文件夹：${target}`)
     const entries = readdirSync(target)
-    if (entries.length > 0) throw new Error(`clone 目标不是空文件夹：${target}`)
+    if (entries.length > 0) {
+      if (isReusableClone(target, source)) return target
+      throw new Error(`clone 目标不是空文件夹，且不是同一 Git 仓库：${target}`)
+    }
   } else {
     mkdirSync(dirname(target), { recursive: true })
   }
@@ -137,6 +169,9 @@ export function checkWorkspace(path: string): WorkspaceCheck {
   const missing = REQUIRED_MARKER_GROUPS.filter(group => !group.alternatives.some(marker => entries.includes(marker))).map(group => group.label)
   if (entries.length === 0) {
     return { status: 'empty', present, missing, message: '空文件夹可以交给 Codex 初始化为 Workspace。' }
+  }
+  if (isGitRepositoryRoot(canonical)) {
+    return { status: 'ready', present, missing: [], message: '检测到 Workspace 根目录 Git 仓库，将直接采用；CSR 控制目录可按需补齐。' }
   }
   if (missing.length === 0) {
     return { status: 'ready', present, missing, message: 'Workspace 结构完整，将直接复用，不会重新创建。' }

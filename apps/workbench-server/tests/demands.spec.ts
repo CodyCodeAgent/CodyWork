@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../src/db/index.js'
 import { addRepositoryToDemand, createDemand, importExistingWorktrees, listDemands, reconcileDemandOperations } from '../src/services/demands.js'
 import { dashboardSnapshot } from '../src/services/dashboard.js'
@@ -33,6 +33,35 @@ function fixture() {
 }
 
 describe('demand worktree construction', () => {
+  it('keeps a root Git Workspace clean after creating CodyWork-owned Demand worktrees', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-root-demand-'))
+    git(root, ['init', '-b', 'main'])
+    git(root, ['config', 'user.email', 'test@example.com'])
+    git(root, ['config', 'user.name', 'Test'])
+    writeFileSync(join(root, 'README.md'), '# root repository\n')
+    git(root, ['add', '.'])
+    git(root, ['commit', '-m', 'initial'])
+    const excludePath = resolve(root, git(root, ['rev-parse', '--git-path', 'info/exclude']))
+    writeFileSync(excludePath, '# existing local rules\n.local-only\n')
+
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspace: WorkspaceRow = { id: makeId('ws'), name: 'root-repo', path: root, created_at: now, last_opened_at: now }
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)').run(workspace.id, workspace.name, workspace.path, workspace.created_at, workspace.last_opened_at)
+    const repositories = listRepositories(db, workspace)
+    expect(repositories).toMatchObject([{ baseline_path: root, dirty: 0 }])
+
+    createDemand(db, workspace, { name: 'Runtime diagnostics', branchName: 'codex/runtime-diagnostics', repositoryIds: [repositories[0]!.id] })
+
+    expect(git(root, ['status', '--porcelain=v1'])).toBe('')
+    expect(readFileSync(excludePath, 'utf8')).toContain('# existing local rules\n.local-only\n')
+    expect(readFileSync(excludePath, 'utf8')).toContain('# CodyWork-managed Demand worktrees\n/worktrees/\n')
+    expect(git(join(root, 'worktrees', 'codex__runtime-diagnostics', 'services', root.split('/').at(-1)!), ['branch', '--show-current'])).toBe('codex/runtime-diagnostics')
+    expect(listRepositories(db, workspace)[0]?.dirty).toBe(0)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('creates one demand directory with multiple linked worktrees and docs', () => {
     const { root, db, workspace } = fixture()
     const repositories = listRepositories(db, workspace)

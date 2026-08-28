@@ -54,7 +54,7 @@
           <section class="chat-main">
             <div v-if="selectedConversation?.goal?.objective" class="chat-toolbar"><span class="goal-chip">Goal · {{ selectedConversation.goal.objective }}</span></div>
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
-              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
+              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @resolve-approval="resolveTimelineApproval"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
               <article v-if="liveStatus" class="live-overlay-inline"><strong>{{ liveStatus }}</strong><span>{{ socketState === 'open' ? '实时更新中' : '等待恢复连接' }}</span></article>
             </div>
             <div class="composer">
@@ -448,6 +448,7 @@ async function copyDemandLink(demand: Demand): Promise<void> {
   } catch { error.value = '复制需求链接失败，请从浏览器地址栏复制。' }
 }
 async function resolveApproval(outcome: 'allowed-once' | 'rejected'): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingApproval.value) return; await api.resolveApproval(workspace.value.id, selectedConversation.value.id, pendingApproval.value.id, outcome) }
+async function resolveTimelineApproval(requestId: string, decision: 'accept' | 'decline'): Promise<void> { if (!workspace.value || !selectedConversation.value) return; await api.resolveApproval(workspace.value.id, selectedConversation.value.id, requestId, decision === 'accept' ? 'allowed-once' : 'rejected') }
 async function resolveQuestion(): Promise<void> { if (!workspace.value || !selectedConversation.value || !pendingQuestion.value || !questionAnswer.value.trim()) return; await api.answerQuestion(workspace.value.id, selectedConversation.value.id, pendingQuestion.value.id, questionAnswer.value.trim()); questionAnswer.value = '' }
 watch(() => conversationState.value.appliedEventIds.length, () => { void scrollToBottom() })
 let dashboardTimer: number | null = null
