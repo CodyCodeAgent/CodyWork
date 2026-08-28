@@ -341,9 +341,10 @@ async function restoreRoute(): Promise<void> {
 function applyConversationLifecycle(conversationId: string, event: ConversationEvent): void {
   if (event.type === 'turn.failed') {
     const reason = String(event.data.error ?? 'Codex 未能完成本次回复。')
+    const sentenceReason = reason.replace(/[。.!！?？]+$/u, '')
     if (lastSubmittedPrompt.value && !draft.value.trim()) {
       draft.value = lastSubmittedPrompt.value
-      error.value = `Codex 本次连接中断：${reason}。原始消息已放回输入框，请确认后重试。`
+      error.value = `Codex 本次连接中断：${sentenceReason}。原始消息已放回输入框，请确认后重试。`
     } else error.value = `Codex 本次连接中断：${reason}`
     lastSubmittedPrompt.value = null
   } else if (event.type === 'turn.completed') lastSubmittedPrompt.value = null
