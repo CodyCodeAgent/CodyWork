@@ -166,10 +166,11 @@ export class ConversationService {
 
   async history(workspaceId: string, conversationId: string): Promise<ConversationEvent[]> {
     const row = this.requireConversation(workspaceId, conversationId)
-    await this.ensureHandle(row)
     if (!this.runtime.readConversation) throw new Error('当前 Runtime 不支持读取原生 Thread 历史')
+    const demand = this.requireDemand(workspaceId, row.demand_id)
+    const context = this.contextFor(demand, row.permission_mode)
     try {
-      const events = await this.runtime.readConversation({ conversation: this.handleFor(row), context: this.contexts.get(conversationId)! })
+      const events = await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
       // Native Codex Thread history remains authoritative. Retain only the
       // current bounded failure diagnostic, so refresh does not make a visible
       // Runtime error turn back into an unexplained failed status.
@@ -257,13 +258,12 @@ export class ConversationService {
     }
     const context = this.contextFor(demand, 'workspace-write')
     const id = makeId('conversation')
-    const handle = await this.runtime.resumeConversation({ conversationId: id, nativeId, context })
     const now = nowIso()
     const row: ConversationRow = {
       id,
       demand_id: demand.id,
       workspace_id: workspaceId,
-      provider: handle.provider,
+      provider: this.runtime.provider,
       native_id: nativeId,
       title: input.title?.trim() || `已绑定 Thread ${nativeId.slice(0, 8)}`,
       status: 'idle',
@@ -277,8 +277,6 @@ export class ConversationService {
     }
     this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(row.id, row.demand_id, row.workspace_id, row.provider, row.native_id, row.title, row.status, row.permission_mode, row.goal_json, row.plan_json, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
-    this.handles.set(id, handle)
-    this.contexts.set(id, context)
     this.audit(id, 'conversation.bound', { nativeId, demandId: demand.id, policyHash: context.effectivePolicy.hash })
     return this.get(workspaceId, id)
   }
