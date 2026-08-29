@@ -17,6 +17,7 @@ import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/pol
 import type { RuntimeEvent } from '../runtime/protocol.js'
 import { listBrowsableDirectories } from '../services/directories.js'
 import { DashboardCache } from '../services/dashboardCache.js'
+import { createStaticAssetHandler } from '../http/staticAssets.js'
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
@@ -100,9 +101,21 @@ const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:3211', 'http://localhost:3211
 const publicOrigin = process.env.CODYWORK_PUBLIC_ORIGIN?.trim()
 if (publicOrigin) ALLOWED_ORIGINS.add(publicOrigin)
 
+export function isAllowedOrigin(origin: string, requestHost?: string): boolean {
+  if (ALLOWED_ORIGINS.has(origin)) return true
+  try {
+    const url = new URL(origin)
+    if (requestHost && url.host === requestHost) return true
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]')
+  } catch {
+    return false
+  }
+}
+
 function corsHeaders(req: IncomingMessage): Record<string, string> {
   const origin = req.headers.origin
-  return typeof origin === 'string' && ALLOWED_ORIGINS.has(origin)
+  return typeof origin === 'string' && isAllowedOrigin(origin, req.headers.host)
     ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' }
     : {}
 }
@@ -642,18 +655,28 @@ function match(pattern: string, pathname: string): Record<string, string> | null
   return params
 }
 
-export function startServer(ctx: AppContext, port: number) {
+export interface ServerOptions {
+  host: string
+  port: number
+  staticRoot?: string
+}
+
+export function startServer(ctx: AppContext, options: ServerOptions) {
   const routes = buildRoutes(ctx)
+  const serveStaticAsset = options.staticRoot ? createStaticAssetHandler(options.staticRoot) : null
   const server = createServer(async (req, res) => {
     const origin = req.headers.origin
-    if (typeof origin === 'string' && !ALLOWED_ORIGINS.has(origin)) return json(req, res, 403, { ok: false, error: 'origin not allowed' })
+    if (typeof origin === 'string' && !isAllowedOrigin(origin, req.headers.host)) return json(req, res, 403, { ok: false, error: 'origin not allowed' })
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', ...corsHeaders(req) })
       return res.end()
     }
     const url = new URL(req.url ?? '/', 'http://localhost')
     const route = routes.find(item => item.method === req.method && match(item.pattern, url.pathname) !== null)
-    if (!route) return json(req, res, 404, { ok: false, error: `not found: ${req.method} ${url.pathname}` })
+    if (!route) {
+      if (!url.pathname.startsWith('/api/') && serveStaticAsset && await serveStaticAsset(req, res, url.pathname)) return
+      return json(req, res, 404, { ok: false, error: `not found: ${req.method} ${url.pathname}` })
+    }
     const c: Ctx = { req, res, params: match(route.pattern, url.pathname) ?? {}, body: await readBody(req).catch(() => ({})), query: url.searchParams }
     try {
       const result = await route.handler(c)
@@ -685,6 +708,6 @@ export function startServer(ctx: AppContext, port: number) {
     })
     client.on('close', unsubscribe)
   })
-  server.listen(port, '127.0.0.1', () => console.log(`[codywork] server listening on http://127.0.0.1:${port}`))
+  server.listen(options.port, options.host, () => console.log(`[codywork] server listening on http://${options.host}:${options.port}`))
   return server
 }
