@@ -6,4 +6,5 @@ lib/
 .cody-workbench/
 .vite/
 .sessions/
+.runtime/
 website/
