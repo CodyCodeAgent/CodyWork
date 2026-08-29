@@ -81,17 +81,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   DEFAULT_VISIBLE_MESSAGE_COUNT,
   buildConversationScrollState,
-  createConversationState,
   hiddenMessageCount,
   nextVisibleMessageCount,
   shouldLockConversationToBottom,
   visibleMessageStartIndex,
   type ConversationScrollState,
-  type ConversationState,
 } from '@codycodeagent/cody-web-core/conversation'
 import { composerHasContent, resolveComposerSubmitMode, type ComposerSubmitMode } from '@codycodeagent/cody-web-core/composer'
-import { createConversationController, createReconnectingConversationSocket, type ConversationController, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
-import { CodyComposer, CodyConversation, conversationEntriesFromState, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
+import { createReconnectingConversationSocket, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
+import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
 import {
   api,
@@ -115,11 +113,12 @@ type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'cha
 type ThreadProject = { cwd: string; name: string; count: number; relatedToDemand: boolean }
 type HistoryMode = 'push' | 'replace' | 'none'
 
-const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null); const conversationState = ref<ConversationState>(createConversationState())
+const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
+const { state: conversationState, connect: connectConversationState, reset: resetConversationState } = useConversationController()
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showDirectoryPicker = ref(false); const directoryListing = ref<DirectoryListing | null>(null); const directoryLoading = ref(false); const directoryError = ref(''); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const workspaceMode = ref<'folder' | 'git'>('folder'); const workspaceName = ref(''); const workspacePath = ref(''); const workspaceGitUrl = ref(''); const useAiWorkspaceSetup = ref(true); const workspaceSetupJob = ref<WorkspaceSetupJob | null>(null); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 const lastSubmittedPrompt = ref<string | null>(null)
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
-let conversationController: ConversationController | null = null; let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
+let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
 const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
 const socketLabel = computed(() => socketState.value === 'open' ? '实时连接' : socketState.value === 'connecting' ? '连接中…' : '已断开')
@@ -168,9 +167,8 @@ async function deleteConversation(): Promise<void> {
     conversationPendingDelete.value = null
     if (selectedConversation.value?.id === target.id) {
       selectedConversation.value = null
-      conversationState.value = createConversationState()
+      resetConversationState()
       draft.value = ''
-      conversationController?.dispose()
       await openConversation(remaining[0]!)
     }
   } catch (cause) { deleteConversationError.value = cause instanceof Error ? cause.message : String(cause) } finally { deletingConversation.value = false }
@@ -230,9 +228,8 @@ function demandUrl(demand: Demand): string {
   return url.toString()
 }
 function clearConversationState(): void {
-  conversationController?.dispose()
   selectedConversation.value = null
-  conversationState.value = createConversationState()
+  resetConversationState()
 }
 async function loadWorkspaces(): Promise<void> { loading.value = true; error.value = ''; try { workspaces.value = await api.listWorkspaces(); const route = routeParams(); const active = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active, { demandId: route.demandId, history: 'replace' }) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
 function goTo(page: Exclude<Page, 'chat'>): void {
@@ -300,14 +297,13 @@ async function deleteWorkspace(): Promise<void> {
     workspaces.value = remaining
     workspacePendingDelete.value = null
     if (!removedActiveWorkspace) return
-    conversationController?.dispose()
     workspace.value = null
     demands.value = []
     repositories.value = []
     conversations.value = []
     selectedDemand.value = null
     selectedConversation.value = null
-    conversationState.value = createConversationState()
+    resetConversationState()
     dashboard.value = null
     const next = remaining.find(item => item.active) ?? remaining[0]
     if (next) await selectWorkspace(next)
@@ -404,14 +400,12 @@ function applyConversationLifecycle(conversationId: string, event: ConversationE
   if (selectedConversation.value?.id === conversationId) selectedConversation.value = conversations.value.find(item => item.id === conversationId) ?? selectedConversation.value
 }
 async function connect(conversation: Conversation): Promise<void> {
-  conversationController?.dispose()
-  conversationState.value = createConversationState(conversation.nativeId)
   visibleConversationEntryCount.value = DEFAULT_VISIBLE_MESSAGE_COUNT
   conversationScrollState.value = null
   const workspaceId = workspace.value!.id
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const host = window.location.host || '127.0.0.1:3211'
-  conversationController = createConversationController(conversation.nativeId, {
+  await connectConversationState(conversation.nativeId, {
     read: async () => (await api.conversationHistory(workspaceId, conversation.id)).events,
     subscribe: (_threadId, listener) => {
       const realtime = createReconnectingConversationSocket({
@@ -433,8 +427,6 @@ async function connect(conversation: Conversation): Promise<void> {
       return () => realtime.close()
     },
   })
-  conversationController.subscribe(state => { conversationState.value = state })
-  await conversationController.start()
 }
 async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; lastSubmittedPrompt.value = null; error.value = ''; await connect(conversation); await scrollToBottom(true) }
 async function browseDirectories(path?: string): Promise<void> { directoryLoading.value = true; directoryError.value = ''; try { directoryListing.value = await api.listDirectories(path) } catch (cause) { directoryError.value = cause instanceof Error ? cause.message : String(cause) } finally { directoryLoading.value = false } }
@@ -496,5 +488,5 @@ async function resolveTimelineQuestion(requestId: string, answer: Record<string,
 watch(() => conversationState.value.appliedEventIds.length, () => { void scrollToBottom() })
 let dashboardTimer: number | null = null
 onMounted(() => { void loadWorkspaces(); window.addEventListener('popstate', () => { void restoreRoute() }); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
-onBeforeUnmount(() => { conversationController?.dispose(); if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
+onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
 </script>
