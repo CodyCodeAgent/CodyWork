@@ -64,4 +64,25 @@ describe('dashboard cache', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('does not spin failed stale refreshes until an explicit retry', async () => {
+    const db = new WorkbenchDb(':memory:')
+    const row = workspace(db)
+    let calls = 0
+    const cache = new DashboardCache(db, async () => {
+      calls += 1
+      throw new Error('fixture refresh failed')
+    })
+
+    cache.refresh(row)
+    await cache.waitForIdle()
+    const failed = cache.refreshIfStale(row)
+    expect(failed.cache).toMatchObject({ state: 'stale', lastError: 'fixture refresh failed' })
+    expect(calls).toBe(1)
+
+    cache.refresh(row)
+    await cache.waitForIdle()
+    expect(calls).toBe(2)
+    db.close()
+  })
 })

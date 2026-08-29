@@ -6,8 +6,7 @@ import { tmpdir } from 'node:os'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from '../src/runtime/protocol.js'
-import { RuntimeManager } from '../src/runtime/manager.js'
-import { CodexRuntimeAdapter } from '../src/runtime/codex.js'
+import { CodyWorkCodexRuntime } from '../src/runtime/codex.js'
 
 describe('generic runtime protocol', () => {
   it('compiles policy roots and instruction sources without widening writes', () => {
@@ -44,9 +43,8 @@ describe('generic runtime protocol', () => {
 
   it('exposes standard capabilities and events through the test adapter', async () => {
     const runtime = new TestRuntimeAdapter()
-    const manifest = await runtime.getManifest()
-    expect(manifest.protocolVersion).toBe(WORKBENCH_RUNTIME_PROTOCOL_VERSION)
-    expect(manifest.writePolicy).toBe('roots')
+    const info = await runtime.getInfo()
+    expect(info.protocolVersion).toBe(WORKBENCH_RUNTIME_PROTOCOL_VERSION)
     const conversation = await runtime.createConversation({
       context: {
         workspacePath: '/tmp/workspace',
@@ -60,20 +58,11 @@ describe('generic runtime protocol', () => {
     await runtime.close()
   })
 
-  it('selects a runtime by semantic capability instead of provider-specific names', async () => {
-    const manager = new RuntimeManager()
-    const runtime = new TestRuntimeAdapter()
-    manager.register(runtime)
-    await expect(manager.select({ streaming: true, writePolicy: 'roots' })).resolves.toBe(runtime)
-    await expect(manager.select({ interrupt: false })).rejects.toThrow('no runtime adapter')
-    await manager.close()
-  })
-
-  it('drives a Codex App Server session, goal commands and runtime approvals', async () => {
+  it('drives a Codex App Server session, turn-scoped collaboration and runtime approvals', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
-    const runtime = new CodexRuntimeAdapter({ command: `${process.execPath} ${fixture}` })
-    expect((await runtime.getManifest()).runtimeVersion).toBe('cody-web-core/0.23.2')
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}` })
+    expect((await runtime.getInfo()).runtimeVersion).toBe('cody-web-core/0.32.0')
     expect(runtime.diagnostics()).toBeNull()
     const context = {
       workspacePath: root,
@@ -83,13 +72,43 @@ describe('generic runtime protocol', () => {
     }
     const conversation = await runtime.createConversation({ context })
     expect(runtime.diagnostics()).toMatchObject({ status: 'running', initialized: true })
+    await expect(runtime.listNativeThreads({ context })).resolves.toEqual(expect.arrayContaining([expect.objectContaining({
+      nativeId: 'native-fixture-thread',
+      preview: 'Fixture catalog thread',
+      source: 'vscode',
+    })]))
+    await expect(runtime.getComposerOptions(context)).resolves.toEqual({
+      models: ['gpt-5.6-sol'],
+      skills: [{
+        id: '/skills/fixture-skill/SKILL.md',
+        name: 'fixture-skill',
+        label: 'fixture-skill',
+        description: 'Fixture skill',
+      }],
+      collaborationModes: [{
+        name: 'plan',
+        mode: 'plan',
+        label: 'plan',
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'high',
+      }],
+    })
+    await expect(runtime.resolveSkills(context, ['/skills/fixture-skill/SKILL.md'])).resolves.toEqual([
+      { name: 'fixture-skill', path: '/skills/fixture-skill/SKILL.md' },
+    ])
+    await expect(runtime.resolveSkills(context, ['/skills/missing/SKILL.md'])).rejects.toThrow('不适用于当前上下文')
     const result = await runtime.sendTurn({ conversation, prompt: 'hello' })
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
     const nativeHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
-    expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'user.completed', 'tool.completed', 'assistant.completed', 'turn.completed'])
-    expect(nativeHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
+    expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'user.completed', 'assistant.completed', 'turn.completed'])
+    expect(nativeHistory.find(event => event.itemId === 'item-1')).toMatchObject({
+      type: 'assistant.completed',
+      data: { text: 'CODEX_FIXTURE_OK' },
+    })
+    const catalogHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: 'native-fixture-thread', context })
+    expect(catalogHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
 
     await expect(runtime.sendTurn({
       conversation,
@@ -97,11 +116,8 @@ describe('generic runtime protocol', () => {
       settings: { skills: [{ name: 'e2e-sample', path: '/skills/e2e-sample/SKILL.md' }] },
     })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
 
-    await runtime.sendCommand({ conversation, prompt: '/plan on' })
-    const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL' })
+    const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL', settings: { collaborationMode: 'plan' } })
     expect(planResult.finalText).toBe('CODEX_FIXTURE_REAL')
-    await runtime.sendCommand({ conversation, prompt: '/goal ship it' })
-    await runtime.sendCommand({ conversation, prompt: '/goal pause' })
     const approvalEvents: string[] = []
     const approvalTurn = runtime.sendTurn({ conversation, prompt: 'APPROVAL', onEvent: (event) => {
       approvalEvents.push(event.type)

@@ -4,31 +4,14 @@ import type { CodexEvent, CodexEventType } from '@codycodeagent/cody-web-core/co
 
 export const WORKBENCH_RUNTIME_PROTOCOL_VERSION = '1.0'
 
-export type RuntimePolicyRootMode = 'workspace' | 'roots' | 'brokered'
 export type RuntimeShellPolicy = 'disabled' | 'allowlist' | 'full'
 export type RuntimeApprovalMode = 'runtime' | 'workbench' | 'none'
 export type RuntimePermissionMode = 'read-only' | 'workspace-write' | 'yolo'
+export type RuntimeCollaborationMode = 'default' | 'plan'
 
-export interface RuntimeManifest {
-  provider: string
+export interface CodexRuntimeInfo {
   runtimeVersion: string
   protocolVersion: string
-  streaming: boolean
-  resume: boolean
-  fork: boolean
-  interrupt: boolean
-  approvals: boolean
-  diffs: boolean
-  subagents: boolean
-  readPolicy: RuntimePolicyRootMode
-  writePolicy: RuntimePolicyRootMode
-  shellPolicy: RuntimeShellPolicy
-  approval: RuntimeApprovalMode
-  workspaceInitialize: boolean
-  workspaceRepair: boolean
-  goals?: boolean
-  plans?: boolean
-  questions?: boolean
 }
 
 export interface RuntimeInstructionSource {
@@ -85,7 +68,6 @@ export interface WorkspaceInitializationResult {
 
 export interface ConversationHandle {
   id: string
-  provider: string
   nativeId: string
   createdAt: string
 }
@@ -94,7 +76,6 @@ export type RuntimeEventType = CodexEventType
 
 export interface RuntimeEvent extends CodexEvent {
   conversationId: string
-  provider: string
   timestamp: string
 }
 
@@ -103,7 +84,7 @@ export interface CreateConversationRequest {
   context: RuntimeContext
 }
 
-/** A lightweight provider-native thread record suitable for a picker. */
+/** A lightweight native Codex thread record suitable for a picker. */
 export interface NativeThreadSummary {
   nativeId: string
   preview: string
@@ -124,6 +105,8 @@ export interface SendTurnRequest {
   settings?: {
     model?: string
     reasoningEffort?: ReasoningEffort
+    /** Turn-scoped collaboration mode. It is never mirrored into CodyWork storage. */
+    collaborationMode?: RuntimeCollaborationMode
     /** Provider-native structured skill inputs; never concatenate these into user text. */
     skills?: Array<{ name: string; path: string }>
   }
@@ -134,6 +117,13 @@ export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | '
 
 export interface RuntimeComposerOptions {
   models: string[]
+  /** Provider-authoritative skills. `id` is the opaque value returned by the Composer. */
+  skills: Array<{
+    id: string
+    name: string
+    label: string
+    description: string
+  }>
   collaborationModes: Array<{
     name: string
     mode: 'default' | 'plan'
@@ -155,31 +145,27 @@ export interface ReadConversationRequest {
   context: RuntimeContext
 }
 
-export interface RuntimeAdapter {
-  readonly provider: string
-  getManifest(): Promise<RuntimeManifest>
+/** CodyWork's product port to the shared Codex runtime. */
+export interface CodyWorkRuntime {
+  getInfo(): Promise<CodexRuntimeInfo>
   checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult>
   initializeWorkspace(request: WorkspaceInitializationRequest): Promise<WorkspaceInitializationResult>
   createConversation(request: CreateConversationRequest): Promise<ConversationHandle>
   sendTurn(request: SendTurnRequest): Promise<SendTurnResult>
   interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }>
   close(): Promise<void>
-}
-
-/** Optional long-lived capabilities used by the CodyWork conversation facade. */
-export interface ConversationRuntimeAdapter extends RuntimeAdapter {
-  /** Bounded provider diagnostics suitable for an authenticated product surface. */
+  /** Bounded runtime diagnostics suitable for an authenticated product surface. */
   diagnostics?(): unknown
-  resumeConversation?(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle>
-  /** Lists resumable provider-native threads without attaching one to a Demand. */
-  listNativeThreads?(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
-  /** Discover provider-supported Composer options without making the UI guess a protocol version. */
-  getComposerOptions?(context: RuntimeContext): Promise<RuntimeComposerOptions>
-  /** Reads provider-native durable history. CodyWork deliberately does not mirror this in SQLite. */
-  readConversation?(request: ReadConversationRequest): Promise<RuntimeEvent[]>
-  /** Send a provider-native slash command without adding CodyWork policy prompt text. */
-  sendCommand?(request: SendTurnRequest): Promise<SendTurnResult>
-  setPermission?(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>
-  respondApproval?(conversation: ConversationHandle, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
-  respondQuestion?(conversation: ConversationHandle, requestId: string, answer: unknown): Promise<void>
+  resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle>
+  /** Lists resumable native Codex threads without attaching one to a Demand. */
+  listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
+  /** Discover runtime-supported Composer options without making the UI guess a protocol version. */
+  getComposerOptions(context: RuntimeContext): Promise<RuntimeComposerOptions>
+  /** Resolve opaque Composer skill ids to native structured inputs. */
+  resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>>
+  /** Reads native durable history. CodyWork deliberately does not mirror this in SQLite. */
+  readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]>
+  setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>
+  respondApproval(conversation: ConversationHandle, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
+  respondQuestion(conversation: ConversationHandle, requestId: string, answer: unknown): Promise<void>
 }

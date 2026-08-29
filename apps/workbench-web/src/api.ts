@@ -86,7 +86,6 @@ export interface SkillInstallStatus {
   workspaceId: string
   source: string
   status: 'running' | 'completed' | 'failed'
-  provider?: string
   message?: string
   events: SkillInstallEvent[]
   installed?: Array<{ id: string; name: string; path: string; status: string }>
@@ -138,13 +137,10 @@ export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'com
 export interface Conversation {
   id: string
   demandId: string
-  provider: string
   nativeId: string
   title: string
   status: ConversationStatus
   permissionMode: ConversationPermissionMode
-  goal: { objective?: string; status?: string } | null
-  plan: { active?: boolean; status?: string } | null
   policyHash: string
   instructionHash: string
   createdAt: string
@@ -153,7 +149,6 @@ export interface Conversation {
 
 export interface ConversationEvent extends CodexEvent {
   conversationId: string
-  provider: string
   timestamp?: string
 }
 
@@ -169,12 +164,12 @@ export interface AvailableNativeThread {
 
 export interface ComposerOptions {
   models: string[]
+  skills: Array<{ id: string; name: string; label: string; description: string }>
   collaborationModes: Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>
 }
 
 export interface RuntimeSettings {
-  provider: 'codex'
-  codex: { url: string; command: string }
+  command: string
   updatedAt: string
 }
 
@@ -191,10 +186,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  runtimeManifest: () => request<{ provider: string; runtimeVersion: string; protocolVersion: string }>('GET', '/api/runtime'),
-  testRuntime: () => request<{ provider: 'codex'; runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
+  testRuntime: () => request<{ runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
   runtimeSettings: () => request<RuntimeSettings>('GET', '/api/settings/runtime'),
-  updateRuntimeSettings: (patch: { codex?: { url?: string; command?: string } }) =>
+  updateRuntimeSettings: (patch: { command?: string }) =>
     request<RuntimeSettings>('PATCH', '/api/settings/runtime', patch),
   listWorkspaces: () => request<Workspace[]>('GET', '/api/workspaces'),
   listDirectories: (path?: string) => request<DirectoryListing>('GET', `/api/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -236,7 +230,7 @@ export const api = {
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>
     request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
-  sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; skills?: string[] }) =>
+  sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }) =>
     request<{ accepted: true; turnId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { content, mode, ...(settings ?? {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
