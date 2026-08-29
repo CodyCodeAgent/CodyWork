@@ -79,7 +79,7 @@ function executionContext(context: RuntimeContext, mode: RuntimePermissionMode):
       cwd, approvalPolicy: approvalPolicy(mode), sandbox: mode === 'read-only' ? 'read-only' : 'workspace-write',
       runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
       baseInstructions: context.instructionBundle.systemInstructions, developerInstructions: policyInstructions(context),
-      experimentalRawEvents: false,
+      experimentalRawEvents: false, ephemeral: false,
     },
     turn: {
       cwd,
@@ -155,8 +155,12 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> {
-    await this.ensureRuntime(request.context)
-    return (await this.requireCatalog().readThread(request.nativeId)).map(event => toRuntimeEvent(event, request.conversationId))
+    const manager = await this.ensureRuntime(request.context)
+    const history = (await this.requireCatalog().readThread(request.nativeId)).map(event => toRuntimeEvent(event, request.conversationId))
+    const pending = this.sessions.has(request.conversationId)
+      ? manager.listPendingEvents(request.conversationId).map(event => toRuntimeEvent(event, request.conversationId))
+      : []
+    return [...history, ...pending]
   }
 
   async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
@@ -230,7 +234,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       runtimeWorkspaceRoots: session.context.effectivePolicy.writableRoots,
       approvalPolicy: approvalPolicy(session.mode), sandboxPolicy: sandboxPolicy(session.context, session.mode),
-      ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
+      ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
     try { await this.requireManager().run(session.handle.id, turn, request.mode === 'steer' ? 'steer' : 'queue') } finally { unsubscribe() }
     const state = reduceConversationEvents(createConversationState(session.binding.threadId), events)
