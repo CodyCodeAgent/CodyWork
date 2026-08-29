@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { createAppServerHost, type AppServerHost } from '@codycodeagent/cody-web-core/runtime'
+import {
+  CODY_WEB_CORE_VERSION,
+  createAppServerHost,
+  type AppServerHost,
+} from '@codycodeagent/cody-web-core/runtime'
 import {
   buildTurnUserInput,
   CodexSessionManager,
@@ -160,7 +164,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   async getManifest(): Promise<RuntimeManifest> {
     return {
-      provider: this.provider, runtimeVersion: 'cody-web-core/0.22.2', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
+      provider: this.provider, runtimeVersion: `cody-web-core/${CODY_WEB_CORE_VERSION}`, protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
       streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: true,
       readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'allowlist', approval: 'runtime',
       workspaceInitialize: true, workspaceRepair: false, goals: true, plans: true, questions: true,
