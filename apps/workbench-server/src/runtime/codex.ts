@@ -178,10 +178,11 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   async getComposerOptions(context: RuntimeContext): Promise<RuntimeComposerOptions> {
     await this.ensureRuntime(context)
     const cwd = context.demandPath ?? context.workspacePath
+    const skillCwds = [...new Set([cwd, context.workspacePath].filter(Boolean))]
     const [models, modes, skills] = await Promise.allSettled([
       this.requireCatalog().listModels(),
       this.requireCatalog().listCollaborationModes(),
-      this.requireCatalog().listSkills([cwd]),
+      this.requireCatalog().listSkills(skillCwds),
     ])
     return {
       models: models.status === 'fulfilled' ? [...new Set(models.value.map(model => model.id || model.model).filter(Boolean))] : [],
@@ -207,7 +208,8 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   async resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
     if (skillIds.length === 0) return []
     await this.ensureRuntime(context)
-    const available = await this.requireCatalog().listSkills([context.demandPath ?? context.workspacePath])
+    const cwd = context.demandPath ?? context.workspacePath
+    const available = await this.requireCatalog().listSkills([...new Set([cwd, context.workspacePath].filter(Boolean))])
     const enabledByPath = new Map(available.filter(skill => skill.enabled).map(skill => [skill.path, skill]))
     return skillIds.map(id => {
       const skill = enabledByPath.get(id)

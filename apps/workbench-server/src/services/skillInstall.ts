@@ -69,7 +69,11 @@ async function runSkillInstall(
       writableRoots: [skillsRoot],
       deniedRoots: [],
       shell: 'allowlist' as const,
-      approval: 'workbench' as const,
+      // This coordinator has no interactive approval surface. Auto-approve
+      // only inside the OS-enforced Skill write root so background installs
+      // cannot deadlock while still being unable to modify product code or
+      // Workspace policy files.
+      approval: 'none' as const,
     }),
   }
   const conversation = await runtime.createConversation({ context })
