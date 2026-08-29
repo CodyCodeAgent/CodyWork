@@ -125,7 +125,7 @@ describe('conversation websocket control plane', () => {
   it('streams live events over WebSocket while history is read from the native thread', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
-    const server = startServer({ db: test.db, conversations }, 0)
+    const server = startServer({ db: test.db, conversations }, { host: '127.0.0.1', port: 0 })
     await once(server, 'listening')
     const address = server.address()
     if (!address || typeof address === 'string') throw new Error('server did not bind')

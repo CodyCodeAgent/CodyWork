@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The current release focuses on Workspace management, Dashboard metrics, demand Worktrees, and demand-development conversations. The demand page is a CodyWork-owned three-column UI. The server streams Codex events over WebSocket and restores message history, Goal, Plan, approvals, permission modes, and multi-conversation metadata.
+The current release focuses on Workspace management, Dashboard metrics, demand Worktrees, and demand-development conversations. The demand page is a CodyWork-owned three-column UI. The server streams normalized Codex events over WebSocket; native Codex Threads are the durable transcript authority, while CodyWork stores only product metadata and bounded diagnostics.
 
 ```text
 apps/workbench-web/      Workspace creation, switching, and automatic restore UI
@@ -11,14 +11,14 @@ apps/workbench-server/   Workspace, Dashboard, repository, demand Worktree, and 
   ├─ src/services/repositories.ts   baseline repository discovery and metrics
   ├─ src/services/demands.ts        multi-repository Worktrees, demand docs, and rollback
   ├─ src/runtime/                    protocol, policy, and Codex App Server Adapter
-  ├─ src/services/conversations.ts  conversation metadata, persisted events, and WebSocket subscriptions
+  ├─ src/services/conversations.ts  native Thread bindings, product metadata, and WebSocket subscriptions
   ├─ src/db/index.ts                 CodyWork metadata
   └─ src/routes/index.ts             HTTP control plane
 ```
 
 A Workspace is a real folder. After its directory is ready, CodyWork uses it as the Codex working directory. CodyWork performs deterministic control-plane operations; Codex owns the model loop and native tool execution.
 
-## Run
+## Development
 
 ```sh
 cd apps/workbench-server
@@ -29,6 +29,15 @@ npx vite --port 3211
 ```
 
 The server listens on `http://127.0.0.1:3210`; the web app listens on `http://localhost:3211`.
+
+## Production
+
+```sh
+pnpm build
+pnpm start -- --host 0.0.0.0 --port 3001
+```
+
+The production server serves the API, WebSocket endpoint, and built Vue SPA from one process.
 
 ## API
 
@@ -44,11 +53,11 @@ The server listens on `http://127.0.0.1:3210`; the web app listens on `http://lo
 - `GET /api/workspaces/:id/demands/:demandId`: read demand-development shell metadata
 - `GET /api/workspaces/:id/demands/:demandId/conversations`: list conversations for a demand
 - `POST /api/workspaces/:id/demands/:demandId/conversations`: create a recoverable conversation
-- `GET /api/workspaces/:id/conversations/:conversationId/history`: read event history
+- `GET /api/workspaces/:id/conversations/:conversationId/history`: read normalized native Thread history
 - `POST /api/workspaces/:id/conversations/:conversationId/messages`: send a queued or steering message
 - `POST /api/workspaces/:id/conversations/:conversationId/interrupt`: interrupt the active turn
 - `POST /api/workspaces/:id/conversations/:conversationId/permission`: switch read-only, Workspace-write, or Yolo mode
-- `ws://127.0.0.1:3210/api/workspaces/:workspaceId/conversations/:conversationId/events`: WebSocket event stream with `after` cursor recovery
+- `ws://127.0.0.1:3210/api/workspaces/:workspaceId/conversations/:conversationId/events`: live normalized event stream
 
 Example creation request:
 
@@ -72,4 +81,4 @@ Runtime configuration is global and does not belong to one Workspace. The sideba
 
 Codex is integrated through real App Server Thread/Turn APIs. CodyWork maps the CSR instruction bundle to base and developer instructions, maps the demand directory to the working directory and Runtime roots, and forwards message deltas, tools, diffs, Goal, approvals, and interrupt events. If Codex cannot start or cannot enforce the required protocol and policy, conversation creation fails closed; no fake runtime is used.
 
-Environment variables: `CODYWORK_PORT`, `CODYWORK_DB`, `CODY_CODEX_COMMAND`, `CODY_CODEX_MODEL`, and `CODY_CODEX_INIT_PROMPT`. Legacy `CODY_WORKBENCH_PORT` and `CODY_WORKBENCH_DB` remain only for compatibility with existing local data.
+Environment variables: `CODYWORK_HOST`, `CODYWORK_PORT`, `CODYWORK_DB`, `CODYWORK_WEB_ROOT`, `CODYWORK_PUBLIC_ORIGIN`, `CODY_CODEX_COMMAND`, `CODY_CODEX_MODEL`, and `CODY_CODEX_INIT_PROMPT`.

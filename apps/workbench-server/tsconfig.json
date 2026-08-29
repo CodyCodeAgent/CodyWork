@@ -2,12 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "lib/types",
+    "outDir": "dist",
     "lib": ["ES2024"],
     "types": ["node"],
     "composite": false,
     "incremental": false,
-    "noEmit": true,
+    "noEmit": false,
     "paths": {}
   },
   "include": ["src"]

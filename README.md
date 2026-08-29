@@ -19,6 +19,16 @@ The server listens on `127.0.0.1:3210`; the Vue application is served from
 pnpm verify
 ```
 
+## Production
+
+```bash
+pnpm build
+pnpm start -- --host 0.0.0.0 --port 3001
+```
+
+The built server is the single production process. It serves the API,
+WebSocket endpoint, and the Vue SPA from `apps/workbench-web/dist`.
+
 ## Architecture
 
 - `apps/workbench-server`: SQLite-backed Workspace/Demand/Worktree policy API
