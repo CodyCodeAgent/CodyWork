@@ -18,8 +18,8 @@ importers:
   apps/workbench-server:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.15.1
-        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#894b36f07a67613908f2b21bfa9196eb2fe092af(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.16.1
+        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#90dd49e5c14bfedeef148f9d1415b60c7154743d(vue@3.5.39(typescript@6.0.3))
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -40,8 +40,8 @@ importers:
   apps/workbench-web:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.15.1
-        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#894b36f07a67613908f2b21bfa9196eb2fe092af(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.16.1
+        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#90dd49e5c14bfedeef148f9d1415b60c7154743d(vue@3.5.39(typescript@6.0.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.39(typescript@6.0.3)
@@ -112,9 +112,9 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#894b36f07a67613908f2b21bfa9196eb2fe092af':
-    resolution: {commit: 894b36f07a67613908f2b21bfa9196eb2fe092af, repo: git@github.com:CodyCodeAgent/CodyWebCore.git, type: git}
-    version: 0.15.1
+  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#90dd49e5c14bfedeef148f9d1415b60c7154743d':
+    resolution: {commit: 90dd49e5c14bfedeef148f9d1415b60c7154743d, repo: git@github.com:CodyCodeAgent/CodyWebCore.git, type: git}
+    version: 0.16.1
     peerDependencies:
       vue: ^3.5.0
 
@@ -2069,7 +2069,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#894b36f07a67613908f2b21bfa9196eb2fe092af(vue@3.5.39(typescript@6.0.3))':
+  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#90dd49e5c14bfedeef148f9d1415b60c7154743d(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       dompurify: 3.4.14
       highlight.js: 11.12.0

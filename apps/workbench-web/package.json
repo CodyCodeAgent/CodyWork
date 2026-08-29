@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.15.1",
+    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.16.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {
