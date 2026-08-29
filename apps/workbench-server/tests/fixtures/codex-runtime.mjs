@@ -22,6 +22,7 @@ let turnSequence = Number(restoredState?.turnSequence ?? 0)
 let threadSequence = Number(restoredState?.threadSequence ?? 0)
 const threadHistories = new Map(restoredState?.threadHistories ?? [['native-fixture-thread', catalogHistory]])
 const pendingTurns = new Map()
+let initialized = false
 
 function write(value) { process.stdout.write(`${JSON.stringify(value)}\n`) }
 function notify(method, params) { write({ method, params }) }
@@ -83,7 +84,11 @@ function emitTurn(threadId, prompt) {
 rl.on('line', line => {
   let message
   try { message = JSON.parse(line) } catch { return }
-  if (message.method === 'initialize') write({ id: message.id, result: { serverInfo: { name: 'codex-fixture', version: '1' } } })
+  if (message.method === 'initialize') {
+    initialized = true
+    write({ id: message.id, result: { serverInfo: { name: 'codex-fixture', version: '1' } } })
+  }
+  else if (typeof message.method === 'string' && !initialized) write({ id: message.id, error: { code: -32002, message: 'fixture app-server is not initialized' } })
   else if (message.method === 'thread/start') {
     const serialized = JSON.stringify(message.params)
     if (serialized.includes('readOnlyAccess') || serialized.includes('persistExtendedHistory')) {
