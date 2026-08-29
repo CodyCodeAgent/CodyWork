@@ -184,10 +184,19 @@ rl.on('line', line => {
     const threadId = String(message.params?.threadId ?? 'native-fixture-thread')
     if (!threadHistories.has(threadId)) threadHistories.set(threadId, [])
     if (prompt.includes('SKILL_ORDER')) {
+      const skillInputs = input.filter(item => item?.type === 'skill')
       const skillIndex = input.findIndex(item => item?.type === 'skill')
       const textIndex = input.findIndex(item => item?.type === 'text')
-      if (skillIndex < 0 || textIndex < 0 || skillIndex > textIndex) {
-        write({ id: message.id, error: { code: -32602, message: 'Skill input must precede text input' } })
+      const selectedSkill = skillInputs[0]
+      if (
+        skillInputs.length !== 1
+        || selectedSkill?.name !== 'e2e-sample'
+        || selectedSkill?.path !== '/skills/e2e-sample/SKILL.md'
+        || skillIndex < 0
+        || textIndex < 0
+        || skillIndex > textIndex
+      ) {
+        write({ id: message.id, error: { code: -32602, message: 'Exactly the selected Skill must precede text input' } })
         return
       }
     }
