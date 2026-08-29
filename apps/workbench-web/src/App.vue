@@ -54,8 +54,10 @@
           <section class="chat-main">
             <div v-if="selectedConversation?.goal?.objective" class="chat-toolbar"><span class="goal-chip">Goal · {{ selectedConversation.goal.objective }}</span></div>
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
+              <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
               <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
             </div>
+            <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div class="composer">
               <div class="composer-hint">{{ selectedConversation?.plan?.active ? 'Plan 模式：先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（Enter 发送给当前 Turn）' : '描述下一步…（Enter 排队，Shift + Enter 换行）') : '描述你希望完成的事情…（Enter 发送，Shift + Enter 换行）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @send="sendMessage" @stop="interrupt" />
             </div>
@@ -76,7 +78,17 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { createConversationState, type ConversationState } from '@codycodeagent/cody-web-core/conversation'
+import {
+  DEFAULT_VISIBLE_MESSAGE_COUNT,
+  buildConversationScrollState,
+  createConversationState,
+  hiddenMessageCount,
+  nextVisibleMessageCount,
+  shouldLockConversationToBottom,
+  visibleMessageStartIndex,
+  type ConversationScrollState,
+  type ConversationState,
+} from '@codycodeagent/cody-web-core/conversation'
 import { composerHasContent, resolveComposerSubmitMode, type ComposerSubmitMode } from '@codycodeagent/cody-web-core/composer'
 import { createConversationController, createReconnectingConversationSocket, type ConversationController, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
 import { CodyComposer, CodyConversation, conversationEntriesFromState, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
@@ -107,12 +119,18 @@ const loading = ref(true); const error = ref(''); const modalError = ref(''); co
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showDirectoryPicker = ref(false); const directoryListing = ref<DirectoryListing | null>(null); const directoryLoading = ref(false); const directoryError = ref(''); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const workspaceMode = ref<'folder' | 'git'>('folder'); const workspaceName = ref(''); const workspacePath = ref(''); const workspaceGitUrl = ref(''); const useAiWorkspaceSetup = ref(true); const workspaceSetupJob = ref<WorkspaceSetupJob | null>(null); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 const lastSubmittedPrompt = ref<string | null>(null)
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
-let conversationController: ConversationController | null = null; let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null; let followBottom = true
+let conversationController: ConversationController | null = null; let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
+const conversationScrollState = ref<ConversationScrollState | null>(null)
+const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
 const socketLabel = computed(() => socketState.value === 'open' ? '实时连接' : socketState.value === 'connecting' ? '连接中…' : '已断开')
 const isRunning = computed(() => Boolean(conversationState.value.activeTurnId))
 const pendingApproval = computed(() => conversationState.value.pendingRequests.find(request => request.kind === 'approval') ?? null)
 const pendingQuestion = computed(() => conversationState.value.pendingRequests.find(request => request.kind === 'question') ?? null)
-const sharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
+const allSharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
+const hiddenConversationEntryCount = computed(() => hiddenMessageCount(allSharedConversationEntries.value.length, visibleConversationEntryCount.value))
+const sharedConversationEntries = computed(() => allSharedConversationEntries.value.slice(
+  visibleMessageStartIndex(allSharedConversationEntries.value.length, visibleConversationEntryCount.value),
+))
 const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.trim().toLowerCase(); return query ? knowledge.value.filter(doc => `${doc.name} ${doc.relativePath}`.toLowerCase().includes(query)) : knowledge.value })
 const dashboardCacheLabel = computed(() => { const cache = dashboard.value?.cache; if (!cache) return ''; if (cache.state === 'refreshing') return cache.generatedAt ? '后台刷新中' : '首次统计中'; if (cache.state === 'empty') return '等待首次统计'; if (cache.state === 'stale') return `更新于 ${cache.ageSeconds ?? 0}s 前`; return `更新于 ${cache.ageSeconds ?? 0}s 前` })
 const threadProjects = computed<ThreadProject[]>(() => { const projects = new Map<string, ThreadProject>(); const demandPaths = selectedDemand.value?.repositories.map(repo => repo.worktreePath) ?? []; for (const thread of nativeThreads.value) { const cwd = thread.cwd?.trim() || '未记录项目路径'; const existing = projects.get(cwd); const relatedToDemand = demandPaths.some(path => path === cwd || path.startsWith(`${cwd}/`) || cwd.startsWith(`${path}/`)); projects.set(cwd, existing ? { ...existing, count: existing.count + 1 } : { cwd, name: projectName(cwd), count: 1, relatedToDemand }); } return [...projects.values()].sort((left, right) => Number(right.relatedToDemand) - Number(left.relatedToDemand) || right.count - left.count || left.name.localeCompare(right.name)) })
@@ -162,8 +180,36 @@ function toggleDemandNav(): void { demandNavExpanded.value = !demandNavExpanded.
 function projectName(cwd: string): string { if (cwd === '未记录项目路径') return cwd; const segments = cwd.split('/').filter(Boolean); return segments.at(-1) || cwd }
 function threadTitle(thread: AvailableNativeThread): string { const title = thread.preview.replace(/\s+/g, ' ').trim(); return title ? title.slice(0, 100) : `未命名 Thread · ${thread.nativeId.slice(0, 8)}` }
 function formatThreadTime(value: string): string { const time = Date.parse(value); if (!Number.isFinite(time)) return ''; const minutes = Math.max(0, Math.round((Date.now() - time) / 60_000)); return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前` : minutes < 1_440 ? `${Math.round(minutes / 60)} 小时前` : `${Math.round(minutes / 1_440)} 天前` }
-function onScroll(): void { const node = scrollArea.value; if (node) followBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 160 }
-async function scrollToBottom(): Promise<void> { await nextTick(); if (followBottom) scrollArea.value?.scrollTo({ top: scrollArea.value.scrollHeight, behavior: 'smooth' }) }
+function onScroll(): void {
+  const node = scrollArea.value
+  if (!node) return
+  conversationScrollState.value = buildConversationScrollState({
+    scrollTop: node.scrollTop,
+    scrollHeight: node.scrollHeight,
+    clientHeight: node.clientHeight,
+    bottomThresholdPx: 16,
+  })
+}
+async function scrollToBottom(force = false): Promise<void> {
+  const shouldFollow = force || shouldLockConversationToBottom(conversationScrollState.value)
+  if (!shouldFollow) return
+  await nextTick()
+  const node = scrollArea.value
+  if (!node) return
+  node.scrollTo({ top: node.scrollHeight, behavior: force ? 'auto' : 'smooth' })
+  conversationScrollState.value = { scrollTop: node.scrollHeight, scrollRatio: 1, isAtBottom: true }
+}
+async function showEarlierConversationEntries(): Promise<void> {
+  const node = scrollArea.value
+  const previousHeight = node?.scrollHeight ?? 0
+  const previousTop = node?.scrollTop ?? 0
+  visibleConversationEntryCount.value = nextVisibleMessageCount(
+    allSharedConversationEntries.value.length,
+    visibleConversationEntryCount.value,
+  )
+  await nextTick()
+  if (node) node.scrollTop = previousTop + Math.max(node.scrollHeight - previousHeight, 0)
+}
 function routeParams(): { workspaceId: string | null; demandId: string | null } { const params = new URLSearchParams(window.location.search); return { workspaceId: params.get('workspace'), demandId: params.get('demand') } }
 function demandFromRoute(id: string): Demand | undefined { return demands.value.find((demand) => demand.id === id || demand.worktreeKey === id || demand.branchName === id) }
 function updateRoute(demand: Demand | null, mode: HistoryMode): void {
@@ -360,6 +406,8 @@ function applyConversationLifecycle(conversationId: string, event: ConversationE
 async function connect(conversation: Conversation): Promise<void> {
   conversationController?.dispose()
   conversationState.value = createConversationState(conversation.nativeId)
+  visibleConversationEntryCount.value = DEFAULT_VISIBLE_MESSAGE_COUNT
+  conversationScrollState.value = null
   const workspaceId = workspace.value!.id
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const host = window.location.host || '127.0.0.1:3211'
@@ -388,7 +436,7 @@ async function connect(conversation: Conversation): Promise<void> {
   conversationController.subscribe(state => { conversationState.value = state })
   await conversationController.start()
 }
-async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; lastSubmittedPrompt.value = null; error.value = ''; await connect(conversation); await scrollToBottom() }
+async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; lastSubmittedPrompt.value = null; error.value = ''; await connect(conversation); await scrollToBottom(true) }
 async function browseDirectories(path?: string): Promise<void> { directoryLoading.value = true; directoryError.value = ''; try { directoryListing.value = await api.listDirectories(path) } catch (cause) { directoryError.value = cause instanceof Error ? cause.message : String(cause) } finally { directoryLoading.value = false } }
 async function openDirectoryPicker(): Promise<void> { showDirectoryPicker.value = true; await browseDirectories(workspacePath.value.trim() || undefined) }
 function useSelectedDirectory(): void { if (!directoryListing.value) return; workspacePath.value = directoryListing.value.current; showDirectoryPicker.value = false }

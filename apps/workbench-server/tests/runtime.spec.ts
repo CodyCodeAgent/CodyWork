@@ -73,7 +73,7 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
     const runtime = new CodexRuntimeAdapter({ command: `${process.execPath} ${fixture}` })
-    expect((await runtime.getManifest()).runtimeVersion).toBe('cody-web-core/0.9.1')
+    expect((await runtime.getManifest()).runtimeVersion).toBe('cody-web-core/0.10.0')
     expect(runtime.diagnostics()).toBeNull()
     const context = {
       workspacePath: root,

@@ -309,7 +309,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .conversation-status.completed { background: #39ab78; }
 .conversation-status.failed { background: #c35e63; }
 .conversation-foot { padding: 12px 4px 0; color: #9aa4b3; border-top: 1px solid #edf0f3; font-size: 10px; }
-.chat-main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.chat-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
 .chat-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 20px; color: #78869a; background: #fff; border-bottom: 1px solid var(--line); font-size: 11px; }
 .chat-toolbar > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-toolbar select { min-height: 31px; padding: 4px 8px; color: #51617d; background: #f6f8fb; border: 1px solid #dce2eb; border-radius: 7px; font-size: 11px; }
@@ -702,6 +702,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .goal-chip, .plan-chip { min-height: 32px; border-radius: 8px; }
 .plan-chip.active { background: #5b5cf0; border-color: #5b5cf0; }
 .chat-scroll { padding-top: 30px; padding-bottom: 36px; }
+.chat-history-button { display: block; min-height: 34px; padding: 7px 13px; margin: 0 auto 18px; color: #59657a; background: #fff; border: 1px solid #dfe4ec; border-radius: 999px; box-shadow: 0 4px 14px rgba(24,34,54,.05); font-size: 11px; cursor: pointer; }
+.chat-history-button:hover { color: var(--blue); border-color: #c9ccff; }
+.chat-scroll-bottom { position: absolute; right: 24px; bottom: 150px; z-index: 4; display: grid; width: 38px; height: 38px; place-items: center; color: #fff; background: var(--blue); border: 0; border-radius: 999px; box-shadow: 0 10px 28px rgba(65,66,190,.28); cursor: pointer; }
+.chat-scroll-bottom:hover { background: var(--blue-hover); }
 .chat-bubble { max-width: min(720px, 88%); border-radius: 13px; font-size: 13px; }
 .chat-bubble.user { background: #5758dd; box-shadow: 0 8px 22px rgba(87,88,221,.14); }
 .chat-bubble.assistant { border-color: #e2e5ea; box-shadow: var(--shadow-card); }
