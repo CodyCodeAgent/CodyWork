@@ -181,7 +181,7 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('keeps one bounded Runtime failure reason visible after a refresh', async () => {
+  it('does not reconstruct native history from SQLite failure audits', async () => {
     class FailingRuntime extends TestRuntimeAdapter {
       override async sendTurn(): Promise<never> { throw new Error('response stream disconnected') }
     }
@@ -193,9 +193,8 @@ describe('conversation websocket control plane', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'turn.failed', data: { error: 'response stream disconnected' } }),
-    ]))
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'turn.failed'").get(conversation.id)).toEqual({ action: 'turn.failed' })
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })

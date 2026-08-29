@@ -170,27 +170,7 @@ export class ConversationService {
     const demand = this.requireDemand(workspaceId, row.demand_id)
     const context = this.contextFor(demand, row.permission_mode)
     try {
-      const events = await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
-      // Native Codex Thread history remains authoritative. Retain only the
-      // current bounded failure diagnostic, so refresh does not make a visible
-      // Runtime error turn back into an unexplained failed status.
-      if (row.status === 'failed' && !events.some(event => event.type === 'turn.failed')) {
-        const failure = this.db.db.prepare("SELECT id, data_json, created_at FROM conversation_audits WHERE conversation_id = ? AND action = 'turn.failed' ORDER BY id DESC LIMIT 1").get(conversationId) as { id: number; data_json: string; created_at: string } | undefined
-        const data = failure ? parseJson(failure.data_json) : null
-        const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
-        events.push({
-          id: `audit:turn.failed:${String(failure?.id ?? row.updated_at)}`,
-          type: 'turn.failed',
-          threadId: row.native_id,
-          conversationId,
-          ...(typeof record.turnId === 'string' ? { turnId: record.turnId } : {}),
-          provider: row.provider,
-          timestamp: failure?.created_at ?? row.updated_at,
-          atIso: failure?.created_at ?? row.updated_at,
-          data: { error: typeof record.error === 'string' ? record.error : 'Codex 未能完成本次回复。' },
-        })
-      }
-      return events
+      return await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
     } catch (error) {
       // App Server cannot read a just-started native thread until its first user
       // turn materializes. Treat only an untouched local conversation as empty.
