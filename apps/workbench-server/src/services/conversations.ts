@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { composerHasContent } from '@codycodeagent/cody-web-core/composer'
 import { resolve } from 'node:path'
 import { WorkbenchDb, ConversationPermissionMode, ConversationRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
 import { getDemand } from './demands.js'
@@ -292,9 +293,9 @@ export class ConversationService {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
     const text = prompt.trim()
-    if (!text) throw new Error('消息不能为空')
-    const turnId = `turn-${randomUUID()}`
     const requestedSkills = (settings?.skills ?? []).filter(skill => typeof skill === 'string' && skill.trim()).map(skill => skill.trim()).slice(0, 20)
+    if (!composerHasContent({ text, skills: requestedSkills })) throw new Error('消息不能为空')
+    const turnId = `turn-${randomUUID()}`
     const context = this.contexts.get(conversationId)
     if (!context) throw new Error('会话 Runtime 上下文不可用')
     const skillsByName = new Map(context.instructionBundle.skills.map(skill => [skill.name, skill]))

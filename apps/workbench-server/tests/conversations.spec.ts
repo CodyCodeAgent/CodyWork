@@ -52,6 +52,13 @@ describe('conversation websocket control plane', () => {
       mode: 'steer',
       settings: { skills: [{ name: 'e2e-sample', path: realpathSync(skillPath) }] },
     })
+    await conversations.send(test.workspaceId, conversation.id, '', 'queue', { skills: ['e2e-sample'] })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(runtime.requests[1]).toMatchObject({
+      prompt: '',
+      mode: 'queue',
+      settings: { skills: [{ name: 'e2e-sample', path: realpathSync(skillPath) }] },
+    })
     await expect(conversations.send(test.workspaceId, conversation.id, 'unknown skill', 'queue', { skills: ['missing'] })).rejects.toThrow('Skill 不存在')
 
     test.db.close()
