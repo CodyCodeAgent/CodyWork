@@ -73,7 +73,7 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
     const runtime = new CodexRuntimeAdapter({ command: `${process.execPath} ${fixture}` })
-    expect((await runtime.getManifest()).runtimeVersion).toBe('cody-web-core/0.13.0')
+    expect((await runtime.getManifest()).runtimeVersion).toBe('cody-web-core/0.14.0')
     expect(runtime.diagnostics()).toBeNull()
     const context = {
       workspacePath: root,
@@ -87,7 +87,7 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
-    const nativeHistory = await runtime.readConversation({ conversation, context })
+    const nativeHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
     expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'user.completed', 'tool.completed', 'assistant.completed', 'turn.completed'])
     expect(nativeHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
 

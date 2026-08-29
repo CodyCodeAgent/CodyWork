@@ -50,7 +50,7 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
     return conversation
   }
 
-  async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> { return this.history.get(request.conversation.nativeId) ?? [] }
+  async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> { return this.history.get(request.nativeId) ?? [] }
 
   async listNativeThreads(_request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
     return [

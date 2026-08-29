@@ -66,17 +66,29 @@ describe('conversation websocket control plane', () => {
   })
 
   it('binds an existing provider thread to one Demand and persists the policy-scoped mapping', async () => {
+    class ResumeTrackingRuntime extends TestRuntimeAdapter {
+      resumeCalls = 0
+      override async resumeConversation(request: Parameters<TestRuntimeAdapter['resumeConversation']>[0]) {
+        this.resumeCalls += 1
+        return super.resumeConversation(request)
+      }
+    }
     const test = await fixture()
-    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const runtime = new ResumeTrackingRuntime()
+    const conversations = new ConversationService(test.db, runtime)
     const bound = await conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123', title: 'Existing context' })
     expect(bound.nativeId).toBe('thread-existing-123')
     expect(bound.title).toBe('Existing context')
     await expect(conversations.history(test.workspaceId, bound.id)).resolves.toEqual([])
+    expect(runtime.resumeCalls).toBe(0)
     await expect(conversations.listAvailableNativeThreads(test.workspaceId, test.demandId)).resolves.toEqual([
       expect.objectContaining({ nativeId: 'thread-existing-123', bound: true }),
       expect.objectContaining({ nativeId: 'thread-unbound-456', bound: false }),
     ])
     await expect(conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123' })).rejects.toThrow('已绑定到当前 Demand')
+    await conversations.send(test.workspaceId, bound.id, 'attach only when execution starts')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(runtime.resumeCalls).toBe(1)
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })

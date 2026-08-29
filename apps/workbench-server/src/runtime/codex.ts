@@ -3,6 +3,7 @@ import { createAppServerHost, type AppServerHost } from '@codycodeagent/cody-web
 import {
   buildTurnUserInput,
   CodexSessionManager,
+  normalizeThreadHistory,
   type ExecutionContext,
   type ExecutionPolicyProvider,
   type ThreadBinding,
@@ -159,7 +160,7 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
 
   async getManifest(): Promise<RuntimeManifest> {
     return {
-      provider: this.provider, runtimeVersion: 'cody-web-core/0.13.0', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
+      provider: this.provider, runtimeVersion: 'cody-web-core/0.14.0', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION,
       streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: true,
       readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'allowlist', approval: 'runtime',
       workspaceInitialize: true, workspaceRepair: false, goals: true, plans: true, questions: true,
@@ -199,8 +200,9 @@ export class CodexRuntimeAdapter implements ConversationRuntimeAdapter {
   }
 
   async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> {
-    const session = this.require(request.conversation)
-    return (await this.requireManager().read(session.handle.id)).map(event => toRuntimeEvent(event, session.handle.id))
+    await this.ensureRuntime(request.context)
+    const result = await this.requireHost().call('thread/read', { threadId: request.nativeId, includeTurns: true })
+    return normalizeThreadHistory(result, request.nativeId).map(event => toRuntimeEvent(event, request.conversationId))
   }
 
   async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {

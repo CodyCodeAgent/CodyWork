@@ -150,7 +150,8 @@ export interface SendTurnResult {
 }
 
 export interface ReadConversationRequest {
-  conversation: ConversationHandle
+  conversationId: string
+  nativeId: string
   context: RuntimeContext
 }
 
