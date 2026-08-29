@@ -62,7 +62,7 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
     const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}` })
-    expect((await runtime.getInfo()).runtimeVersion).toBe('cody-web-core/0.32.0')
+    expect((await runtime.getInfo()).runtimeVersion).toBe('cody-web-core/0.33.1')
     expect(runtime.diagnostics()).toBeNull()
     const context = {
       workspacePath: root,
@@ -119,10 +119,18 @@ describe('generic runtime protocol', () => {
     const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL', settings: { collaborationMode: 'plan' } })
     expect(planResult.finalText).toBe('CODEX_FIXTURE_REAL')
     const approvalEvents: string[] = []
+    let signalApproval!: () => void
+    const approvalRequested = new Promise<void>((resolve) => { signalApproval = resolve })
     const approvalTurn = runtime.sendTurn({ conversation, prompt: 'APPROVAL', onEvent: (event) => {
       approvalEvents.push(event.type)
-      if (event.type === 'approval.requested') void runtime.respondApproval(conversation, String(event.data.approvalId), 'allowed-once')
+      if (event.type === 'approval.requested') signalApproval()
     } })
+    await approvalRequested
+    const pendingHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
+    expect(pendingHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'approval.requested', data: expect.objectContaining({ approvalId: expect.any(String) }) }),
+    ]))
+    await runtime.respondApproval(conversation, String(pendingHistory.find(event => event.type === 'approval.requested')?.data.approvalId), 'allowed-once')
     const approvalResult = await approvalTurn
     expect(approvalEvents).toContain('approval.requested')
     expect(approvalResult.finalText).toBe('APPROVED')

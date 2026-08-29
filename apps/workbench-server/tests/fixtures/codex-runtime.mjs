@@ -93,6 +93,8 @@ rl.on('line', line => {
     const serialized = JSON.stringify(message.params)
     if (serialized.includes('readOnlyAccess') || serialized.includes('persistExtendedHistory')) {
       write({ id: message.id, error: { code: -32602, message: 'legacy Codex fields are forbidden' } })
+    } else if (message.params?.ephemeral !== false) {
+      write({ id: message.id, error: { code: -32602, message: 'CodyWork threads must be durable' } })
     } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length === 0) {
       write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
     } else {
