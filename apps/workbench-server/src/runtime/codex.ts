@@ -258,25 +258,30 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   private async ensureRuntime(context: RuntimeContext): Promise<CodexSessionManager> {
-    if (this.manager) return this.manager
-    this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
-    this.catalog = new CodexSessionCatalog(this.host)
-    const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
-      const session = this.sessions.get(binding.id)
-      if (!session) return { action: 'deny', reason: 'CodyWork session is not attached.' }
-      const paths = referencedPaths(operation.params)
-      if (paths.some(path => session.context.effectivePolicy.deniedRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'Path is denied by CodyWork policy.' }
-      if (operation.method.includes('fileChange') && paths.some(path => !session.context.effectivePolicy.writableRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'File change is outside the Demand Worktree.' }
-      if (session.mode === 'yolo') return { action: 'allow', reason: 'CodyWork YOLO mode inside the fixed sandbox.' }
-      return { action: 'ask' }
-    } }
-    this.manager = new CodexSessionManager({ host: this.host, policy })
-    this.unsubscribeManager = this.manager.subscribe(event => {
-      const conversationId = this.sessionIdByThreadId.get(event.threadId)
-      if (!conversationId) return
-      const wrapped = toRuntimeEvent(event, conversationId)
-      for (const listener of this.listeners.get(conversationId) ?? []) listener(wrapped)
-    })
+    if (!this.manager) {
+      this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
+      this.catalog = new CodexSessionCatalog(this.host)
+      const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
+        const session = this.sessions.get(binding.id)
+        if (!session) return { action: 'deny', reason: 'CodyWork session is not attached.' }
+        const paths = referencedPaths(operation.params)
+        if (paths.some(path => session.context.effectivePolicy.deniedRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'Path is denied by CodyWork policy.' }
+        if (operation.method.includes('fileChange') && paths.some(path => !session.context.effectivePolicy.writableRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'File change is outside the Demand Worktree.' }
+        if (session.mode === 'yolo') return { action: 'allow', reason: 'CodyWork YOLO mode inside the fixed sandbox.' }
+        return { action: 'ask' }
+      } }
+      this.manager = new CodexSessionManager({ host: this.host, policy })
+      this.unsubscribeManager = this.manager.subscribe(event => {
+        const conversationId = this.sessionIdByThreadId.get(event.threadId)
+        if (!conversationId) return
+        const wrapped = toRuntimeEvent(event, conversationId)
+        for (const listener of this.listeners.get(conversationId) ?? []) listener(wrapped)
+      })
+    }
+    // Catalog reads are valid only after the App Server handshake. Keep the
+    // manager allocated across a failed handshake so the next request can retry
+    // the shared host's de-duplicated initialization promise.
+    await this.requireHost().ensureInitialized()
     return this.manager
   }
 
@@ -300,6 +305,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   private requireCatalog(): CodexSessionCatalog { if (!this.catalog) throw new Error('Codex Session Catalog 尚未初始化'); return this.catalog }
+  private requireHost(): AppServerHost { if (!this.host) throw new Error('Codex App Server 尚未初始化'); return this.host }
   private requireManager(): CodexSessionManager { if (!this.manager) throw new Error('Codex Session Manager 尚未初始化'); return this.manager }
   private command(): string { return this.options.command?.trim() || 'codex app-server --stdio' }
   private modeFromContext(context: RuntimeContext): RuntimePermissionMode { return context.effectivePolicy.approval === 'none' ? 'yolo' : context.effectivePolicy.writableRoots.length ? 'workspace-write' : 'read-only' }
