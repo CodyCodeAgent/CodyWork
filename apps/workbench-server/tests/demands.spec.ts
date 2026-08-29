@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../src/db/index.js'
 import { addRepositoryToDemand, createDemand, importExistingWorktrees, listDemands, reconcileDemandOperations } from '../src/services/demands.js'
 import { dashboardSnapshot } from '../src/services/dashboard.js'
-import { addRepository, listRepositories } from '../src/services/repositories.js'
+import { addRepository, inspectRepository, listRepositories } from '../src/services/repositories.js'
 
 function git(cwd: string, args: string[]) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
@@ -42,6 +42,20 @@ function fixture() {
 }
 
 describe('demand worktree construction', () => {
+  it('reports untracked files as dirty before the first commit', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-unborn-repo-'))
+    initRepository(root, 'main')
+    writeFileSync(join(root, 'README.md'), '# unborn repository\n')
+
+    expect(inspectRepository(root)).toMatchObject({
+      dirty: true,
+      defaultRef: 'main',
+      head: '',
+    })
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('keeps a root Git Workspace clean after creating CodyWork-owned Demand worktrees', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-root-demand-'))
     initRepository(root, 'main')

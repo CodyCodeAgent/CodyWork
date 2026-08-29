@@ -63,13 +63,24 @@ function repositoryRef(path: string): string {
   }
 }
 
+function repositoryHead(path: string): string {
+  try {
+    return runGit(path, ['rev-parse', 'HEAD'])
+  } catch {
+    // An initialized repository may legitimately have an unborn branch. Its
+    // worktree status is still meaningful and must not be discarded with the
+    // missing commit id.
+    return ''
+  }
+}
+
 export function inspectRepository(path: string): { dirty: boolean; defaultRef: string; originUrl: string | null; head: string } {
   const status = runGit(path, ['status', '--porcelain=v1'])
   return {
     dirty: status.length > 0,
     defaultRef: repositoryRef(path),
     originUrl: repositoryOrigin(path),
-    head: runGit(path, ['rev-parse', 'HEAD']),
+    head: repositoryHead(path),
   }
 }
 

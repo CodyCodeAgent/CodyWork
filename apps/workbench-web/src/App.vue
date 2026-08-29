@@ -203,7 +203,26 @@ function clearConversationState(): void {
   selectedConversation.value = null
   resetConversationState()
 }
-async function loadWorkspaces(): Promise<void> { loading.value = true; error.value = ''; try { workspaces.value = await api.listWorkspaces(); const route = routeParams(); const active = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspaces.value.find((item) => item.active) ?? workspaces.value[0]; if (active) await selectWorkspace(active, { demandId: route.demandId, history: 'replace' }) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { loading.value = false } }
+let workspaceLoadSequence = 0
+async function loadWorkspaces(): Promise<void> {
+  const sequence = ++workspaceLoadSequence
+  loading.value = true
+  error.value = ''
+  try {
+    const nextWorkspaces = await api.listWorkspaces()
+    if (sequence !== workspaceLoadSequence) return
+    workspaces.value = nextWorkspaces
+    const route = routeParams()
+    const active = nextWorkspaces.find((item) => item.id === route.workspaceId)
+      ?? nextWorkspaces.find((item) => item.active)
+      ?? nextWorkspaces[0]
+    if (active) await selectWorkspace(active, { demandId: route.demandId, history: 'replace' })
+  } catch (cause) {
+    if (sequence === workspaceLoadSequence) error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (sequence === workspaceLoadSequence) loading.value = false
+  }
+}
 function goTo(page: Exclude<Page, 'chat'>): void {
   activePage.value = page
   selectedDemand.value = null
@@ -294,6 +313,18 @@ async function requestDashboardRefresh(): Promise<void> {
       if (workspace.value?.id !== workspaceId) return
       dashboard.value = await api.dashboard(workspaceId)
     }
+    if (workspace.value?.id !== workspaceId) return
+    // The dashboard worker is authoritative for repository discovery and
+    // automatic existing-worktree adoption. Refresh the shell collections
+    // after it settles so the overview cards and demand navigation cannot
+    // remain stuck on the pre-scan empty snapshot until a full-page reload.
+    const [nextDemands, nextRepositories] = await Promise.all([
+      api.listDemands(workspaceId),
+      api.listRepositories(workspaceId),
+    ])
+    if (workspace.value?.id !== workspaceId) return
+    demands.value = nextDemands
+    repositories.value = nextRepositories
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -413,7 +444,13 @@ async function connect(conversation: Conversation): Promise<void> {
   })
 }
 async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; lastSubmittedPrompt.value = null; error.value = ''; await connect(conversation); await scrollToBottom(true) }
-async function workspaceCreated(): Promise<void> { await loadWorkspaces() }
+async function workspaceCreated(created: Workspace): Promise<void> {
+  showCreateWorkspace.value = false
+  const nextWorkspaces = await api.listWorkspaces()
+  workspaces.value = nextWorkspaces
+  const target = nextWorkspaces.find(item => item.id === created.id) ?? created
+  await selectWorkspace(target, { history: 'push' })
+}
 async function importExistingWorktrees(): Promise<void> { if (!workspace.value || importingWorktrees.value) return; importingWorktrees.value = true; try { const result = await api.importExistingWorktrees(workspace.value.id); demands.value = await api.listDemands(workspace.value.id); await refreshDashboard(); error.value = result.imported.length ? `已导入 ${result.imported.length} 个已有 Demand。` : result.skipped.length ? `没有可导入的 Worktree：${result.skipped[0]!.reason}` : '没有发现尚未导入的 Worktree。' } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { importingWorktrees.value = false } }
 async function createDemand(): Promise<void> { if (!workspace.value) return; creating.value = true; modalError.value = ''; try { const created = await api.createDemand(workspace.value.id, { name: demandName.value.trim(), ...(demandBranch.value.trim() ? { branchName: demandBranch.value.trim() } : {}), repositoryIds: selectedRepositoryIds.value }); demands.value = await api.listDemands(workspace.value.id); showCreateDemand.value = false; demandName.value = ''; demandBranch.value = ''; selectedRepositoryIds.value = []; const demand = demands.value.find((item) => item.id === created.demand.id); if (demand) await openDemand(demand) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { creating.value = false } }
 async function createConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || creatingConversation.value) return; creatingConversation.value = true; error.value = ''; try { const created = await api.createConversation(workspace.value.id, selectedDemand.value.id); conversations.value = [created, ...conversations.value]; await openConversation(created) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { creatingConversation.value = false } }
