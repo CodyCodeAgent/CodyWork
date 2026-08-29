@@ -10,7 +10,7 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.14.0",
+    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.15.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
