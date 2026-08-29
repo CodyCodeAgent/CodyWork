@@ -3,14 +3,13 @@ import { nowIso } from '../../src/db/index.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from '../../src/runtime/protocol.js'
 import type {
   ConversationHandle,
-  ConversationRuntimeAdapter,
+  CodyWorkRuntime,
   CreateConversationRequest,
   ListNativeThreadsRequest,
   NativeThreadSummary,
   ReadConversationRequest,
   RuntimeContext,
   RuntimeEvent,
-  RuntimeManifest,
   RuntimePermissionMode,
   SendTurnRequest,
   SendTurnResult,
@@ -21,22 +20,19 @@ import type {
 } from '../../src/runtime/protocol.js'
 
 /** Deterministic adapter available only to protocol and service tests. */
-export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
-  readonly provider = 'test'
+export class TestRuntimeAdapter implements CodyWorkRuntime {
   private readonly conversations = new Map<string, ConversationHandle>()
   private readonly contexts = new Map<string, RuntimeContext>()
   private readonly history = new Map<string, RuntimeEvent[]>()
 
-  async getManifest(): Promise<RuntimeManifest> {
-    return { provider: this.provider, runtimeVersion: 'test-1.0.0', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION, streaming: true, resume: true, fork: false, interrupt: true, approvals: true, diffs: true, subagents: false, readPolicy: 'roots', writePolicy: 'roots', shellPolicy: 'disabled', approval: 'workbench', workspaceInitialize: false, workspaceRepair: false, goals: true, plans: true, questions: true }
-  }
+  async getInfo() { return { runtimeVersion: 'test-1.0.0', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION } }
 
   async checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult> { return { status: 'ready', present: [request.workspacePath], missing: [], message: 'test runtime accepts the Workspace' } }
   async initializeWorkspace(_request: WorkspaceInitializationRequest): Promise<WorkspaceInitializationResult> { return { status: 'unsupported', message: 'test runtime does not initialize Workspaces' } }
 
   async createConversation(request: CreateConversationRequest): Promise<ConversationHandle> {
     const id = request.conversationId ?? `conversation-${randomUUID()}`
-    const conversation = { id, provider: this.provider, nativeId: id, createdAt: nowIso() }
+    const conversation = { id, nativeId: id, createdAt: nowIso() }
     this.conversations.set(id, conversation); this.contexts.set(id, request.context)
     if (!this.history.has(conversation.nativeId)) this.history.set(conversation.nativeId, [])
     return conversation
@@ -44,7 +40,7 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
 
   async resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle> {
     const id = request.conversationId ?? request.nativeId
-    const conversation = { id, provider: this.provider, nativeId: request.nativeId, createdAt: nowIso() }
+    const conversation = { id, nativeId: request.nativeId, createdAt: nowIso() }
     this.conversations.set(id, conversation); this.contexts.set(id, request.context)
     if (!this.history.has(conversation.nativeId)) this.history.set(conversation.nativeId, [])
     return conversation
@@ -60,6 +56,14 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
   }
 
   async setPermission(_conversation: ConversationHandle, _mode: RuntimePermissionMode): Promise<void> {}
+  async resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
+    const byPath = new Map(context.instructionBundle.skills.map(skill => [skill.path, skill]))
+    return skillIds.map(id => {
+      const skill = byPath.get(id)
+      if (!skill) throw new Error(`Skill 不存在、已禁用或不适用于当前上下文：${id}`)
+      return { name: skill.name, path: skill.path }
+    })
+  }
 
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
     if (!this.conversations.has(request.conversation.id)) throw new Error('conversation does not belong to this adapter')
@@ -67,7 +71,7 @@ export class TestRuntimeAdapter implements ConversationRuntimeAdapter {
     const events: RuntimeEvent[] = []
     const emit = (type: RuntimeEvent['type'], data: Record<string, unknown>): void => {
       const timestamp = nowIso()
-      const event: RuntimeEvent = { id: randomUUID(), type, conversationId: request.conversation.id, threadId: request.conversation.nativeId, turnId, provider: this.provider, timestamp, atIso: timestamp, data }
+      const event: RuntimeEvent = { id: randomUUID(), type, conversationId: request.conversation.id, threadId: request.conversation.nativeId, turnId, timestamp, atIso: timestamp, data }
       events.push(event); request.onEvent?.(event)
     }
     emit('user.completed', { text: request.prompt, optimistic: true })

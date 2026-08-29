@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WorkbenchDb, WorkspaceRow, nowIso } from '../db/index.js'
 
@@ -47,10 +48,13 @@ function emptySnapshot(db: WorkbenchDb, workspace: WorkspaceRow): DashboardData 
 
 function workerCollector(dbPath: string): Collector {
   return (workspace) => new Promise((resolve, reject) => {
-    const taskPath = fileURLToPath(new URL('./dashboardWorker.ts', import.meta.url))
-    const tsxCli = fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url))
+    const sourceMode = extname(fileURLToPath(import.meta.url)) === '.ts'
+    const taskPath = fileURLToPath(new URL(sourceMode ? './dashboardWorker.ts' : './dashboardWorker.js', import.meta.url))
     const input = Buffer.from(JSON.stringify({ dbPath, workspace })).toString('base64url')
-    const child = spawn(process.execPath, [tsxCli, taskPath, input], {
+    const args = sourceMode
+      ? [fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)), taskPath, input]
+      : [taskPath, input]
+    const child = spawn(process.execPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let output = ''
@@ -96,7 +100,7 @@ export class DashboardCache {
 
   refreshIfStale(workspace: WorkspaceRow): DashboardView {
     const view = this.read(workspace)
-    if (view.cache.state === 'empty' || view.cache.state === 'stale') void this.refresh(workspace)
+    if (view.cache.state === 'empty' || (view.cache.state === 'stale' && !view.cache.lastError)) void this.refresh(workspace)
     return view
   }
 

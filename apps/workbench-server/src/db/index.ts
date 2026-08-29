@@ -40,7 +40,6 @@ export type ConversationPermissionMode = 'read-only' | 'workspace-write' | 'yolo
 
 export interface RuntimeSettingsRow {
   id: number
-  codex_url: string | null
   codex_command: string | null
   updated_at: string
 }
@@ -49,13 +48,10 @@ export interface ConversationRow {
   id: string
   demand_id: string
   workspace_id: string
-  provider: string
   native_id: string
   title: string
   status: ConversationStatus
   permission_mode: ConversationPermissionMode
-  goal_json: string | null
-  plan_json: string | null
   policy_hash: string
   instruction_hash: string
   created_at: string
@@ -129,18 +125,15 @@ export class WorkbenchDb {
         id TEXT PRIMARY KEY,
         demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-        provider TEXT NOT NULL,
         native_id TEXT NOT NULL,
         title TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'idle',
         permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
-        goal_json TEXT,
-        plan_json TEXT,
         policy_hash TEXT NOT NULL,
         instruction_hash TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        UNIQUE(provider, native_id)
+        UNIQUE(native_id)
       );
       CREATE TABLE IF NOT EXISTS conversation_audits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,7 +144,6 @@ export class WorkbenchDb {
       );
       CREATE TABLE IF NOT EXISTS runtime_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        codex_url TEXT,
         codex_command TEXT,
         updated_at TEXT NOT NULL
       );
@@ -164,24 +156,63 @@ export class WorkbenchDb {
       );
     `)
     // Direct cut-over: native Codex threads are the sole conversation history.
-    // Old event mirrors are intentionally discarded instead of migrated.
+    // Rebuild the metadata tables once so no retired provider/event/goal shape
+    // survives in the active schema. Message history is intentionally not copied.
     this.db.exec('DROP INDEX IF EXISTS conversation_events_conversation_id_id; DROP TABLE IF EXISTS conversation_events;')
     const conversationColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name?: string }[]
-    if (conversationColumns.some(column => column.name === 'last_event_id')) this.db.exec('ALTER TABLE conversations DROP COLUMN last_event_id;')
+    if (conversationColumns.some(column => ['provider', 'last_event_id', 'goal_json', 'plan_json'].includes(column.name ?? ''))) {
+      this.db.exec('PRAGMA foreign_keys = OFF;')
+      try {
+        this.db.exec(`
+          BEGIN IMMEDIATE;
+          ALTER TABLE conversation_audits RENAME TO conversation_audits_retired;
+          ALTER TABLE conversations RENAME TO conversations_retired;
+          CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            native_id TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'idle',
+            permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+            policy_hash TEXT NOT NULL,
+            instruction_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at)
+            SELECT id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at
+            FROM conversations_retired;
+          CREATE TABLE conversation_audits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            action TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+          INSERT INTO conversation_audits (id, conversation_id, action, data_json, created_at)
+            SELECT id, conversation_id, action, data_json, created_at FROM conversation_audits_retired;
+          DROP TABLE conversation_audits_retired;
+          DROP TABLE conversations_retired;
+          COMMIT;
+        `)
+      } finally {
+        this.db.exec('PRAGMA foreign_keys = ON;')
+      }
+    }
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
-    if (runtimeColumns.some(column => column.name === 'provider' || column.name?.startsWith('legacy_'))) {
+    if (runtimeColumns.some(column => column.name !== 'id' && column.name !== 'codex_command' && column.name !== 'updated_at')) {
       this.db.exec(`
         BEGIN IMMEDIATE;
-        ALTER TABLE runtime_settings RENAME TO runtime_settings_legacy;
+        ALTER TABLE runtime_settings RENAME TO runtime_settings_retired;
         CREATE TABLE runtime_settings (
           id INTEGER PRIMARY KEY CHECK (id = 1),
-          codex_url TEXT,
           codex_command TEXT,
           updated_at TEXT NOT NULL
         );
-        INSERT INTO runtime_settings (id, codex_url, codex_command, updated_at)
-          SELECT id, codex_url, codex_command, updated_at FROM runtime_settings_legacy;
-        DROP TABLE runtime_settings_legacy;
+        INSERT INTO runtime_settings (id, codex_command, updated_at)
+          SELECT id, codex_command, updated_at FROM runtime_settings_retired;
+        DROP TABLE runtime_settings_retired;
         COMMIT;
       `)
     }

@@ -44,7 +44,7 @@ describe('conversation websocket control plane', () => {
     const conversations = new ConversationService(test.db, runtime)
     const conversation = await conversations.create(test.workspaceId, test.demandId, 'Structured skill')
 
-    await conversations.send(test.workspaceId, conversation.id, 'Keep this user message clean', 'steer', { skills: ['e2e-sample'] })
+    await conversations.send(test.workspaceId, conversation.id, 'Keep this user message clean', 'steer', { skills: [realpathSync(skillPath)] })
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(runtime.requests[0]).toMatchObject({
@@ -52,7 +52,7 @@ describe('conversation websocket control plane', () => {
       mode: 'steer',
       settings: { skills: [{ name: 'e2e-sample', path: realpathSync(skillPath) }] },
     })
-    await conversations.send(test.workspaceId, conversation.id, '', 'queue', { skills: ['e2e-sample'] })
+    await conversations.send(test.workspaceId, conversation.id, '', 'queue', { skills: [realpathSync(skillPath)] })
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(runtime.requests[1]).toMatchObject({
       prompt: '',
@@ -65,7 +65,32 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('binds an existing provider thread to one Demand and persists the policy-scoped mapping', async () => {
+  it('passes collaboration mode as turn-scoped input without persisting a second owner', async () => {
+    class StateRuntime extends TestRuntimeAdapter {
+      requests: Array<Parameters<TestRuntimeAdapter['sendTurn']>[0]> = []
+      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+        this.requests.push(request)
+        return super.sendTurn(request)
+      }
+    }
+    const test = await fixture()
+    const runtime = new StateRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Structured state')
+
+    await conversations.send(test.workspaceId, conversation.id, 'plan this', 'queue', { collaborationMode: 'plan' })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(runtime.requests).toHaveLength(1)
+    expect(runtime.requests[0]?.settings).toMatchObject({ collaborationMode: 'plan' })
+    const columns = test.db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
+    expect(columns.map(column => column.name)).not.toEqual(expect.arrayContaining(['goal_json', 'plan_json']))
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('binds an existing Codex thread to one Demand and persists the policy-scoped mapping', async () => {
     class ResumeTrackingRuntime extends TestRuntimeAdapter {
       resumeCalls = 0
       override async resumeConversation(request: Parameters<TestRuntimeAdapter['resumeConversation']>[0]) {
@@ -206,7 +231,7 @@ describe('conversation websocket control plane', () => {
         const timestamp = nowIso()
         const event = {
           id: 'turn-interrupted', type: 'turn.interrupted' as const, conversationId: request.conversation.id,
-          threadId: request.conversation.nativeId, turnId: 'turn-1', provider: this.provider,
+          threadId: request.conversation.nativeId, turnId: 'turn-1',
           timestamp, atIso: timestamp, data: { status: 'interrupted' },
         }
         request.onEvent?.(event)

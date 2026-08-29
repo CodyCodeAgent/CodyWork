@@ -5,7 +5,6 @@ import type {
   EffectivePolicy,
   InstructionBundle,
   RuntimeInstructionSource,
-  RuntimePolicyRootMode,
   RuntimeShellPolicy,
   RuntimeApprovalMode,
 } from './protocol.js'
@@ -133,13 +132,11 @@ export interface PolicyInput {
   deniedRoots?: string[]
   shell?: RuntimeShellPolicy
   approval?: RuntimeApprovalMode
-  readPolicy?: RuntimePolicyRootMode
-  writePolicy?: RuntimePolicyRootMode
 }
 
 /**
- * Compile the vendor-neutral policy. Writable roots must always be inside the
- * Workspace; a runtime may narrow them further but may never widen them.
+ * Compile CodyWork's Worktree policy. Writable roots must always be inside the
+ * Workspace; the shared runtime may narrow them further but never widen them.
  */
 export function resolveEffectivePolicy(input: PolicyInput): EffectivePolicy {
   const workspacePath = canonicalPath(input.workspacePath)

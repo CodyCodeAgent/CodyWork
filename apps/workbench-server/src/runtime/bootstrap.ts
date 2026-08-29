@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { CodexRuntimeAdapter } from './codex.js'
+import { CodyWorkCodexRuntime } from './codex.js'
 import type { RuntimeEvent, WorkspaceInitializationResult } from './protocol.js'
 
 export const DEFAULT_WORKSPACE_SETUP_PROMPT = `You are the CodyWork Workspace setup agent. Inspect the selected directory before changing anything, then prepare it for CSR-style work.
@@ -29,9 +29,9 @@ export async function delegateWorkspaceInitialization(workspacePath: string, env
   if (!existsSync(workspacePath)) return { status: 'error', message: 'Workspace path does not exist' }
   const command = env.CODY_CODEX_COMMAND?.trim() || 'codex app-server --stdio'
   const model = env.CODY_CODEX_MODEL?.trim()
-  const adapter = new CodexRuntimeAdapter({ command, ...(model ? { model } : {}), env })
+  const runtime = new CodyWorkCodexRuntime({ command, ...(model ? { model } : {}), env })
   try {
-    return await adapter.initializeWorkspace({
+    return await runtime.initializeWorkspace({
       workspacePath,
       instruction: instruction ?? (env.CODY_CODEX_INIT_PROMPT?.trim() || DEFAULT_WORKSPACE_SETUP_PROMPT),
       ...(onEvent ? { onEvent } : {}),
@@ -39,6 +39,6 @@ export async function delegateWorkspaceInitialization(workspacePath: string, env
   } catch (error) {
     return { status: 'error', message: error instanceof Error ? error.message : String(error) }
   } finally {
-    await adapter.close()
+    await runtime.close()
   }
 }

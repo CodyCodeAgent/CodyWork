@@ -6,7 +6,7 @@ import { getDemand } from './demands.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/policy.js'
 import type {
   ConversationHandle,
-  ConversationRuntimeAdapter,
+  CodyWorkRuntime,
   NativeThreadSummary,
   RuntimeContext,
   RuntimeEvent,
@@ -16,13 +16,10 @@ import type {
 export interface ConversationView {
   id: string
   demandId: string
-  provider: string
   nativeId: string
   title: string
   status: ConversationRow['status']
   permissionMode: ConversationPermissionMode
-  goal: unknown
-  plan: unknown
   policyHash: string
   instructionHash: string
   createdAt: string
@@ -35,7 +32,6 @@ export interface ConversationEvent extends RuntimeEvent {
   conversationId: string
   turnId?: string
   itemId?: string
-  provider: string
 }
 
 export interface AvailableNativeThread extends NativeThreadSummary {
@@ -47,12 +43,14 @@ type Listener = (event: ConversationEvent) => void
 type ConversationSendSettings = {
   model?: string
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  collaborationMode?: 'default' | 'plan'
   skills?: string[]
 }
 
 type RuntimeTurnSettings = {
   model?: string
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  collaborationMode?: 'default' | 'plan'
   skills?: Array<{ name: string; path: string }>
 }
 
@@ -68,11 +66,6 @@ type DemandContext = {
   repositories: { id: string; name: string; worktreePath: string }[]
 }
 
-function parseJson(value: string | null): unknown {
-  if (!value) return null
-  try { return JSON.parse(value) as unknown } catch { return null }
-}
-
 /**
  * A shared App Server process can exit independently of CodyWork's durable
  * conversation metadata. This error is raised before `turn/start` is sent, so
@@ -86,13 +79,10 @@ function toView(row: ConversationRow): ConversationView {
   return {
     id: row.id,
     demandId: row.demand_id,
-    provider: row.provider,
     nativeId: row.native_id,
     title: row.title,
     status: row.status,
     permissionMode: row.permission_mode,
-    goal: parseJson(row.goal_json),
-    plan: parseJson(row.plan_json),
     policyHash: row.policy_hash,
     instructionHash: row.instruction_hash,
     createdAt: row.created_at,
@@ -125,20 +115,18 @@ export class ConversationService {
   /** App Server failure notifications, held until the enclosing send settles. */
   private readonly runtimeFailureMessages = new Map<string, string>()
 
-  private runtime: ConversationRuntimeAdapter
+  private runtime: CodyWorkRuntime
 
-  constructor(private readonly db: WorkbenchDb, runtime: ConversationRuntimeAdapter, private readonly onTurnFinished?: (workspaceId: string) => void) { this.runtime = runtime }
+  constructor(private readonly db: WorkbenchDb, runtime: CodyWorkRuntime, private readonly onTurnFinished?: (workspaceId: string) => void) { this.runtime = runtime }
 
-  getRuntime(): ConversationRuntimeAdapter { return this.runtime }
+  getRuntime(): CodyWorkRuntime { return this.runtime }
 
-  async replaceRuntime(runtime: ConversationRuntimeAdapter): Promise<void> {
+  async replaceRuntime(runtime: CodyWorkRuntime): Promise<void> {
     await this.runtime.close()
     this.runtime = runtime
     this.handles.clear(); this.contexts.clear()
     this.db.db.prepare("UPDATE conversations SET status = 'disconnected', updated_at = ? WHERE status IN ('running', 'awaiting_approval')").run(nowIso())
   }
-
-  async manifest() { return this.runtime.getManifest() }
 
   diagnostics() { return this.runtime.diagnostics?.() ?? null }
 
@@ -147,13 +135,11 @@ export class ConversationService {
     return rows.map(toView)
   }
 
-  /** Returns recent provider threads that may be resumed under this Demand's policy. */
+  /** Returns recent Codex threads that may be resumed under this Demand's policy. */
   async listAvailableNativeThreads(workspaceId: string, demandId: string): Promise<AvailableNativeThread[]> {
     const demand = this.requireDemand(workspaceId, demandId)
-    const manifest = await this.runtime.getManifest()
-    if (!manifest.resume || !this.runtime.listNativeThreads) throw new Error('当前 Runtime 不支持列出可恢复 Thread')
     const threads = await this.runtime.listNativeThreads({ context: this.contextFor(demand, 'workspace-write') })
-    const boundRows = this.db.db.prepare('SELECT native_id FROM conversations WHERE provider = ?').all(this.runtime.provider) as Array<{ native_id: string }>
+    const boundRows = this.db.db.prepare('SELECT native_id FROM conversations').all() as Array<{ native_id: string }>
     const bound = new Set(boundRows.map(row => row.native_id))
     return threads.map(thread => ({ ...thread, bound: bound.has(thread.nativeId) }))
   }
@@ -166,7 +152,6 @@ export class ConversationService {
 
   async history(workspaceId: string, conversationId: string): Promise<ConversationEvent[]> {
     const row = this.requireConversation(workspaceId, conversationId)
-    if (!this.runtime.readConversation) throw new Error('当前 Runtime 不支持读取原生 Thread 历史')
     const demand = this.requireDemand(workspaceId, row.demand_id)
     const context = this.contextFor(demand, row.permission_mode)
     try {
@@ -174,7 +159,7 @@ export class ConversationService {
     } catch (error) {
       // App Server cannot read a just-started native thread until its first user
       // turn materializes. Treat only an untouched local conversation as empty.
-      if (row.status === 'idle' && !row.goal_json && !row.plan_json) return []
+      if (row.status === 'idle') return []
       throw error
     }
   }
@@ -199,22 +184,19 @@ export class ConversationService {
       id,
       demand_id: demand.id,
       workspace_id: workspaceId,
-      provider: handle.provider,
       native_id: handle.nativeId,
       title: title?.trim() || '新会话',
       status: 'idle',
       permission_mode: 'workspace-write',
-      goal_json: null,
-      plan_json: null,
       policy_hash: context.effectivePolicy.hash,
       instruction_hash: context.instructionBundle.sha256,
       created_at: now,
       updated_at: now,
     }
-    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
-        row.id, row.demand_id, row.workspace_id, row.provider, row.native_id,
-        row.title, row.status, row.permission_mode, row.goal_json, row.plan_json,
+        row.id, row.demand_id, row.workspace_id, row.native_id,
+        row.title, row.status, row.permission_mode,
         row.policy_hash, row.instruction_hash, row.created_at,
         row.updated_at,
       )
@@ -223,15 +205,13 @@ export class ConversationService {
     return this.get(workspaceId, id)
   }
 
-  /** Binds a provider-native thread to this Demand without weakening its Worktree policy. */
+  /** Binds a native Codex thread to this Demand without weakening its Worktree policy. */
   async bind(workspaceId: string, demandId: string, input: { nativeId: string; title?: string }): Promise<ConversationView> {
     const nativeId = input.nativeId.trim()
     if (!nativeId) throw new Error('请输入 Thread 或 Session ID')
     if (nativeId.length > 240) throw new Error('Thread 或 Session ID 过长')
     const demand = this.requireDemand(workspaceId, demandId)
-    const manifest = await this.runtime.getManifest()
-    if (!manifest.resume || !this.runtime.resumeConversation) throw new Error('当前 Runtime 不支持恢复已有 Thread')
-    const existing = this.db.db.prepare('SELECT * FROM conversations WHERE provider = ? AND native_id = ?').get(this.runtime.provider, nativeId) as ConversationRow | undefined
+    const existing = this.db.db.prepare('SELECT * FROM conversations WHERE native_id = ?').get(nativeId) as ConversationRow | undefined
     if (existing) {
       if (existing.workspace_id === workspaceId && existing.demand_id === demandId) throw new Error('这个 Thread 已绑定到当前 Demand')
       throw new Error('这个 Thread 已绑定到另一个 Demand，不能跨 Worktree 复用')
@@ -243,27 +223,23 @@ export class ConversationService {
       id,
       demand_id: demand.id,
       workspace_id: workspaceId,
-      provider: this.runtime.provider,
       native_id: nativeId,
       title: input.title?.trim() || `已绑定 Thread ${nativeId.slice(0, 8)}`,
       status: 'idle',
       permission_mode: 'workspace-write',
-      goal_json: null,
-      plan_json: null,
       policy_hash: context.effectivePolicy.hash,
       instruction_hash: context.instructionBundle.sha256,
       created_at: now,
       updated_at: now,
     }
-    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, provider, native_id, title, status, permission_mode, goal_json, plan_json, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(row.id, row.demand_id, row.workspace_id, row.provider, row.native_id, row.title, row.status, row.permission_mode, row.goal_json, row.plan_json, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
+    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.demand_id, row.workspace_id, row.native_id, row.title, row.status, row.permission_mode, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
     this.audit(id, 'conversation.bound', { nativeId, demandId: demand.id, policyHash: context.effectivePolicy.hash })
     return this.get(workspaceId, id)
   }
 
   async composerOptions(workspaceId: string, demandId: string): Promise<RuntimeComposerOptions> {
     const demand = this.requireDemand(workspaceId, demandId)
-    if (!this.runtime.getComposerOptions) return { models: [], collaborationModes: [] }
     return this.runtime.getComposerOptions(this.contextFor(demand, 'workspace-write'))
   }
 
@@ -276,34 +252,12 @@ export class ConversationService {
     const turnId = `turn-${randomUUID()}`
     const context = this.contexts.get(conversationId)
     if (!context) throw new Error('会话 Runtime 上下文不可用')
-    const skillsByName = new Map(context.instructionBundle.skills.map(skill => [skill.name, skill]))
-    const selectedSkills = requestedSkills.map(name => {
-      const skill = skillsByName.get(name)
-      if (!skill) throw new Error(`Skill 不存在或不可用于当前 Workspace：${name}`)
-      return { name: skill.name, path: skill.path }
-    })
+    const selectedSkills = await this.runtime.resolveSkills(context, requestedSkills)
     const runtimeSettings: RuntimeTurnSettings = {
       ...(settings?.model ? { model: settings.model } : {}),
       ...(settings?.reasoningEffort ? { reasoningEffort: settings.reasoningEffort } : {}),
+      ...(settings?.collaborationMode ? { collaborationMode: settings.collaborationMode } : {}),
       ...(selectedSkills.length ? { skills: selectedSkills } : {}),
-    }
-    if (text === '/plan' || text === '/plan on' || text === '/plan off' || text === '/plan approve' || text === '/plan reject') {
-      await this.runtime.sendCommand?.({ conversation: this.handleFor(row), prompt: text, mode })
-      const current = parseJson(row.plan_json) as { active?: boolean } | null
-      const active = text === '/plan off' || text === '/plan reject' ? false : text === '/plan approve' ? Boolean(current?.active) : text === '/plan on' || text === '/plan' ? !current?.active : false
-      const status = text === '/plan approve' ? 'approved' : text === '/plan reject' ? 'rejected' : active ? 'planning' : 'inactive'
-      const plan = { active, status, updatedAt: nowIso() }
-      this.db.db.prepare('UPDATE conversations SET plan_json = ?, status = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(plan), 'idle', nowIso(), conversationId)
-      return { accepted: true, turnId }
-    }
-    if (text.startsWith('/goal')) {
-      await this.runtime.sendCommand?.({ conversation: this.handleFor(row), prompt: text, mode })
-      const objective = text.replace(/^\/goal\s*/, '').trim()
-      const current = parseJson(row.goal_json) as { objective?: string } | null
-      const commandStatus = objective === 'pause' || objective === '暂停' ? 'paused' : objective === 'resume' || objective === '恢复' ? 'active' : objective === 'complete' || objective === '完成' ? 'completed' : objective === 'clear' || objective === '清除' ? 'cleared' : null
-      const goal = commandStatus === 'cleared' ? null : commandStatus ? { objective: current?.objective ?? '', status: commandStatus, updatedAt: nowIso() } : objective ? { objective, status: 'active', updatedAt: nowIso() } : null
-      this.db.db.prepare('UPDATE conversations SET goal_json = ?, status = ?, updated_at = ? WHERE id = ?').run(goal ? JSON.stringify(goal) : null, 'idle', nowIso(), conversationId)
-      return { accepted: true, turnId }
     }
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
     const run = () => this.runTurn(row, text, turnId, mode, runtimeSettings)
@@ -323,7 +277,7 @@ export class ConversationService {
     if (context) {
       const next = permissionPolicy(context, mode)
       this.contexts.set(conversationId, next)
-      await this.runtime.setPermission?.(this.handleFor(row), mode)
+      await this.runtime.setPermission(this.handleFor(row), mode)
     }
     this.db.db.prepare('UPDATE conversations SET permission_mode = ?, updated_at = ? WHERE id = ?').run(mode, nowIso(), conversationId)
     this.audit(conversationId, 'permission.changed', { mode })
@@ -342,14 +296,14 @@ export class ConversationService {
   async approve(workspaceId: string, conversationId: string, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
-    await this.runtime.respondApproval?.(this.handleFor(row), approvalId, outcome)
+    await this.runtime.respondApproval(this.handleFor(row), approvalId, outcome)
     this.audit(conversationId, 'approval.resolved', { approvalId, outcome })
   }
 
   async answer(workspaceId: string, conversationId: string, requestId: string, answer: unknown): Promise<void> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
-    await this.runtime.respondQuestion?.(this.handleFor(row), requestId, answer)
+    await this.runtime.respondQuestion(this.handleFor(row), requestId, answer)
     this.audit(conversationId, 'question.resolved', { requestId, answer })
   }
 
@@ -362,7 +316,7 @@ export class ConversationService {
     return this.get(workspaceId, conversationId)
   }
 
-  /** Removes CodyWork's local record only. The provider-native Thread is intentionally retained. */
+  /** Removes CodyWork's local record only. The native Codex Thread is intentionally retained. */
   remove(workspaceId: string, conversationId: string): { deleted: true } {
     const row = this.requireConversation(workspaceId, conversationId)
     if (row.status === 'running' || row.status === 'awaiting_approval' || this.turnChains.has(conversationId)) {
@@ -385,7 +339,7 @@ export class ConversationService {
       const current = this.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(row.id) as { status?: string } | undefined
       if (current?.status !== 'idle') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), row.id)
     } catch (error) {
-      this.fail(row.id, row.provider, turnId, error instanceof Error ? error : new Error(String(error)))
+      this.fail(row.id, turnId, error instanceof Error ? error : new Error(String(error)))
     }
     this.onTurnFinished?.(row.workspace_id)
   }
@@ -407,7 +361,7 @@ export class ConversationService {
       if (!isMissingRuntimeAttachment(error)) throw error
 
       // The App Server owns transient thread attachments. Drop only CodyWork's
-      // stale in-memory references, resume the provider-native Thread under the
+      // stale in-memory references, resume the native Codex Thread under the
       // existing Demand policy, then retry the request once. Do not retry any
       // other failure: a remote turn may already have started in that case.
       this.handles.delete(row.id)
@@ -432,7 +386,7 @@ export class ConversationService {
     }
   }
 
-  private fail(conversationId: string, provider: string, turnId: string, error: Error): void {
+  private fail(conversationId: string, turnId: string, error: Error): void {
     const message = error.message.slice(0, 1_000)
     const alreadyPublished = this.runtimeFailureMessages.get(conversationId) === message
     this.runtimeFailureMessages.delete(conversationId)
@@ -444,7 +398,7 @@ export class ConversationService {
     if (!alreadyPublished) {
       const row = this.db.db.prepare('SELECT native_id FROM conversations WHERE id = ?').get(conversationId) as { native_id?: string } | undefined
       const timestamp = nowIso()
-      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', threadId: row?.native_id ?? '', provider, turnId, timestamp, atIso: timestamp, data: { error: message } })
+      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', threadId: row?.native_id ?? '', turnId, timestamp, atIso: timestamp, data: { error: message } })
     }
   }
 
@@ -506,9 +460,7 @@ export class ConversationService {
     if (this.handles.has(row.id)) return
     const demand = this.requireDemand(row.workspace_id, row.demand_id)
     const context = permissionPolicy(this.contextFor(demand, row.permission_mode), row.permission_mode)
-    const handle = await (this.runtime.resumeConversation
-      ? this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context })
-      : this.runtime.createConversation({ conversationId: row.id, context }))
+    const handle = await this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context })
     this.handles.set(row.id, handle)
     this.contexts.set(row.id, context)
   }

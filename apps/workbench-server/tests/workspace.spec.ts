@@ -22,11 +22,11 @@ describe('workspace-only server primitives', () => {
     const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]
     expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_audits', 'runtime_settings', 'dashboard_snapshots'])
     const conversationColumns = db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
-    expect(conversationColumns.map(column => column.name)).not.toContain('last_event_id')
+    expect(conversationColumns.map(column => column.name)).not.toEqual(expect.arrayContaining(['provider', 'last_event_id', 'goal_json', 'plan_json']))
     db.close()
   })
 
-  it('migrates legacy runtime settings to Codex-only without losing the saved command', () => {
+  it('cuts runtime settings over to the single Codex command without losing it', () => {
     const root = mkdtempSync(join(tmpdir(), 'codywork-db-migration-'))
     const path = join(root, 'workspace.db')
     const legacy = new DatabaseSync(path)
@@ -47,7 +47,7 @@ describe('workspace-only server primitives', () => {
     legacy.close()
     const db = new WorkbenchDb(path)
     const columns = db.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name: string }[]
-    expect(columns.map(column => column.name)).toEqual(['id', 'codex_url', 'codex_command', 'updated_at'])
+    expect(columns.map(column => column.name)).toEqual(['id', 'codex_command', 'updated_at'])
     const row = db.db.prepare('SELECT * FROM runtime_settings WHERE id = 1').get() as { codex_command: string }
     expect(row.codex_command).toBe('custom-codex app-server --stdio')
     db.close()
@@ -73,7 +73,7 @@ describe('workspace-only server primitives', () => {
     const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conversation_events'").all()
     const columns = db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
     expect(tables).toEqual([])
-    expect(columns.map(column => column.name)).not.toContain('last_event_id')
+    expect(columns.map(column => column.name)).not.toEqual(expect.arrayContaining(['provider', 'last_event_id', 'goal_json', 'plan_json']))
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
