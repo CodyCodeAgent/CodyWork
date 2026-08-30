@@ -7,6 +7,7 @@ import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from '../src/runtime/protocol.js'
 import { CodyWorkCodexRuntime } from '../src/runtime/codex.js'
+import { CODY_WEB_CORE_VERSION } from '@codycodeagent/cody-web-core/runtime'
 
 describe('generic runtime protocol', () => {
   it('compiles policy roots and instruction sources without widening writes', () => {
@@ -62,7 +63,7 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
     const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}` })
-    expect((await runtime.getInfo()).runtimeVersion).toBe('cody-web-core/0.33.5')
+    expect((await runtime.getInfo()).runtimeVersion).toBe(`cody-web-core/${CODY_WEB_CORE_VERSION}`)
     expect(runtime.diagnostics()).toBeNull()
     const context = {
       workspacePath: root,
