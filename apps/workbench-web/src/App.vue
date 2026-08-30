@@ -133,7 +133,10 @@ type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'cha
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
 const { state: conversationState, connect: connectConversationState, reset: resetConversationState } = useConversationController()
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
-const lastSubmittedPrompt = ref<string | null>(null)
+// Composer state belongs to a conversation. Keeping a single global draft made
+// a failed message from one session appear in a newly-created session.
+const draftByConversationId = new Map<string, string>()
+const lastSubmittedPromptByConversationId = new Map<string, string>()
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
@@ -222,6 +225,8 @@ async function deleteConversation(): Promise<void> {
       selectedConversation.value = null
       resetConversationState()
       draft.value = ''
+      draftByConversationId.delete(target.id)
+      lastSubmittedPromptByConversationId.delete(target.id)
       await openConversation(remaining[0]!)
     }
   } catch (cause) { deleteConversationError.value = cause instanceof Error ? cause.message : String(cause) } finally { deletingConversation.value = false }
@@ -471,12 +476,14 @@ function applyConversationLifecycle(conversationId: string, event: ConversationE
   if (event.type === 'turn.failed') {
     const reason = String(event.data.error ?? 'Codex 未能完成本次回复。')
     const sentenceReason = reason.replace(/[。.!！?？]+$/u, '')
-    if (lastSubmittedPrompt.value && !draft.value.trim()) {
-      draft.value = lastSubmittedPrompt.value
+    const failedPrompt = lastSubmittedPromptByConversationId.get(conversationId)
+    if (failedPrompt && !draftByConversationId.get(conversationId)?.trim()) {
+      draftByConversationId.set(conversationId, failedPrompt)
+      if (selectedConversation.value?.id === conversationId) draft.value = failedPrompt
       error.value = `Codex 本次连接中断：${sentenceReason}。原始消息已放回输入框，请确认后重试。`
     } else error.value = `Codex 本次连接中断：${reason}`
-    lastSubmittedPrompt.value = null
-  } else if (event.type === 'turn.completed' || event.type === 'turn.interrupted') lastSubmittedPrompt.value = null
+    lastSubmittedPromptByConversationId.delete(conversationId)
+  } else if (event.type === 'turn.completed' || event.type === 'turn.interrupted') lastSubmittedPromptByConversationId.delete(conversationId)
   conversations.value = conversations.value.map(item => item.id === conversationId ? {
     ...item,
     status: conversationStatusAfterEvent(item.status, event.type),
@@ -512,7 +519,7 @@ async function connect(conversation: Conversation): Promise<void> {
     },
   })
 }
-async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; lastSubmittedPrompt.value = null; error.value = ''; await connect(conversation); await scrollToBottom(true) }
+async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; error.value = ''; await connect(conversation); await scrollToBottom(true) }
 async function workspaceCreated(created: Workspace): Promise<void> {
   showCreateWorkspace.value = false
   const nextWorkspaces = await api.listWorkspaces()
@@ -527,8 +534,8 @@ async function openBindConversation(): Promise<void> { if (!workspace.value || !
 function closeBindConversation(): void { if (bindingConversation.value) return; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false }
 function selectNativeThread(thread: AvailableNativeThread): void { if (thread.bound) return; boundNativeId.value = thread.nativeId; if (!boundConversationTitle.value.trim()) boundConversationTitle.value = threadTitle(thread) }
 async function bindConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || bindingConversation.value || !canBindNativeThread.value) return; bindingConversation.value = true; modalError.value = ''; try { const created = await api.bindConversation(workspace.value.id, selectedDemand.value.id, { nativeId: boundNativeId.value.trim(), ...(boundConversationTitle.value.trim() ? { title: boundConversationTitle.value.trim() } : {}) }); conversations.value = [created, ...conversations.value]; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; boundNativeId.value = ''; boundConversationTitle.value = ''; await openConversation(created) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { bindingConversation.value = false } }
-async function sendMessage(): Promise<void> { if (!workspace.value || !selectedConversation.value || sending.value) return; const content = draft.value.trim(); const turnSkills = [...selectedSkillsForTurn.value]; if (!composerHasContent({ text: content, skills: turnSkills })) return; draft.value = ''; lastSubmittedPrompt.value = content; sending.value = true; try { await api.sendMessage(workspace.value.id, selectedConversation.value.id, content, resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value), { ...(selectedModel.value ? { model: selectedModel.value } : {}), ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}), collaborationMode: selectedCollaborationModeKind.value, ...(turnSkills.length ? { skills: turnSkills } : {}) }); selectedSkillsForTurn.value = [] } catch (cause) { draft.value = content; selectedSkillsForTurn.value = turnSkills; lastSubmittedPrompt.value = null; error.value = cause instanceof Error ? cause.message : String(cause) } finally { sending.value = false } }
-function updateDraft(value: string): void { draft.value = value }
+async function sendMessage(): Promise<void> { if (!workspace.value || !selectedConversation.value || sending.value) return; const conversationId = selectedConversation.value.id; const content = draft.value.trim(); const turnSkills = [...selectedSkillsForTurn.value]; if (!composerHasContent({ text: content, skills: turnSkills })) return; draft.value = ''; draftByConversationId.delete(conversationId); lastSubmittedPromptByConversationId.set(conversationId, content); sending.value = true; try { await api.sendMessage(workspace.value.id, conversationId, content, resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value), { ...(selectedModel.value ? { model: selectedModel.value } : {}), ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}), collaborationMode: selectedCollaborationModeKind.value, ...(turnSkills.length ? { skills: turnSkills } : {}) }); selectedSkillsForTurn.value = [] } catch (cause) { draft.value = content; draftByConversationId.set(conversationId, content); selectedSkillsForTurn.value = turnSkills; lastSubmittedPromptByConversationId.delete(conversationId); error.value = cause instanceof Error ? cause.message : String(cause) } finally { sending.value = false } }
+function updateDraft(value: string): void { draft.value = value; const conversationId = selectedConversation.value?.id; if (!conversationId) return; if (value) draftByConversationId.set(conversationId, value); else draftByConversationId.delete(conversationId) }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
 async function loadComposerOptions(demandId: string): Promise<void> { if (!workspace.value) return; try { const options = await api.composerOptions(workspace.value.id, demandId); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!selectedModel.value && options.models.length) selectedModel.value = options.models[0]! } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; selectedSkillsForTurn.value = [] } }
 function selectCollaborationMode(name: string): void {
