@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import {
   CODY_WEB_CORE_VERSION,
   createAppServerHost,
@@ -73,17 +74,21 @@ function policyInstructions(context: RuntimeContext): string {
   return `Effective CodyWork policy. Readable roots: ${context.effectivePolicy.readableRoots.join(', ')}. Writable roots: ${context.effectivePolicy.writableRoots.join(', ')}. Never access or modify paths outside these roots.`
 }
 
-function executionContext(context: RuntimeContext, mode: RuntimePermissionMode): ExecutionContext {
-  const cwd = context.demandPath ?? context.workspacePath
+function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, bootstrapCwd: string): ExecutionContext {
+  const executionCwd = realpathSync.native(context.demandPath ?? context.workspacePath)
   return {
     thread: {
-      cwd, approvalPolicy: approvalPolicy(mode), sandbox: mode === 'read-only' ? 'read-only' : 'workspace-write',
+      // Codex discovers Skills when a native Thread is created/resumed. Do not
+      // point that bootstrap phase at a Workspace: a large Workspace skill
+      // catalog would be implicitly injected even when the user referenced no
+      // `$Skill`. The actual Turn below always receives the Demand Worktree.
+      cwd: bootstrapCwd, approvalPolicy: approvalPolicy(mode), sandbox: mode === 'read-only' ? 'read-only' : 'workspace-write',
       runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
       baseInstructions: context.instructionBundle.systemInstructions, developerInstructions: policyInstructions(context),
       experimentalRawEvents: false, ephemeral: false,
     },
     turn: {
-      cwd,
+      cwd: executionCwd,
       runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
       approvalPolicy: approvalPolicy(mode),
       sandboxPolicy: sandboxPolicy(context, mode),
@@ -142,7 +147,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const manager = await this.ensureRuntime(request.context)
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
-    const binding = await manager.create(id, executionContext(request.context, mode))
+    const binding = await manager.create(id, executionContext(request.context, mode, this.runtimeOwnerCwd()))
     return this.attach(id, binding, request.context, mode)
   }
 
@@ -151,7 +156,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
     const binding = { id, threadId: request.nativeId }
-    await manager.resume(binding, executionContext(request.context, mode))
+    await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd()))
     return this.attach(id, binding, request.context, mode)
   }
 
@@ -227,7 +232,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   async setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void> {
     const session = this.require(conversation)
     session.mode = mode
-    this.requireManager().setContext(session.handle.id, executionContext(session.context, mode))
+    this.requireManager().setContext(session.handle.id, executionContext(session.context, mode, this.runtimeOwnerCwd()))
   }
 
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
@@ -276,7 +281,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       // workspace skill before the user has referenced one. Keep the process
       // in CodyWork's neutral runtime directory; each thread/turn still gets
       // its Demand Worktree cwd and policy explicitly.
-      this.host = createAppServerHost({ command: this.command(), cwd: this.options.appServerCwd ?? process.cwd(), ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
+      this.host = createAppServerHost({ command: this.command(), cwd: this.runtimeOwnerCwd(), ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
       this.catalog = new CodexSessionCatalog(this.host)
       const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
         const session = this.sessions.get(binding.id)
@@ -325,5 +330,6 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   private requireHost(): AppServerHost { if (!this.host) throw new Error('Codex App Server 尚未初始化'); return this.host }
   private requireManager(): CodexSessionManager { if (!this.manager) throw new Error('Codex Session Manager 尚未初始化'); return this.manager }
   private command(): string { return this.options.command?.trim() || 'codex app-server --stdio' }
+  private runtimeOwnerCwd(): string { return realpathSync.native(this.options.appServerCwd ?? process.cwd()) }
   private modeFromContext(context: RuntimeContext): RuntimePermissionMode { return context.effectivePolicy.approval === 'none' ? 'yolo' : context.effectivePolicy.writableRoots.length ? 'workspace-write' : 'read-only' }
 }

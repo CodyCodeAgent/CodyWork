@@ -20,6 +20,7 @@ try {
 }
 let turnSequence = Number(restoredState?.turnSequence ?? 0)
 let threadSequence = Number(restoredState?.threadSequence ?? 0)
+let lastThreadCwd = ''
 const threadHistories = new Map(restoredState?.threadHistories ?? [['native-fixture-thread', catalogHistory]])
 const pendingTurns = new Map()
 let initialized = false
@@ -60,7 +61,7 @@ function recordFailedTurn(threadId, prompt) {
   persistState()
 }
 
-function emitTurn(threadId, prompt) {
+function emitTurn(threadId, prompt, turnCwd = '') {
   const turnId = `turn-${++turnSequence}`
   const itemId = `item-${turnSequence}`
   pendingTurns.set(turnId, { threadId, prompt, itemId })
@@ -73,7 +74,10 @@ function emitTurn(threadId, prompt) {
     write({ id: 800 + turnSequence, method: 'item/tool/requestUserInput', params: { threadId, turnId, itemId, questions: [{ id: 'q1', header: 'Fixture', question: '继续吗？', isOther: false, isSecret: false, options: null }], isBlocking: true } })
     return
   }
-  const text = prompt.includes('SERVER_CWD') ? process.cwd() : prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
+  const text = prompt.includes('SERVER_CWD') ? process.cwd()
+    : prompt.includes('THREAD_CWD') ? lastThreadCwd
+      : prompt.includes('TURN_CWD') ? turnCwd
+        : prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
   notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(0, 5) })
   notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(5) })
   notify('item/completed', { threadId, turnId, item: { id: itemId, type: 'agentMessage', text } })
@@ -98,6 +102,7 @@ rl.on('line', line => {
     } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length === 0) {
       write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
     } else {
+      lastThreadCwd = String(message.params?.cwd ?? '')
       const threadId = `native-fixture-thread-${++threadSequence}`
       threadHistories.set(threadId, [])
       persistState()
@@ -215,9 +220,10 @@ rl.on('line', line => {
       return
     }
     write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
+    const turnCwd = String(message.params?.cwd ?? '')
     if (prompt.includes('DISCONNECT')) setTimeout(() => { recordFailedTurn(threadId, prompt); process.exit(23) }, 5)
-    else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt), 5)
-    else setTimeout(() => emitTurn(threadId, prompt), 5)
+    else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
+    else setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })
   else if (message.id === 900 + turnSequence) {
     write({ id: message.id, result: { decision: 'approved' } })

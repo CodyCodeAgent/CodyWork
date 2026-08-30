@@ -74,6 +74,8 @@ describe('generic runtime protocol', () => {
     }
     const conversation = await runtime.createConversation({ context })
     expect(runtime.diagnostics()).toMatchObject({ status: 'running', initialized: true })
+    await expect(runtime.sendTurn({ conversation, prompt: 'THREAD_CWD' })).resolves.toMatchObject({ finalText: realpathSync(appServerCwd) })
+    await expect(runtime.sendTurn({ conversation, prompt: 'TURN_CWD' })).resolves.toMatchObject({ finalText: realpathSync(root) })
     await expect(runtime.listNativeThreads({ context })).resolves.toEqual(expect.arrayContaining([expect.objectContaining({
       nativeId: 'native-fixture-thread',
       preview: 'Fixture catalog thread',
@@ -106,7 +108,7 @@ describe('generic runtime protocol', () => {
     await expect(runtime.sendTurn({ conversation, prompt: 'SERVER_CWD' })).resolves.toMatchObject({ finalText: realpathSync(appServerCwd) })
     const nativeHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
     expect(nativeHistory.slice(0, 4).map(event => event.type)).toEqual(['turn.started', 'user.completed', 'assistant.completed', 'turn.completed'])
-    expect(nativeHistory.find(event => event.itemId === 'item-1')).toMatchObject({
+    expect(nativeHistory.find(event => event.type === 'assistant.completed' && event.data.text === 'CODEX_FIXTURE_OK')).toMatchObject({
       type: 'assistant.completed',
       data: { text: 'CODEX_FIXTURE_OK' },
     })
