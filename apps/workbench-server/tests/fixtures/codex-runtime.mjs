@@ -205,9 +205,10 @@ rl.on('line', line => {
       policy?.type !== 'workspaceWrite'
       || !Array.isArray(policy?.writableRoots)
       || policy.writableRoots.length === 0
+      || policy.networkAccess !== true
       || Object.hasOwn(policy, 'readOnlyAccess')
     )
-    const invalidReadPolicy = prompt.includes('EXPECT_READ_ONLY') && (policy?.type !== 'readOnly' || policy?.networkAccess !== false)
+    const invalidReadPolicy = prompt.includes('EXPECT_READ_ONLY') && (policy?.type !== 'readOnly' || policy?.networkAccess !== true)
     const invalidCollaborationMode = prompt.includes('REAL') && message.params?.collaborationMode?.mode !== 'plan'
     if (invalidWritePolicy || invalidReadPolicy || invalidCollaborationMode) {
       write({ id: message.id, error: { code: -32602, message: 'invalid current Codex sandbox policy' } })

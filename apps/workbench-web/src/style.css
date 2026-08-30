@@ -298,8 +298,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .conversation-row strong, .conversation-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-row strong { font-size: 12px; }
 .conversation-row small { margin-top: 3px; color: #98a2b2; font-size: 10px; }
-.conversation-rename { display: none; margin-left: auto; color: #7f8ba0; font-size: 16px; }
-.conversation-row:hover .conversation-rename, .conversation-row.active .conversation-rename { display: block; }
 .conversation-status { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #b2bac6; }
 .conversation-status.running { background: #4c78ed; box-shadow: 0 0 0 4px #e7edff; }
 .conversation-status.awaiting_approval { background: #dc9b2f; box-shadow: 0 0 0 4px #fff4dc; }
@@ -666,6 +664,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .conversation-row:hover, .conversation-row.active { background: #f0f0ff; }
 .conversation-row-wrap { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .conversation-row-wrap .conversation-row { min-width: 0; flex: 1; }
+.conversation-edit-action { display: grid; flex: 0 0 auto; place-items: center; width: 36px; min-height: 44px; padding: 0; color: #8792a3; background: transparent; border: 0; border-radius: 8px; cursor: pointer; transition: color 160ms var(--ease), background 160ms var(--ease), opacity 160ms var(--ease); }
+.conversation-edit-action svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.conversation-edit-action.rename { opacity: 0; }
+.conversation-row-wrap:hover .conversation-edit-action.rename, .conversation-row-wrap.active .conversation-edit-action.rename, .conversation-row-wrap:focus-within .conversation-edit-action.rename { opacity: 1; }
+.conversation-edit-action.rename:hover, .conversation-edit-action.rename:focus-visible { color: #385fc9; background: #eef3ff; outline: none; }
+.conversation-edit-action.save:hover, .conversation-edit-action.save:focus-visible { color: #21855d; background: #eaf8f1; outline: none; }
+.conversation-edit-action.cancel:hover, .conversation-edit-action.cancel:focus-visible { color: #9b5360; background: #fff0f1; outline: none; }
+.conversation-edit-action:focus-visible { box-shadow: 0 0 0 3px rgba(63,99,201,.16); }
+.conversation-edit-action:disabled { color: #c8ced8; cursor: wait; }
+.conversation-rename-editor { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; padding: 5px 0 5px 9px; background: #f0f0ff; border: 1px solid #d8dafa; border-radius: 9px; }
+.conversation-rename-field { min-width: 0; flex: 1; }
+.conversation-rename-field input { width: 100%; min-height: 34px; padding: 6px 8px; color: var(--text); background: #fff; border: 1px solid #cdd5e3; border-radius: 7px; font: 600 12px/1.4 inherit; }
+.conversation-rename-field input:focus { border-color: #5b5cf0; outline: 3px solid rgba(91,92,240,.13); }
+.conversation-rename-field small { display: block; padding: 4px 2px 0; color: #b24d59; font-size: 9px; line-height: 1.3; }
 .conversation-delete { display: grid; flex: 0 0 auto; place-items: center; width: 44px; min-height: 44px; padding: 0; color: #9aa3b2; background: transparent; border: 0; border-radius: 8px; cursor: pointer; transition: color 160ms var(--ease), background 160ms var(--ease); }
 .conversation-delete svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .conversation-delete:hover, .conversation-delete:focus-visible { color: #c44857; background: #fff0f1; outline: none; }

@@ -8,6 +8,7 @@ import {
   buildTurnUserInput,
   CodexSessionCatalog,
   CodexSessionManager,
+  CodexThreadCommands,
   type ExecutionContext,
   type ExecutionPolicyProvider,
   type ThreadBinding,
@@ -61,10 +62,10 @@ function approvalPolicy(mode: RuntimePermissionMode): 'never' | 'untrusted' {
 }
 
 function sandboxPolicy(context: RuntimeContext, mode: RuntimePermissionMode): TurnInput['sandboxPolicy'] {
-  if (mode === 'read-only') return { type: 'readOnly', networkAccess: false }
+  if (mode === 'read-only') return { type: 'readOnly', networkAccess: true }
   return {
     type: 'workspaceWrite', writableRoots: context.effectivePolicy.writableRoots,
-    networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true,
+    networkAccess: true, excludeTmpdirEnvVar: true, excludeSlashTmp: true,
   }
 }
 
@@ -152,6 +153,11 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const binding = { id, threadId: request.nativeId }
     await manager.resume(binding, executionContext(request.context, mode))
     return this.attach(id, binding, request.context, mode)
+  }
+
+  async renameConversation(conversation: ConversationHandle, title: string): Promise<void> {
+    const session = this.require(conversation)
+    await new CodexThreadCommands(this.requireHost()).renameThread(session.binding.threadId, title)
   }
 
   async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> {

@@ -307,10 +307,14 @@ export class ConversationService {
     this.audit(conversationId, 'question.resolved', { requestId, answer })
   }
 
-  rename(workspaceId: string, conversationId: string, title: string): ConversationView {
-    this.requireConversation(workspaceId, conversationId)
+  async rename(workspaceId: string, conversationId: string, title: string): Promise<ConversationView> {
+    const row = this.requireConversation(workspaceId, conversationId)
     const value = title.trim()
     if (!value) throw new Error('会话标题不能为空')
+    if (value.length > 120) throw new Error('会话标题不能超过 120 个字符')
+    if (value === row.title) return toView(row)
+    await this.ensureHandle(row)
+    await this.runtime.renameConversation(this.handleFor(row), value)
     this.db.db.prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?').run(value, nowIso(), conversationId)
     this.audit(conversationId, 'conversation.renamed', { title: value })
     return this.get(workspaceId, conversationId)
