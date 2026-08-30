@@ -56,6 +56,9 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
   }
 
   async setPermission(_conversation: ConversationHandle, _mode: RuntimePermissionMode): Promise<void> {}
+  async renameConversation(conversation: ConversationHandle, _title: string): Promise<void> {
+    if (!this.conversations.has(conversation.id)) throw new Error('conversation does not belong to this adapter')
+  }
   async resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
     const byPath = new Map(context.instructionBundle.skills.map(skill => [skill.path, skill]))
     return skillIds.map(id => {
