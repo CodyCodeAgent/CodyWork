@@ -73,7 +73,7 @@ function emitTurn(threadId, prompt) {
     write({ id: 800 + turnSequence, method: 'item/tool/requestUserInput', params: { threadId, turnId, itemId, questions: [{ id: 'q1', header: 'Fixture', question: '继续吗？', isOther: false, isSecret: false, options: null }], isBlocking: true } })
     return
   }
-  const text = prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
+  const text = prompt.includes('SERVER_CWD') ? process.cwd() : prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
   notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(0, 5) })
   notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text.slice(5) })
   notify('item/completed', { threadId, turnId, item: { id: itemId, type: 'agentMessage', text } })

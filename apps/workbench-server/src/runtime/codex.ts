@@ -40,7 +40,7 @@ import type {
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from './protocol.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from './policy.js'
 
-type CodexOptions = { command?: string; model?: string; env?: NodeJS.ProcessEnv }
+type CodexOptions = { command?: string; model?: string; env?: NodeJS.ProcessEnv; appServerCwd?: string }
 type ProductSession = {
   handle: ConversationHandle
   binding: ThreadBinding
@@ -271,7 +271,12 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
 
   private async ensureRuntime(context: RuntimeContext): Promise<CodexSessionManager> {
     if (!this.manager) {
-      this.host = createAppServerHost({ command: this.command(), cwd: context.workspacePath, ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
+      // The App Server process is product-owned and shared across demands.
+      // Starting it in the first Workspace makes Codex auto-discover every
+      // workspace skill before the user has referenced one. Keep the process
+      // in CodyWork's neutral runtime directory; each thread/turn still gets
+      // its Demand Worktree cwd and policy explicitly.
+      this.host = createAppServerHost({ command: this.command(), cwd: this.options.appServerCwd ?? process.cwd(), ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
       this.catalog = new CodexSessionCatalog(this.host)
       const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
         const session = this.sessions.get(binding.id)
