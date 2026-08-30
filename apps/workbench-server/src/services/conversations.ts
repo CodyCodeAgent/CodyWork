@@ -341,7 +341,10 @@ export class ConversationService {
     try {
       await this.sendRuntimeTurn(row, prompt, submissionMode, settings)
       const current = this.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(row.id) as { status?: string } | undefined
-      if (current?.status !== 'idle') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), row.id)
+      // A normalized terminal failure is a successful transport completion of
+      // `sendTurn`, not a successful Codex Turn. Preserve it so the UI can
+      // retain the failed outbox instead of falsely reporting completion.
+      if (current?.status !== 'idle' && current?.status !== 'failed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), row.id)
     } catch (error) {
       this.fail(row.id, turnId, error instanceof Error ? error : new Error(String(error)))
     }

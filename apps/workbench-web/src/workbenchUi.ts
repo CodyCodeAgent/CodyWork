@@ -3,14 +3,6 @@ import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand } f
 export type HistoryMode = 'push' | 'replace' | 'none'
 export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
-export interface CollaborationModeOption { value: string; label: string }
-
-export function collaborationModeOptions(modes: Array<{ name: string; label: string }>): CollaborationModeOption[] {
-  return [
-    { value: 'default', label: 'Default' },
-    ...modes.filter(mode => mode.name !== 'default').map(mode => ({ value: mode.name, label: mode.label })),
-  ]
-}
 
 export function conversationStatusLabel(status: Conversation['status']): string {
   if (status === 'idle') return '就绪'
