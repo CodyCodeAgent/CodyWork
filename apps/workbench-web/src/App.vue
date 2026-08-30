@@ -54,7 +54,7 @@
             </div>
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div class="composer">
-              <div class="composer-hint">{{ selectedCollaborationModeKind === 'plan' ? 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（Enter 换行，Control + Enter 发送）' : '描述下一步…（Enter 换行，Control + Enter 排队）') : '描述你希望完成的事情…（Enter 换行，Control + Enter 发送）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @send="sendMessage" @stop="interrupt" />
+              <div class="composer-hint">{{ selectedCollaborationModeKind === 'plan' ? 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。输入 $ 可引用多个 Skill。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）' : '描述下一步…（输入 $ 引用 Skill；Enter 换行，Control + Enter 排队）') : '描述你希望完成的事情…（输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @send="sendMessage" @stop="interrupt" />
             </div>
           </section>
         </div>
@@ -81,7 +81,15 @@ import {
   visibleMessageStartIndex,
   type ConversationScrollState,
 } from '@codycodeagent/cody-web-core/conversation'
-import { composerHasContent, resolveComposerSubmitMode, type ComposerSubmitMode } from '@codycodeagent/cody-web-core/composer'
+import {
+  composerHasContent,
+  isKnownReasoningEffort,
+  mergeCollaborationModeOptions,
+  reconcileSelectedCollaborationModeName,
+  resolveComposerSubmitMode,
+  type ComposerCollaborationModeOption,
+  type ComposerSubmitMode,
+} from '@codycodeagent/cody-web-core/composer'
 import { createReconnectingConversationSocket, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
 import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
@@ -106,7 +114,6 @@ import {
 } from './api'
 import {
   canDeleteConversation as canDeleteConversationRule,
-  collaborationModeOptions,
   conversationStatusAfterEvent,
   conversationStatusLabel as statusLabel,
   dashboardCacheLabel as formatDashboardCacheLabel,
@@ -144,13 +151,22 @@ const threadProjects = computed<ThreadProject[]>(() => groupThreadProjects(nativ
 const filteredNativeThreads = computed(() => filterNativeThreads(nativeThreads.value, selectedThreadProject.value, threadQuery.value))
 const canBindNativeThread = computed(() => manualThreadEntry.value ? Boolean(boundNativeId.value.trim()) : filteredNativeThreads.value.some(thread => thread.nativeId === boundNativeId.value && !thread.bound))
 const composerModels = computed<CodyComposerOption[]>(() => runtimeModels.value.map(model => ({ value: model, label: model })))
-const composerCollaborationModes = computed<CodyComposerOption[]>(() => collaborationModeOptions(runtimeCollaborationModes.value))
-const selectedCollaborationMode = computed(() => {
-  return selectedCollaborationModeName.value === 'default' || runtimeCollaborationModes.value.some(mode => mode.name === selectedCollaborationModeName.value)
-    ? selectedCollaborationModeName.value
-    : 'default'
+const coreCollaborationModes = computed<ComposerCollaborationModeOption[]>(() => {
+  return mergeCollaborationModeOptions(runtimeCollaborationModes.value.map((mode) => {
+    const reasoningEffort = mode.reasoningEffort ?? ''
+    return {
+      name: mode.name,
+      mode: mode.mode,
+      label: mode.label,
+      model: mode.model ?? '',
+      reasoningEffort: isKnownReasoningEffort(reasoningEffort) ? reasoningEffort : '',
+      developerInstructions: null,
+    }
+  }))
 })
-const selectedCollaborationModeKind = computed<'default' | 'plan'>(() => runtimeCollaborationModes.value.find(mode => mode.name === selectedCollaborationMode.value)?.mode ?? (selectedCollaborationMode.value === 'plan' ? 'plan' : 'default'))
+const composerCollaborationModes = computed<CodyComposerOption[]>(() => coreCollaborationModes.value.map(mode => ({ value: mode.name, label: mode.label })))
+const selectedCollaborationMode = computed(() => reconcileSelectedCollaborationModeName(selectedCollaborationModeName.value, coreCollaborationModes.value))
+const selectedCollaborationModeKind = computed<'default' | 'plan'>(() => coreCollaborationModes.value.find(mode => mode.name === selectedCollaborationMode.value)?.mode ?? 'default')
 const composerSubmitModes = computed<CodyComposerOption[]>(() => [{ value: 'queue', label: '排队', description: '当前 Turn 结束后顺序执行。' }, { value: 'steer', label: '引导', description: '正在执行时发送给当前 Turn。' }])
 const composerReasoningOptions = computed<CodyComposerOption[]>(() => [{ value: 'none', label: '无推理' }, { value: 'minimal', label: '极低' }, { value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }, { value: 'xhigh', label: '极高' }])
 const composerPermissionOptions = computed<CodyComposerOption[]>(() => [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
@@ -516,9 +532,8 @@ function updateDraft(value: string): void { draft.value = value }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
 async function loadComposerOptions(demandId: string): Promise<void> { if (!workspace.value) return; try { const options = await api.composerOptions(workspace.value.id, demandId); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!selectedModel.value && options.models.length) selectedModel.value = options.models[0]! } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; selectedSkillsForTurn.value = [] } }
 function selectCollaborationMode(name: string): void {
-  const next = runtimeCollaborationModes.value.find(mode => mode.name === name) ?? (name === 'plan'
-    ? { name, mode: 'plan' as const, label: 'Plan' }
-    : { name, mode: 'default' as const, label: 'Default' })
+  const next = coreCollaborationModes.value.find(mode => mode.name === name) ?? coreCollaborationModes.value[0]
+  if (!next) return
   selectedCollaborationModeName.value = next.name
   if (next.model) selectedModel.value = next.model
   if (next.reasoningEffort) selectedReasoning.value = next.reasoningEffort

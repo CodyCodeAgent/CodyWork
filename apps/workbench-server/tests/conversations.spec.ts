@@ -253,6 +253,35 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
+  it('keeps a normalized upstream terminal failure failed after sendTurn settles', async () => {
+    class UpstreamFailureRuntime extends TestRuntimeAdapter {
+      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+        const timestamp = nowIso()
+        const event = {
+          id: 'upstream-terminal', type: 'turn.failed' as const, conversationId: request.conversation.id,
+          threadId: request.conversation.nativeId, turnId: 'turn-upstream', timestamp, atIso: timestamp,
+          data: {
+            cause: 'upstream_response_stream_unrecoverable',
+            error: 'Codex 上游响应流恢复失败，未自动重发。',
+          },
+        }
+        request.onEvent?.(event)
+        return { conversation: request.conversation, finalText: '', events: [event] }
+      }
+    }
+
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new UpstreamFailureRuntime())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Keep failed outbox')
+
+    await conversations.send(test.workspaceId, conversation.id, 'do not silently resend')
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('returns an interrupted turn to idle without recording a Runtime failure', async () => {
     class InterruptedRuntime extends TestRuntimeAdapter {
       override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {

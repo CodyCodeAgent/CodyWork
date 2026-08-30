@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { AvailableNativeThread, Conversation, Demand } from './api'
 import {
   canDeleteConversation,
-  collaborationModeOptions,
   conversationStatusAfterEvent,
   dashboardCacheLabel,
   dashboardNeedsRefresh,
@@ -28,16 +27,6 @@ const demand = (id: string, branchName = id): Demand => ({
 const thread = (nativeId: string, cwd: string, preview = nativeId): AvailableNativeThread => ({ nativeId, cwd, preview, bound: false })
 
 describe('workbench UI rules', () => {
-  it('always exposes the product default collaboration mode before runtime modes', () => {
-    expect(collaborationModeOptions([{ name: 'plan', label: 'Plan' }])).toEqual([
-      { value: 'default', label: 'Default' },
-      { value: 'plan', label: 'Plan' },
-    ])
-    expect(collaborationModeOptions([{ name: 'default', label: 'Provider default' }])).toEqual([
-      { value: 'default', label: 'Default' },
-    ])
-  })
-
   it('protects active and last remaining conversations from deletion', () => {
     expect(canDeleteConversation(conversation('running'), 3)).toBe(false)
     expect(deleteConversationTitle(conversation('awaiting_approval'), 3)).toContain('不能删除')
