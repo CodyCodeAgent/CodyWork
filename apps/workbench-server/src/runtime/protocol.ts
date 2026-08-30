@@ -151,6 +151,8 @@ export interface CodyWorkRuntime {
   checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult>
   initializeWorkspace(request: WorkspaceInitializationRequest): Promise<WorkspaceInitializationResult>
   createConversation(request: CreateConversationRequest): Promise<ConversationHandle>
+  /** Renames the native Codex Thread owned by this conversation. */
+  renameConversation(conversation: ConversationHandle, title: string): Promise<void>
   sendTurn(request: SendTurnRequest): Promise<SendTurnResult>
   interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }>
   close(): Promise<void>

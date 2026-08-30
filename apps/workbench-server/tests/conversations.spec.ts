@@ -134,6 +134,34 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
+  it('renames the native Codex thread before committing the local title', async () => {
+    class RenameRuntime extends TestRuntimeAdapter {
+      renames: Array<{ nativeId: string; title: string }> = []
+      failNext = false
+
+      override async renameConversation(conversation: Parameters<TestRuntimeAdapter['renameConversation']>[0], title: string): Promise<void> {
+        if (this.failNext) throw new Error('native rename failed')
+        await super.renameConversation(conversation, title)
+        this.renames.push({ nativeId: conversation.nativeId, title })
+      }
+    }
+
+    const test = await fixture()
+    const runtime = new RenameRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Before')
+
+    await expect(conversations.rename(test.workspaceId, conversation.id, '  After  ')).resolves.toMatchObject({ title: 'After' })
+    expect(runtime.renames).toEqual([{ nativeId: conversation.nativeId, title: 'After' }])
+
+    runtime.failNext = true
+    await expect(conversations.rename(test.workspaceId, conversation.id, 'Must not persist')).rejects.toThrow('native rename failed')
+    expect(conversations.get(test.workspaceId, conversation.id).title).toBe('After')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('refuses to delete a running session', async () => {
     const test = await fixture()
     const conversations = new ConversationService(test.db, new TestRuntimeAdapter())

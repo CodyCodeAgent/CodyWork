@@ -25,7 +25,28 @@
       <section v-else-if="activePage === 'chat' && selectedDemand" class="demand-chat-page">
         <header class="topbar chat-topbar"><div><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div><div class="topbar-actions"><span :class="['socket-pill', socketState]">{{ socketLabel }}</span><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div></header>
         <div class="chat-layout">
-          <aside class="conversation-sidebar"><div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div></div><div class="conversation-demand"><strong>{{ selectedDemand.name }}</strong><small>{{ selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo' }}</small></div><div class="conversation-list" role="list" aria-label="Demand 会话"><div v-for="conversation in conversations" :key="conversation.id" class="conversation-row-wrap" role="listitem"><button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" @click="openConversation(conversation)"><span :class="['conversation-status', conversation.status]" /><span><strong>{{ conversation.title }}</strong><small>{{ statusLabel(conversation.status) }}</small></span></button><button class="conversation-delete" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg></button></div></div></aside>
+          <aside class="conversation-sidebar">
+            <div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div></div>
+            <div class="conversation-demand"><strong>{{ selectedDemand.name }}</strong><small>{{ selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo' }}</small></div>
+            <div class="conversation-list" role="list" aria-label="Demand 会话">
+              <div v-for="conversation in conversations" :key="conversation.id" :class="['conversation-row-wrap', { active: conversation.id === selectedConversation?.id, editing: renamingConversationId === conversation.id }]" role="listitem">
+                <form v-if="renamingConversationId === conversation.id" class="conversation-rename-editor" @submit.prevent="saveConversationRename(conversation)">
+                  <span :class="['conversation-status', conversation.status]" />
+                  <div class="conversation-rename-field">
+                    <input v-model="conversationRenameDraft" :data-conversation-rename="conversation.id" maxlength="120" :aria-label="`重命名会话：${conversation.title}`" @keydown.enter.prevent="saveConversationRename(conversation)" @keydown.esc.prevent="cancelConversationRename" />
+                    <small v-if="conversationRenameError" role="alert">{{ conversationRenameError }}</small>
+                  </div>
+                  <button class="conversation-edit-action save" type="submit" :disabled="savingConversationRename" aria-label="保存会话名称" title="保存（Enter）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg></button>
+                  <button class="conversation-edit-action cancel" type="button" :disabled="savingConversationRename" aria-label="取消重命名" title="取消（Esc）" @click="cancelConversationRename"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+                </form>
+                <template v-else>
+                  <button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', conversation.status]" /><span><strong>{{ conversation.title }}</strong><small>{{ statusLabel(conversation.status) }}</small></span></button>
+                  <button class="conversation-edit-action rename" type="button" :aria-label="`重命名会话：${conversation.title}`" title="重命名会话" @click.stop="startConversationRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.5-1 9.8-9.8a2 2 0 0 0 0-2.8l-.7-.7a2 2 0 0 0-2.8 0L5 15.5 4 20Z" /></svg></button>
+                  <button class="conversation-delete" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg></button>
+                </template>
+              </div>
+            </div>
+          </aside>
           <section class="chat-main">
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
               <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
@@ -104,7 +125,7 @@ type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'cha
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
 const { state: conversationState, connect: connectConversationState, reset: resetConversationState } = useConversationController()
-const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
+const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 const lastSubmittedPrompt = ref<string | null>(null)
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
@@ -137,6 +158,38 @@ const composerSkills = computed<CodyComposerOption[]>(() => runtimeSkills.value.
 
 function canDeleteConversation(conversation: Conversation): boolean { return canDeleteConversationRule(conversation, conversations.value.length) }
 function deleteConversationTitle(conversation: Conversation): string { return deleteConversationTitleRule(conversation, conversations.value.length) }
+async function startConversationRename(conversation: Conversation): Promise<void> {
+  renamingConversationId.value = conversation.id
+  conversationRenameDraft.value = conversation.title
+  conversationRenameError.value = ''
+  await nextTick()
+  const input = document.querySelector<HTMLInputElement>(`[data-conversation-rename="${conversation.id}"]`)
+  input?.focus()
+  input?.select()
+}
+function cancelConversationRename(): void {
+  if (savingConversationRename.value) return
+  renamingConversationId.value = ''
+  conversationRenameDraft.value = ''
+  conversationRenameError.value = ''
+}
+async function saveConversationRename(conversation: Conversation): Promise<void> {
+  if (!workspace.value || savingConversationRename.value) return
+  const title = conversationRenameDraft.value.trim()
+  if (!title) { conversationRenameError.value = '会话名称不能为空'; return }
+  if (title === conversation.title) { cancelConversationRename(); return }
+  savingConversationRename.value = true
+  conversationRenameError.value = ''
+  try {
+    const renamed = await api.renameConversation(workspace.value.id, conversation.id, title)
+    conversations.value = conversations.value.map(item => item.id === renamed.id ? renamed : item)
+    if (selectedConversation.value?.id === renamed.id) selectedConversation.value = renamed
+    renamingConversationId.value = ''
+    conversationRenameDraft.value = ''
+  } catch (cause) {
+    conversationRenameError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally { savingConversationRename.value = false }
+}
 function requestDeleteConversation(conversation: Conversation): void { if (!canDeleteConversation(conversation)) { error.value = deleteConversationTitle(conversation); return }; deleteConversationError.value = ''; conversationPendingDelete.value = conversation }
 function closeDeleteConversation(): void { if (deletingConversation.value) return; conversationPendingDelete.value = null; deleteConversationError.value = '' }
 async function deleteConversation(): Promise<void> {
