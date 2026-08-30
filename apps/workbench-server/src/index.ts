@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { WorkbenchDb } from './db/index.js'
 import { AppContext, startServer } from './routes/index.js'
 import { reconcileDemandOperations } from './services/demands.js'
+import { reconcileInterruptedConversations } from './services/conversations.js'
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name)
@@ -24,6 +25,8 @@ const staticRoot = process.env.CODYWORK_WEB_ROOT ?? resolve(moduleDirectory, '..
 const db = new WorkbenchDb(databasePath)
 const reconciled = reconcileDemandOperations(db)
 if (reconciled > 0) console.error(`[codywork] reconciled ${reconciled} interrupted demand operation(s)`)
+const disconnected = reconcileInterruptedConversations(db)
+if (disconnected > 0) console.error(`[codywork] marked ${disconnected} interrupted conversation(s) disconnected`)
 const appContext: AppContext = { db }
 const server = startServer(appContext, { host, port, staticRoot })
 
