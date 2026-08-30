@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -61,8 +61,9 @@ describe('generic runtime protocol', () => {
 
   it('drives a Codex App Server session, turn-scoped collaboration and runtime approvals', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
+    const appServerCwd = mkdtempSync(join(tmpdir(), 'cody-app-server-owner-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
-    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}` })
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd })
     expect((await runtime.getInfo()).runtimeVersion).toBe(`cody-web-core/${CODY_WEB_CORE_VERSION}`)
     expect(runtime.diagnostics()).toBeNull()
     const context = {
@@ -102,8 +103,9 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
+    await expect(runtime.sendTurn({ conversation, prompt: 'SERVER_CWD' })).resolves.toMatchObject({ finalText: realpathSync(appServerCwd) })
     const nativeHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
-    expect(nativeHistory.map(event => event.type)).toEqual(['turn.started', 'user.completed', 'assistant.completed', 'turn.completed'])
+    expect(nativeHistory.slice(0, 4).map(event => event.type)).toEqual(['turn.started', 'user.completed', 'assistant.completed', 'turn.completed'])
     expect(nativeHistory.find(event => event.itemId === 'item-1')).toMatchObject({
       type: 'assistant.completed',
       data: { text: 'CODEX_FIXTURE_OK' },
@@ -155,5 +157,6 @@ describe('generic runtime protocol', () => {
 
     await runtime.close()
     rmSync(root, { recursive: true, force: true })
+    rmSync(appServerCwd, { recursive: true, force: true })
   })
 })
