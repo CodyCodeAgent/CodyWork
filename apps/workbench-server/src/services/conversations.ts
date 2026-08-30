@@ -75,6 +75,22 @@ function isMissingRuntimeAttachment(error: Error): boolean {
   return error.message.includes('Codex conversation runtime is not available')
 }
 
+/**
+ * A native App Server owns active turns and pending server requests only in
+ * memory. After CodyWork itself restarts, a persisted `running` or
+ * `awaiting_approval` row therefore cannot be resumed safely: accepting the
+ * old request would acknowledge an ID owned by the previous process. Keep the
+ * native thread history, but make the local control-plane state explicit and
+ * retryable instead of leaving a dead approval button on screen.
+ */
+export function reconcileInterruptedConversations(db: WorkbenchDb): number {
+  const result = db.db.prepare("UPDATE conversations SET status = 'disconnected', updated_at = ? WHERE status IN ('running', 'awaiting_approval')")
+    .run(nowIso())
+  return Number(result.changes)
+}
+
+const RUNTIME_RESTARTED_MESSAGE = 'CodyWork Runtime 已重启，原审批或回复无法恢复，且未自动重发。请确认后重试该消息。'
+
 function toView(row: ConversationRow): ConversationView {
   return {
     id: row.id,
@@ -125,7 +141,7 @@ export class ConversationService {
     await this.runtime.close()
     this.runtime = runtime
     this.handles.clear(); this.contexts.clear()
-    this.db.db.prepare("UPDATE conversations SET status = 'disconnected', updated_at = ? WHERE status IN ('running', 'awaiting_approval')").run(nowIso())
+    reconcileInterruptedConversations(this.db)
   }
 
   diagnostics() { return this.runtime.diagnostics?.() ?? null }
@@ -155,7 +171,13 @@ export class ConversationService {
     const demand = this.requireDemand(workspaceId, row.demand_id)
     const context = this.contextFor(demand, row.permission_mode)
     try {
-      return await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
+      const history = await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
+      // The native transcript can retain an unresolved approval after the
+      // owning runtime has gone away. Add an in-memory terminal event for the
+      // presentation reducer only; do not mirror it into SQLite or mutate the
+      // native history. This removes the dead card and makes the recovery
+      // choice explicit without fabricating a successful response.
+      return row.status === 'disconnected' ? [...history, ...this.interruptedTurnEvents(row, history)] : history
     } catch (error) {
       // App Server cannot read a just-started native thread until its first user
       // turn materializes. Treat only an untouched local conversation as empty.
@@ -470,5 +492,26 @@ export class ConversationService {
     const handle = await this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context })
     this.handles.set(row.id, handle)
     this.contexts.set(row.id, context)
+  }
+
+  private interruptedTurnEvents(row: ConversationRow, history: RuntimeEvent[]): ConversationEvent[] {
+    const openTurns = new Map<string, RuntimeEvent>()
+    for (const event of history) {
+      if (event.type === 'turn.started' && event.turnId) openTurns.set(event.turnId, event)
+      if ((event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') && event.turnId) openTurns.delete(event.turnId)
+    }
+    const active = [...openTurns.values()].at(-1)
+    if (!active?.turnId) return []
+    const timestamp = nowIso()
+    return [{
+      id: `runtime-restarted:${row.id}:${active.turnId}`,
+      conversationId: row.id,
+      type: 'turn.failed',
+      threadId: row.native_id,
+      turnId: active.turnId,
+      timestamp,
+      atIso: timestamp,
+      data: { cause: 'runtime_restarted', error: RUNTIME_RESTARTED_MESSAGE },
+    }]
   }
 }

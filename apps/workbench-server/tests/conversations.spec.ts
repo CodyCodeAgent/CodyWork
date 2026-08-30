@@ -6,7 +6,7 @@ import WebSocket from 'ws'
 import { describe, expect, it } from 'vitest'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
-import { ConversationService } from '../src/services/conversations.js'
+import { ConversationService, reconcileInterruptedConversations } from '../src/services/conversations.js'
 import { startServer } from '../src/routes/index.js'
 
 async function fixture() {
@@ -28,6 +28,32 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('marks turns abandoned by a CodyWork restart disconnected and removes stale approval cards from the live view', async () => {
+    class PendingApprovalRuntime extends TestRuntimeAdapter {
+      override async readConversation(request: Parameters<TestRuntimeAdapter['readConversation']>[0]) {
+        const timestamp = nowIso()
+        return [
+          { id: 'user', type: 'user.completed' as const, conversationId: request.conversationId, threadId: request.nativeId, turnId: 'turn-pending', timestamp, atIso: timestamp, data: { text: 'inspect this' } },
+          { id: 'started', type: 'turn.started' as const, conversationId: request.conversationId, threadId: request.nativeId, turnId: 'turn-pending', timestamp, atIso: timestamp, data: {} },
+          { id: 'approval', type: 'approval.requested' as const, conversationId: request.conversationId, threadId: request.nativeId, turnId: 'turn-pending', timestamp, atIso: timestamp, data: { approvalId: 'approval-stale' } },
+        ]
+      }
+    }
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new PendingApprovalRuntime())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Interrupted owner')
+    test.db.db.prepare("UPDATE conversations SET status = 'awaiting_approval' WHERE id = ?").run(conversation.id)
+
+    expect(reconcileInterruptedConversations(test.db)).toBe(1)
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('disconnected')
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'turn.failed', turnId: 'turn-pending', data: expect.objectContaining({ cause: 'runtime_restarted' }) }),
+    ]))
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('passes clean text, structured selected skills and steer mode to the Runtime', async () => {
     class CapturingRuntime extends TestRuntimeAdapter {
       requests: Parameters<TestRuntimeAdapter['sendTurn']>[0][] = []
