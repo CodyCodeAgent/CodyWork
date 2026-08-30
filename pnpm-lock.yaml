@@ -18,8 +18,8 @@ importers:
   apps/workbench-server:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.33.8
-        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#ad7c5d1358e91accc497ab65be13996903f3961f(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.33.9
+        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#f16a4de8e241dec0489703ace89f4bb8af2a3aef(vue@3.5.39(typescript@6.0.3))
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -40,8 +40,8 @@ importers:
   apps/workbench-web:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.33.8
-        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#ad7c5d1358e91accc497ab65be13996903f3961f(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.33.9
+        version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#f16a4de8e241dec0489703ace89f4bb8af2a3aef(vue@3.5.39(typescript@6.0.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.39(typescript@6.0.3)
@@ -112,9 +112,9 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#ad7c5d1358e91accc497ab65be13996903f3961f':
-    resolution: {commit: ad7c5d1358e91accc497ab65be13996903f3961f, repo: git@github.com:CodyCodeAgent/CodyWebCore.git, type: git}
-    version: 0.33.8
+  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#f16a4de8e241dec0489703ace89f4bb8af2a3aef':
+    resolution: {commit: f16a4de8e241dec0489703ace89f4bb8af2a3aef, repo: git@github.com:CodyCodeAgent/CodyWebCore.git, type: git}
+    version: 0.33.9
     peerDependencies:
       vue: ^3.5.0
 
@@ -927,11 +927,6 @@ packages:
 
   '@volar/typescript@2.4.15':
     resolution: {integrity: sha512-2aZ8i0cqPGjXb4BhkMsPYDkkuc2ZQ6yOpqwAuNwUoncELqoy5fRgOQtLR9gB0g902iS0NAkvpIzs27geVyVdPg==}
-    peerDependencies:
-      typescript: '*'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
 
   '@vue/compiler-core@3.5.39':
     resolution: {integrity: sha512-16KBTEXAJCpDr0mwlw+AZyhu8iyC7R3S2vBwsI7QnWJU6X3WKc9VKeNEZpiMdZ569qWhz9574L3vV55qRL0Vtw==}
@@ -2078,7 +2073,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#ad7c5d1358e91accc497ab65be13996903f3961f(vue@3.5.39(typescript@6.0.3))':
+  '@codycodeagent/cody-web-core@git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#f16a4de8e241dec0489703ace89f4bb8af2a3aef(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       dompurify: 3.4.14
       highlight.js: 11.12.0
@@ -2667,13 +2662,11 @@ snapshots:
 
   '@volar/source-map@2.4.15': {}
 
-  '@volar/typescript@2.4.15(typescript@6.0.3)':
+  '@volar/typescript@2.4.15':
     dependencies:
       '@volar/language-core': 2.4.15
       path-browserify: 1.0.1
       vscode-uri: 3.1.0
-    optionalDependencies:
-      typescript: 6.0.3
 
   '@vue/compiler-core@3.5.39':
     dependencies:
@@ -3708,7 +3701,7 @@ snapshots:
 
   vue-tsc@2.2.12(typescript@6.0.3):
     dependencies:
-      '@volar/typescript': 2.4.15(typescript@6.0.3)
+      '@volar/typescript': 2.4.15
       '@vue/language-core': 2.2.12(typescript@6.0.3)
       typescript: 6.0.3
 
