@@ -105,6 +105,14 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
+    const queuedFirst = runtime.submitTurn({ conversation, prompt: 'queued first', mode: 'queue' })
+    const queuedSecond = runtime.submitTurn({ conversation, prompt: 'queued second', mode: 'queue' })
+    const [queuedFirstResult, queuedSecondResult] = await Promise.all([queuedFirst.completed, queuedSecond.completed])
+    const firstTurnIds = new Set(queuedFirstResult.events.map(event => event.turnId).filter(Boolean))
+    const secondTurnIds = new Set(queuedSecondResult.events.map(event => event.turnId).filter(Boolean))
+    expect(firstTurnIds.size).toBe(1)
+    expect(secondTurnIds.size).toBe(1)
+    expect([...firstTurnIds][0]).not.toBe([...secondTurnIds][0])
     await expect(runtime.sendTurn({ conversation, prompt: 'SERVER_CWD' })).resolves.toMatchObject({ finalText: realpathSync(appServerCwd) })
     const nativeHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
     expect(nativeHistory.slice(0, 4).map(event => event.type)).toEqual(['turn.started', 'user.completed', 'assistant.completed', 'turn.completed'])
@@ -124,18 +132,21 @@ describe('generic runtime protocol', () => {
     const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL', settings: { collaborationMode: 'plan' } })
     expect(planResult.finalText).toBe('CODEX_FIXTURE_REAL')
     const approvalEvents: string[] = []
+    let pendingApprovalId = ''
     let signalApproval!: () => void
     const approvalRequested = new Promise<void>((resolve) => { signalApproval = resolve })
     const approvalTurn = runtime.sendTurn({ conversation, prompt: 'APPROVAL', onEvent: (event) => {
       approvalEvents.push(event.type)
-      if (event.type === 'approval.requested') signalApproval()
+      if (event.type === 'approval.requested') {
+        pendingApprovalId = String(event.data.approvalId ?? '')
+        signalApproval()
+      }
     } })
     await approvalRequested
     const pendingHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
-    expect(pendingHistory).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'approval.requested', data: expect.objectContaining({ approvalId: expect.any(String) }) }),
-    ]))
-    await runtime.respondApproval(conversation, String(pendingHistory.find(event => event.type === 'approval.requested')?.data.approvalId), 'allowed-once')
+    expect(pendingHistory.some(event => event.type === 'approval.requested')).toBe(false)
+    expect(pendingApprovalId).not.toBe('')
+    await runtime.respondApproval(conversation, pendingApprovalId, 'allowed-once')
     const approvalResult = await approvalTurn
     expect(approvalEvents).toContain('approval.requested')
     expect(approvalResult.finalText).toBe('APPROVED')
@@ -156,6 +167,9 @@ describe('generic runtime protocol', () => {
     expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })
     await expect(runtime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId }))
       .rejects.toThrow('will not be restarted automatically')
+    await expect(runtime.sendTurn({ conversation, prompt: 'still unavailable' }))
+      .rejects.toThrow('unavailable')
+    expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })
     await runtime.close()
 
     // A new owning service lifecycle may start one fresh App Server process.

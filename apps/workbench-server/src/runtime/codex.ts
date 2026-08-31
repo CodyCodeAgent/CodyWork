@@ -12,10 +12,15 @@ import {
   CodexThreadCommands,
   type ExecutionContext,
   type ExecutionPolicyProvider,
+  type CodexSessionSnapshot,
   type ThreadBinding,
   type TurnInput,
 } from '@codycodeagent/cody-web-core/session'
-import { createConversationState, reduceConversationEvents, type CodexEvent } from '@codycodeagent/cody-web-core/conversation'
+import {
+  createConversationState,
+  reduceConversationEvents,
+  type CodexEvent,
+} from '@codycodeagent/cody-web-core/conversation'
 import { asRecord } from '@codycodeagent/cody-web-core/protocol'
 import { nowIso } from '../db/index.js'
 import type {
@@ -166,12 +171,23 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> {
-    const manager = await this.ensureRuntime(request.context)
-    const history = (await this.requireCatalog().readThread(request.nativeId)).map(event => toRuntimeEvent(event, request.conversationId))
-    const pending = this.sessions.has(request.conversationId)
-      ? manager.listPendingEvents(request.conversationId).map(event => toRuntimeEvent(event, request.conversationId))
-      : []
-    return [...history, ...pending]
+    await this.ensureRuntime(request.context)
+    return (await this.requireCatalog().readThread(request.nativeId)).map(event => toRuntimeEvent(event, request.conversationId))
+  }
+
+  sessionSnapshot(conversation: ConversationHandle): CodexSessionSnapshot | null {
+    return this.manager?.snapshot(conversation.id) ?? null
+  }
+
+  pendingConversationEvents(conversation: ConversationHandle): RuntimeEvent[] {
+    const session = this.sessions.get(conversation.id)
+    if (!session || !this.manager) return []
+    return this.manager.listPendingEvents(conversation.id).map(event => toRuntimeEvent(event, conversation.id))
+  }
+
+  subscribeConversation(conversation: ConversationHandle, listener: (event: RuntimeEvent) => void): () => void {
+    this.require(conversation)
+    return this.listen(conversation.id, listener)
   }
 
   async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
@@ -244,7 +260,15 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
     if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
     const events: RuntimeEvent[] = []
-    const unsubscribe = this.listen(session.handle.id, event => { events.push(event); request.onEvent?.(event) })
+    const buffered: RuntimeEvent[] = []
+    let nativeTurnId = ''
+    const collect = (event: RuntimeEvent): void => {
+      if (!nativeTurnId) { buffered.push(event); return }
+      if (event.turnId !== nativeTurnId) return
+      events.push(event)
+      request.onEvent?.(event)
+    }
+    const unsubscribe = this.listen(session.handle.id, collect)
     const turn: TurnInput = {
       input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills }),
       ...(session.model ? { model: session.model } : {}),
@@ -259,12 +283,18 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       request.mode === 'steer' ? 'steer' : 'queue',
       request.clientCommandId,
     )
-    const completed = submission.completed.then(() => {
+    const started = submission.started.then(handle => {
+      nativeTurnId = handle.turnId
+      for (const event of buffered.splice(0)) collect(event)
+      return handle
+    })
+    const completed = submission.completed.then(async () => {
+      await started
       const state = reduceConversationEvents(createConversationState(session.binding.threadId), events)
       const finalText = [...state.messages].reverse().find(message => message.role === 'assistant')?.text ?? ''
       return { conversation: request.conversation, finalText, events }
     }).finally(unsubscribe)
-    return { clientCommandId: submission.clientCommandId, started: submission.started, completed }
+    return { clientCommandId: submission.clientCommandId, started, completed }
   }
 
   async interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }> {

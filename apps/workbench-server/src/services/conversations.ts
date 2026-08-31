@@ -65,27 +65,13 @@ type DemandContext = {
   repositories: { id: string; name: string; worktreePath: string }[]
 }
 
-/**
- * A native App Server owns active turns and pending server requests only in
- * memory. After CodyWork itself restarts, a persisted `running` or
- * `awaiting_approval` row therefore cannot be resumed safely: accepting the
- * old request would acknowledge an ID owned by the previous process. Keep the
- * native thread history, but make the local control-plane state explicit and
- * retryable instead of leaving a dead approval button on screen.
- */
-export function reconcileInterruptedConversations(db: WorkbenchDb): number {
-  const result = db.db.prepare("UPDATE conversations SET status = 'disconnected', updated_at = ? WHERE status IN ('running', 'awaiting_approval')")
-    .run(nowIso())
-  return Number(result.changes)
-}
-
 function toView(row: ConversationRow): ConversationView {
   return {
     id: row.id,
     demandId: row.demand_id,
     nativeId: row.native_id,
     title: row.title,
-    status: row.status,
+    status: 'idle',
     permissionMode: row.permission_mode,
     policyHash: row.policy_hash,
     instructionHash: row.instruction_hash,
@@ -114,18 +100,12 @@ export class ConversationService {
   private readonly handles = new Map<string, ConversationHandle>()
   private readonly contexts = new Map<string, RuntimeContext>()
   private readonly listeners = new Map<string, Set<Listener>>()
+  private readonly runtimeSubscriptions = new Map<string, () => void>()
   private runtime: CodyWorkRuntime
 
   constructor(private readonly db: WorkbenchDb, runtime: CodyWorkRuntime, private readonly onTurnFinished?: (workspaceId: string) => void) { this.runtime = runtime }
 
   getRuntime(): CodyWorkRuntime { return this.runtime }
-
-  async replaceRuntime(runtime: CodyWorkRuntime): Promise<void> {
-    await this.runtime.close()
-    this.runtime = runtime
-    this.handles.clear(); this.contexts.clear()
-    reconcileInterruptedConversations(this.db)
-  }
 
   diagnostics() { return this.runtime.diagnostics?.() ?? null }
 
@@ -153,21 +133,17 @@ export class ConversationService {
     const row = this.requireConversation(workspaceId, conversationId)
     const demand = this.requireDemand(workspaceId, row.demand_id)
     const context = this.contextFor(demand, row.permission_mode)
-    try {
-      const history = await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
-      return history
-    } catch (error) {
-      // App Server cannot read a just-started native thread until its first user
-      // turn materializes. Treat only an untouched local conversation as empty.
-      if (row.status === 'idle') return []
-      throw error
-    }
+    return this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
   }
 
   subscribe(conversationId: string, listener: Listener): () => void {
     const set = this.listeners.get(conversationId) ?? new Set<Listener>()
     set.add(listener)
     this.listeners.set(conversationId, set)
+    const handle = this.handles.get(conversationId)
+    if (handle) {
+      for (const event of this.runtime.pendingConversationEvents?.(handle) ?? []) listener(event)
+    }
     return () => {
       set.delete(listener)
       if (set.size === 0) this.listeners.delete(conversationId)
@@ -202,6 +178,7 @@ export class ConversationService {
       )
     this.handles.set(id, handle)
     this.contexts.set(id, context)
+    this.attachRuntimeStream(handle)
     return this.get(workspaceId, id)
   }
 
@@ -259,14 +236,14 @@ export class ConversationService {
       ...(settings?.collaborationMode ? { collaborationMode: settings.collaborationMode } : {}),
       ...(selectedSkills.length ? { skills: selectedSkills } : {}),
     }
-    this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
+    this.db.db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(nowIso(), conversationId)
     const submission = this.runtime.submitTurn({
       conversation: this.handleFor(row),
       prompt: text,
       mode,
       clientCommandId: commandId,
       ...(Object.keys(runtimeSettings).length ? { settings: runtimeSettings } : {}),
-      onEvent: event => this.appendRuntimeEvent(event),
+      ...(!this.runtimeSubscriptions.has(conversationId) ? { onEvent: (event: RuntimeEvent) => this.appendRuntimeEvent(event) } : {}),
     })
     void submission.started.then((handle) => {
       this.audit(conversationId, 'turn.bound', { commandId, nativeTurnId: handle.turnId })
@@ -299,7 +276,6 @@ export class ConversationService {
     await this.ensureHandle(row)
     const result = await this.runtime.interrupt(this.handleFor(row))
     this.audit(conversationId, 'turn.interrupt', result)
-    if (result.supported) this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('idle', nowIso(), conversationId)
     return result
   }
 
@@ -331,9 +307,12 @@ export class ConversationService {
   }
 
   /** Removes CodyWork's local record only. The native Codex Thread is intentionally retained. */
-  remove(workspaceId: string, conversationId: string): { deleted: true } {
+  async remove(workspaceId: string, conversationId: string): Promise<{ deleted: true }> {
     const row = this.requireConversation(workspaceId, conversationId)
-    if (row.status === 'running' || row.status === 'awaiting_approval') {
+    await this.ensureHandle(row)
+    const handle = this.handleFor(row)
+    const state = this.runtime.sessionSnapshot?.(handle) ?? null
+    if (state?.activeTurnId || state?.pendingRequestCount) {
       throw new Error('会话正在执行或等待确认，请先停止后再删除')
     }
     const count = this.db.db.prepare('SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND demand_id = ?').get(workspaceId, row.demand_id) as { count: number }
@@ -344,18 +323,14 @@ export class ConversationService {
     this.handles.delete(conversationId)
     this.contexts.delete(conversationId)
     this.listeners.delete(conversationId)
+    this.runtimeSubscriptions.get(conversationId)?.()
+    this.runtimeSubscriptions.delete(conversationId)
     return { deleted: true }
   }
 
   private appendRuntimeEvent(event: RuntimeEvent): void {
     const data = event.data
     this.publish({ ...event, data })
-    if (event.type === 'command.queued' || event.type === 'command.bound' || event.type === 'turn.started') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), event.conversationId)
-    if (event.type === 'approval.requested') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('awaiting_approval', nowIso(), event.conversationId)
-    if (event.type === 'turn.completed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), event.conversationId)
-    if (event.type === 'turn.failed' || event.type === 'command.failed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
-    if (event.type === 'turn.interrupted') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('idle', nowIso(), event.conversationId)
-    if (event.type === 'turn.disconnected' || event.type === 'runtime.disconnected') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('disconnected', nowIso(), event.conversationId)
   }
 
   private publish(event: ConversationEvent): void {
@@ -419,6 +394,12 @@ export class ConversationService {
     const handle = await this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context })
     this.handles.set(row.id, handle)
     this.contexts.set(row.id, context)
+    this.attachRuntimeStream(handle)
+  }
+
+  private attachRuntimeStream(handle: ConversationHandle): void {
+    if (this.runtimeSubscriptions.has(handle.id) || !this.runtime.subscribeConversation) return
+    this.runtimeSubscriptions.set(handle.id, this.runtime.subscribeConversation(handle, event => this.appendRuntimeEvent(event)))
   }
 
 }

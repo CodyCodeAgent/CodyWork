@@ -6,7 +6,7 @@ import WebSocket from 'ws'
 import { describe, expect, it } from 'vitest'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
-import { ConversationService, reconcileInterruptedConversations } from '../src/services/conversations.js'
+import { ConversationService } from '../src/services/conversations.js'
 import { startServer } from '../src/routes/index.js'
 
 async function fixture() {
@@ -28,7 +28,40 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
-  it('marks sessions abandoned by a CodyWork restart disconnected without fabricating native history', async () => {
+  it('never replaces the process owner when Runtime settings are saved', async () => {
+    class TrackingRuntime extends TestRuntimeAdapter {
+      closeCalls = 0
+      override async close(): Promise<void> { this.closeCalls += 1; await super.close() }
+    }
+    const test = await fixture()
+    const runtime = new TrackingRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const server = startServer({ db: test.db, conversations }, { host: '127.0.0.1', port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('server did not bind')
+    const before = test.db.db.prepare('SELECT updated_at FROM runtime_settings WHERE id = 1').get() as { updated_at: string }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/settings/runtime`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: '   ' }),
+    })
+    expect(response.ok).toBe(true)
+    expect(runtime.closeCalls).toBe(0)
+    expect(test.db.db.prepare('SELECT updated_at FROM runtime_settings WHERE id = 1').get()).toEqual(before)
+
+    const changed = await fetch(`http://127.0.0.1:${address.port}/api/settings/runtime`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: 'codex app-server --stdio --new-owner-after-deploy' }),
+    })
+    expect(changed.ok).toBe(true)
+    await expect(changed.json()).resolves.toMatchObject({ ok: true, data: { restartRequired: true } })
+    expect(runtime.closeCalls).toBe(0)
+
+    server.close()
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('does not present persisted SQLite status as native Runtime state', async () => {
     class PendingApprovalRuntime extends TestRuntimeAdapter {
       override async readConversation(request: Parameters<TestRuntimeAdapter['readConversation']>[0]) {
         const timestamp = nowIso()
@@ -44,8 +77,7 @@ describe('conversation websocket control plane', () => {
     const conversation = await conversations.create(test.workspaceId, test.demandId, 'Interrupted owner')
     test.db.db.prepare("UPDATE conversations SET status = 'awaiting_approval' WHERE id = ?").run(conversation.id)
 
-    expect(reconcileInterruptedConversations(test.db)).toBe(1)
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('disconnected')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([
       expect.objectContaining({ type: 'user.completed', turnId: 'turn-pending' }),
       expect.objectContaining({ type: 'turn.started', turnId: 'turn-pending' }),
@@ -89,6 +121,31 @@ describe('conversation websocket control plane', () => {
     })
     await expect(conversations.send(test.workspaceId, conversation.id, 'unknown skill', 'queue', { skills: ['missing'] })).rejects.toThrow('Skill 不存在')
 
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('replays unresolved Core requests through realtime subscription, not native history', async () => {
+    class PendingRuntime extends TestRuntimeAdapter {
+      pendingConversationEvents(conversation: Parameters<TestRuntimeAdapter['renameConversation']>[0]) {
+        const timestamp = nowIso()
+        return [{
+          id: 'approval-live', type: 'approval.requested' as const, conversationId: conversation.id,
+          threadId: conversation.nativeId, turnId: 'turn-live', timestamp, atIso: timestamp,
+          data: { approvalId: 'approval-live' },
+        }]
+      }
+    }
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new PendingRuntime())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Pending request')
+    const events: string[] = []
+    const unsubscribe = conversations.subscribe(conversation.id, event => events.push(event.type))
+
+    expect(events).toEqual(['approval.requested'])
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
+
+    unsubscribe()
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
@@ -153,10 +210,10 @@ describe('conversation websocket control plane', () => {
     const removed = await conversations.create(test.workspaceId, test.demandId, 'Remove this session')
 
     await expect(conversations.history(test.workspaceId, removed.id)).resolves.toEqual([])
-    expect(conversations.remove(test.workspaceId, removed.id)).toEqual({ deleted: true })
+    await expect(conversations.remove(test.workspaceId, removed.id)).resolves.toEqual({ deleted: true })
     expect(conversations.list(test.workspaceId, test.demandId).map(conversation => conversation.id)).toEqual([first.id])
     await expect(conversations.history(test.workspaceId, removed.id)).rejects.toThrow('会话不存在')
-    expect(() => conversations.remove(test.workspaceId, first.id)).toThrow('至少保留一个会话')
+    await expect(conversations.remove(test.workspaceId, first.id)).rejects.toThrow('至少保留一个会话')
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
@@ -191,13 +248,27 @@ describe('conversation websocket control plane', () => {
   })
 
   it('refuses to delete a running session', async () => {
+    class LiveStateRuntime extends TestRuntimeAdapter {
+      activeTurnId = ''
+      sessionSnapshot(conversation: { id: string; nativeId: string }) {
+        return {
+          bindingId: conversation.id,
+          threadId: conversation.nativeId,
+          activeTurnId: this.activeTurnId,
+          pendingRequestCount: 0,
+          attached: true,
+          runtimeAvailable: true,
+        }
+      }
+    }
     const test = await fixture()
-    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const runtime = new LiveStateRuntime()
+    const conversations = new ConversationService(test.db, runtime)
     const running = await conversations.create(test.workspaceId, test.demandId, 'Running session')
     await conversations.create(test.workspaceId, test.demandId, 'Other session')
-    test.db.db.prepare("UPDATE conversations SET status = 'running' WHERE id = ?").run(running.id)
+    runtime.activeTurnId = 'turn-live'
 
-    expect(() => conversations.remove(test.workspaceId, running.id)).toThrow('正在执行或等待确认')
+    await expect(conversations.remove(test.workspaceId, running.id)).rejects.toThrow('正在执行或等待确认')
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
@@ -215,17 +286,29 @@ describe('conversation websocket control plane', () => {
     const second = await (await fetch(`${base}/demands/${test.demandId}/conversations`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json() as { data: { id: string } }
     expect(second.data.id).not.toBe(first.data.id)
     const events: string[] = []
+    const secondTabEvents: string[] = []
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/api/workspaces/${test.workspaceId}/conversations/${first.data.id}/events`)
+    const secondTab = new WebSocket(`ws://127.0.0.1:${address.port}/api/workspaces/${test.workspaceId}/conversations/${first.data.id}/events`)
     socket.on('message', (data) => { const message = JSON.parse(String(data)) as { event?: { type: string } }; if (message.event) events.push(message.event.type) })
-    await once(socket, 'open')
+    secondTab.on('message', (data) => { const message = JSON.parse(String(data)) as { event?: { type: string } }; if (message.event) secondTabEvents.push(message.event.type) })
+    await Promise.all([once(socket, 'open'), once(secondTab, 'open')])
     await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(events).toEqual(['command.queued', 'command.bound', 'user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
+    expect(secondTabEvents).toEqual(events)
+    expect(test.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(first.data.id)).toEqual({ status: 'idle' })
+    const firstTabClosed = once(socket, 'close')
+    socket.close(1000, 'first tab closed')
+    await firstTabClosed
+    await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'second tab remains connected' }) })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(events).toHaveLength(8)
+    expect(secondTabEvents).toHaveLength(16)
     const history = await (await fetch(`${base}/conversations/${first.data.id}/history`)).json() as { data: { events: { type: string }[] } }
     expect(history.data.events.some(event => event.type === 'assistant.delta')).toBe(true)
     const deletion = await (await fetch(`${base}/conversations/${second.data.id}`, { method: 'DELETE' })).json() as { data: { deleted: boolean } }
     expect(deletion.data).toEqual({ deleted: true })
-    socket.close()
+    secondTab.close()
     server.close()
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
@@ -259,7 +342,7 @@ describe('conversation websocket control plane', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(runtime.submitCalls).toBe(1)
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toBeUndefined()
 
@@ -289,7 +372,7 @@ describe('conversation websocket control plane', () => {
     await conversations.send(test.workspaceId, conversation.id, 'do not lose the reason')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'command.failed'").get(conversation.id)).toEqual({ action: 'command.failed' })
 
@@ -325,7 +408,7 @@ describe('conversation websocket control plane', () => {
     await conversations.send(test.workspaceId, conversation.id, 'do not silently resend')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('disconnected')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })

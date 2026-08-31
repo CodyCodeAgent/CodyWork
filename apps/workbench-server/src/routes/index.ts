@@ -193,8 +193,7 @@ function buildRoutes(ctx: AppContext) {
   add('PATCH', '/api/settings/runtime', async (c) => {
     const patch = c.body as RuntimeSettingsPatch
     const updated = updateRuntimeSettings(ctx.db, patch)
-    if (ctx.conversations) await ctx.conversations.replaceRuntime(createDefaultRuntime(ctx.db))
-    return updated
+    return { ...updated, restartRequired: true }
   })
 
   add('GET', '/api/workspaces', () => {
@@ -409,9 +408,9 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).rename(workspace.id, requiredParam(c, 'conversationId'), typeof c.body.title === 'string' ? c.body.title : '')
   })
 
-  add('DELETE', '/api/workspaces/:id/conversations/:conversationId', (c) => {
+  add('DELETE', '/api/workspaces/:id/conversations/:conversationId', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return conversationService(ctx).remove(workspace.id, requiredParam(c, 'conversationId'))
+    return await conversationService(ctx).remove(workspace.id, requiredParam(c, 'conversationId'))
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/approvals/:approvalId', async (c) => {
@@ -494,6 +493,10 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
   websocket.on('connection', (client: WebSocket, _req: IncomingMessage, workspaceId: string, conversationId: string) => {
     const service = conversationService(ctx)
     const unsubscribe = service.subscribe(conversationId, (event) => { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'event', event })) })
+    const heartbeat = setInterval(() => {
+      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'heartbeat', atIso: new Date().toISOString() }))
+    }, 15_000)
+    heartbeat.unref?.()
     client.on('message', (raw) => {
       try {
         const message = JSON.parse(String(raw)) as { type?: string; approvalId?: string; outcome?: 'allowed-once' | 'rejected'; requestId?: string; answer?: unknown }
@@ -502,7 +505,7 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
         if (message.type === 'ping') client.send(JSON.stringify({ type: 'pong' }))
       } catch { client.send(JSON.stringify({ type: 'error', error: 'invalid websocket message' })) }
     })
-    client.on('close', unsubscribe)
+    client.on('close', () => { clearInterval(heartbeat); unsubscribe() })
   })
   server.listen(options.port, options.host, () => console.log(`[codywork] server listening on http://${options.host}:${options.port}`))
   return server

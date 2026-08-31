@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { createConversationState, reduceConversationEvent, type CodexEvent } from '@codycodeagent/cody-web-core/conversation'
 import type { AvailableNativeThread, Conversation, Demand } from './api'
 import {
   canDeleteConversation,
-  conversationStatusAfterEvent,
+  conversationStatusFromState,
   dashboardCacheLabel,
   dashboardNeedsRefresh,
   deleteConversationTitle,
@@ -56,10 +57,18 @@ describe('workbench UI rules', () => {
     expect(matchDemandRoute(demands, 'feat/one')?.id).toBe('demand-1')
   })
 
-  it('maps runtime lifecycle events without disturbing unrelated state', () => {
-    expect(conversationStatusAfterEvent('idle', 'turn.started')).toBe('running')
-    expect(conversationStatusAfterEvent('running', 'approval.requested')).toBe('awaiting_approval')
-    expect(conversationStatusAfterEvent('completed', 'assistant.delta')).toBe('completed')
+  it('derives execution status from the complete Core ConversationState', () => {
+    const event = (id: string, type: CodexEvent['type'], data: Record<string, unknown> = {}): CodexEvent => ({
+      id, type, threadId: 'thread', turnId: 'turn', atIso: `2026-08-29T00:00:0${id.length}.000Z`, data,
+    })
+    let state = createConversationState('thread')
+    state = reduceConversationEvent(state, event('start', 'turn.started'))
+    expect(conversationStatusFromState('idle', state)).toBe('running')
+    state = reduceConversationEvent(state, event('approval', 'approval.requested', { approvalId: 'approval-1' }))
+    expect(conversationStatusFromState('idle', state)).toBe('awaiting_approval')
+    state = reduceConversationEvent(state, event('resolved', 'approval.resolved', { approvalId: 'approval-1' }))
+    state = reduceConversationEvent(state, event('done', 'turn.completed'))
+    expect(conversationStatusFromState('idle', state)).toBe('completed')
   })
 
   it('surfaces dashboard refresh failures instead of presenting stale data as current', () => {

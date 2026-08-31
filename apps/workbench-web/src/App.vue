@@ -23,7 +23,7 @@
         <div class="demand-grid"><button v-for="demand in demands" :key="demand.id" class="demand-card" @click="openDemand(demand)"><span :class="['demand-dot', demand.status]" /><div><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small><p>{{ demand.repositories.length }} 个 Repo · {{ demand.status === 'in_progress' ? '开发中' : demand.status }}</p></div><span>→</span></button><div v-if="demands.length === 0" class="empty-list"><strong>还没有需求</strong><span>先选择开发 Repo，再创建一个隔离的 Demand Worktree。</span><button class="btn primary" @click="showCreateDemand = true">创建需求</button></div></div>
       </section>
       <section v-else-if="activePage === 'chat' && selectedDemand" class="demand-chat-page">
-        <header class="topbar chat-topbar"><div><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div><div class="topbar-actions"><span :class="['socket-pill', socketState]">{{ socketLabel }}</span><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div></header>
+        <header class="topbar chat-topbar"><div><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div><div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div></header>
         <div class="chat-layout">
           <aside class="conversation-sidebar">
             <div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div></div>
@@ -31,7 +31,7 @@
             <div class="conversation-list" role="list" aria-label="Demand 会话">
               <div v-for="conversation in conversations" :key="conversation.id" :class="['conversation-row-wrap', { active: conversation.id === selectedConversation?.id, editing: renamingConversationId === conversation.id }]" role="listitem">
                 <form v-if="renamingConversationId === conversation.id" class="conversation-rename-editor" @submit.prevent="saveConversationRename(conversation)">
-                  <span :class="['conversation-status', conversation.status]" />
+                  <span :class="['conversation-status', displayConversationStatus(conversation)]" />
                   <div class="conversation-rename-field">
                     <input v-model="conversationRenameDraft" :data-conversation-rename="conversation.id" maxlength="120" :aria-label="`重命名会话：${conversation.title}`" @keydown.enter.prevent="saveConversationRename(conversation)" @keydown.esc.prevent="cancelConversationRename" />
                     <small v-if="conversationRenameError" role="alert">{{ conversationRenameError }}</small>
@@ -40,7 +40,7 @@
                   <button class="conversation-edit-action cancel" type="button" :disabled="savingConversationRename" aria-label="取消重命名" title="取消（Esc）" @click="cancelConversationRename"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
                 </form>
                 <template v-else>
-                  <button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', conversation.status]" /><span><strong>{{ conversation.title }}</strong><small>{{ statusLabel(conversation.status) }}</small></span></button>
+                  <button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', displayConversationStatus(conversation)]" /><span><strong>{{ conversation.title }}</strong><small>{{ statusLabel(displayConversationStatus(conversation)) }}</small></span></button>
                   <button class="conversation-edit-action rename" type="button" :aria-label="`重命名会话：${conversation.title}`" title="重命名会话" @click.stop="startConversationRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.5-1 9.8-9.8a2 2 0 0 0 0-2.8l-.7-.7a2 2 0 0 0-2.8 0L5 15.5 4 20Z" /></svg></button>
                   <button class="conversation-delete" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg></button>
                 </template>
@@ -90,12 +90,13 @@ import {
   type ComposerCollaborationModeOption,
   type ComposerSubmitMode,
 } from '@codycodeagent/cody-web-core/composer'
-import { createReconnectingConversationSocket, type ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
+import type { ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
 import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
 import WorkspaceSetupDialog from './components/WorkspaceSetupDialog.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
+import { createConversationEventSocket, type ConversationSocketSnapshot } from './conversationSocket'
 import {
   api,
   type AvailableNativeThread,
@@ -114,7 +115,7 @@ import {
 } from './api'
 import {
   canDeleteConversation as canDeleteConversationRule,
-  conversationStatusAfterEvent,
+  conversationStatusFromState,
   conversationStatusLabel as statusLabel,
   dashboardCacheLabel as formatDashboardCacheLabel,
   dashboardNeedsRefresh,
@@ -131,18 +132,30 @@ import {
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
-const { state: conversationState, connect: connectConversationState, reset: resetConversationState, enqueueUserMessage, failQueuedUserMessage } = useConversationController()
-const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketState = ref<'open' | 'connecting' | 'closed'>('closed'); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
+const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage } = useConversationController()
+const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketConnection = ref<ConversationSocketSnapshot>({ status: 'closed', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null }); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 // Composer state belongs to a conversation. Keeping a single global draft made
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
-const lastSubmittedPromptByConversationId = new Map<string, string>()
 let nextOptimisticMessageId = 0
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
 const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
-const socketLabel = computed(() => socketState.value === 'open' ? '实时连接' : socketState.value === 'connecting' ? '连接中…' : '已断开')
+const socketState = computed(() => socketConnection.value.status)
+const socketLabel = computed(() => {
+  const state = socketConnection.value
+  if (state.status === 'open') return '实时连接'
+  if (state.status === 'connecting') return state.reconnectAttempt > 0 ? `重连中 · 第 ${state.reconnectAttempt} 次` : '连接中…'
+  const code = state.closeCode === null ? '' : ` · ${state.closeCode}`
+  return `已断开${code} · 自动重连 #${state.reconnectAttempt}`
+})
+const socketDetail = computed(() => {
+  const state = socketConnection.value
+  if (state.status !== 'closed') return socketLabel.value
+  const retry = state.retryInMs === null ? '' : `；${state.retryInMs}ms 后自动重连`
+  return `WebSocket 已关闭（${state.closeCode ?? '无关闭码'}）：${state.closeReason || '未提供原因'}${retry}`
+})
 const isRunning = computed(() => Boolean(conversationState.value.activeTurnId))
 const allSharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
 const hiddenConversationEntryCount = computed(() => hiddenMessageCount(allSharedConversationEntries.value.length, visibleConversationEntryCount.value))
@@ -176,8 +189,17 @@ const composerReasoningOptions = computed<CodyComposerOption[]>(() => [{ value: 
 const composerPermissionOptions = computed<CodyComposerOption[]>(() => [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
 const composerSkills = computed<CodyComposerOption[]>(() => runtimeSkills.value.map(skill => ({ value: skill.id, label: skill.label, description: skill.description })))
 
-function canDeleteConversation(conversation: Conversation): boolean { return canDeleteConversationRule(conversation, conversations.value.length) }
-function deleteConversationTitle(conversation: Conversation): string { return deleteConversationTitleRule(conversation, conversations.value.length) }
+function displayConversationStatus(conversation: Conversation): Conversation['status'] {
+  const state = selectedConversation.value?.id === conversation.id && conversationState.value.threadId === conversation.nativeId
+    ? conversationState.value
+    : null
+  return conversationStatusFromState(conversation.status, state)
+}
+function conversationWithDisplayStatus(conversation: Conversation): Conversation {
+  return { ...conversation, status: displayConversationStatus(conversation) }
+}
+function canDeleteConversation(conversation: Conversation): boolean { return canDeleteConversationRule(conversationWithDisplayStatus(conversation), conversations.value.length) }
+function deleteConversationTitle(conversation: Conversation): string { return deleteConversationTitleRule(conversationWithDisplayStatus(conversation), conversations.value.length) }
 async function startConversationRename(conversation: Conversation): Promise<void> {
   renamingConversationId.value = conversation.id
   conversationRenameDraft.value = conversation.title
@@ -227,7 +249,6 @@ async function deleteConversation(): Promise<void> {
       resetConversationState()
       draft.value = ''
       draftByConversationId.delete(target.id)
-      lastSubmittedPromptByConversationId.delete(target.id)
       await openConversation(remaining[0]!)
     }
   } catch (cause) { deleteConversationError.value = cause instanceof Error ? cause.message : String(cause) } finally { deletingConversation.value = false }
@@ -277,6 +298,7 @@ function demandUrl(demand: Demand): string {
 function clearConversationState(): void {
   selectedConversation.value = null
   resetConversationState()
+  socketConnection.value = { status: 'closed', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null }
 }
 let workspaceLoadSequence = 0
 async function loadWorkspaces(): Promise<void> {
@@ -473,24 +495,6 @@ async function restoreRoute(): Promise<void> {
   clearConversationState()
   activePage.value = 'dashboard'
 }
-function applyConversationLifecycle(conversationId: string, event: ConversationEvent): void {
-  if (event.type === 'turn.failed') {
-    const reason = String(event.data.error ?? 'Codex 未能完成本次回复。')
-    const sentenceReason = reason.replace(/[。.!！?？]+$/u, '')
-    const failedPrompt = lastSubmittedPromptByConversationId.get(conversationId)
-    if (failedPrompt && !draftByConversationId.get(conversationId)?.trim()) {
-      draftByConversationId.set(conversationId, failedPrompt)
-      if (selectedConversation.value?.id === conversationId) draft.value = failedPrompt
-      error.value = `Codex 本次连接中断：${sentenceReason}。原始消息已放回输入框，请确认后重试。`
-    } else error.value = `Codex 本次连接中断：${reason}`
-    lastSubmittedPromptByConversationId.delete(conversationId)
-  } else if (event.type === 'turn.completed' || event.type === 'turn.interrupted') lastSubmittedPromptByConversationId.delete(conversationId)
-  conversations.value = conversations.value.map(item => item.id === conversationId ? {
-    ...item,
-    status: conversationStatusAfterEvent(item.status, event.type),
-  } : item)
-  if (selectedConversation.value?.id === conversationId) selectedConversation.value = conversations.value.find(item => item.id === conversationId) ?? selectedConversation.value
-}
 async function connect(conversation: Conversation): Promise<void> {
   visibleConversationEntryCount.value = DEFAULT_VISIBLE_MESSAGE_COUNT
   conversationScrollState.value = null
@@ -499,23 +503,33 @@ async function connect(conversation: Conversation): Promise<void> {
   const host = window.location.host || '127.0.0.1:3211'
   await connectConversationState(conversation.nativeId, {
     read: async () => (await api.conversationHistory(workspaceId, conversation.id)).events,
+    submit: async (command) => {
+      const input = command.input as {
+        content: string
+        settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }
+      }
+      const accepted = await api.sendMessage(
+        workspaceId,
+        conversation.id,
+        command.clientCommandId,
+        input.content,
+        command.mode,
+        input.settings,
+      )
+      return { clientCommandId: accepted.commandId }
+    },
     subscribe: (_threadId, listener) => {
-      const realtime = createReconnectingConversationSocket({
+      const realtime = createConversationEventSocket({
         url: `${protocol}://${host}/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversation.id)}/events`,
-        parse(data): ConversationSubscriptionEvent | null {
-          try {
-            const payload = JSON.parse(String(data)) as { type?: string; event?: ConversationEvent }
-            if (payload.type !== 'event' || !payload.event) return null
-            applyConversationLifecycle(conversation.id, payload.event)
-            return { type: 'event', event: payload.event }
-          } catch { error.value = '收到无法识别的 Runtime 事件'; return null }
+        onEvent(event) {
+          const productEvent = event as ConversationEvent
+          listener({ type: 'event', event: productEvent } satisfies ConversationSubscriptionEvent)
         },
-        listener(value) {
-          socketState.value = value.type === 'connected' ? 'open' : value.type === 'disconnected' ? 'closed' : socketState.value
-          listener(value)
+        onConnection(event) { listener(event) },
+        onState(state) {
+          socketConnection.value = state
         },
       })
-      socketState.value = 'connecting'
       return () => realtime.close()
     },
   })
@@ -535,7 +549,44 @@ async function openBindConversation(): Promise<void> { if (!workspace.value || !
 function closeBindConversation(): void { if (bindingConversation.value) return; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false }
 function selectNativeThread(thread: AvailableNativeThread): void { if (thread.bound) return; boundNativeId.value = thread.nativeId; if (!boundConversationTitle.value.trim()) boundConversationTitle.value = threadTitle(thread) }
 async function bindConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || bindingConversation.value || !canBindNativeThread.value) return; bindingConversation.value = true; modalError.value = ''; try { const created = await api.bindConversation(workspace.value.id, selectedDemand.value.id, { nativeId: boundNativeId.value.trim(), ...(boundConversationTitle.value.trim() ? { title: boundConversationTitle.value.trim() } : {}) }); conversations.value = [created, ...conversations.value]; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; boundNativeId.value = ''; boundConversationTitle.value = ''; await openConversation(created) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { bindingConversation.value = false } }
-async function sendMessage(): Promise<void> { if (!workspace.value || !selectedConversation.value || sending.value) return; const conversationId = selectedConversation.value.id; const content = draft.value.trim(); const turnSkills = [...selectedSkillsForTurn.value]; if (!composerHasContent({ text: content, skills: turnSkills })) return; const optimisticId = `command:${conversationId}:${Date.now().toString(36)}:${String(++nextOptimisticMessageId)}`; const skillReferences = turnSkills.flatMap((id) => { const skill = runtimeSkills.value.find((candidate) => candidate.id === id); return skill ? [{ name: skill.name, path: skill.id, displayName: skill.label }] : [] }); enqueueUserMessage({ id: optimisticId, text: content, ...(skillReferences.length ? { skills: skillReferences } : {}) }); draft.value = ''; draftByConversationId.delete(conversationId); lastSubmittedPromptByConversationId.set(conversationId, content); sending.value = true; try { await api.sendMessage(workspace.value.id, conversationId, optimisticId, content, resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value), { ...(selectedModel.value ? { model: selectedModel.value } : {}), ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}), collaborationMode: selectedCollaborationModeKind.value, ...(turnSkills.length ? { skills: turnSkills } : {}) }); selectedSkillsForTurn.value = [] } catch (cause) { const message = cause instanceof Error ? cause.message : String(cause); failQueuedUserMessage(optimisticId, message); draft.value = content; draftByConversationId.set(conversationId, content); selectedSkillsForTurn.value = turnSkills; lastSubmittedPromptByConversationId.delete(conversationId); error.value = message } finally { sending.value = false } }
+async function sendMessage(): Promise<void> {
+  if (!workspace.value || !selectedConversation.value || sending.value) return
+  const conversationId = selectedConversation.value.id
+  const content = draft.value.trim()
+  const turnSkills = [...selectedSkillsForTurn.value]
+  if (!composerHasContent({ text: content, skills: turnSkills })) return
+  const optimisticId = `command:${conversationId}:${Date.now().toString(36)}:${String(++nextOptimisticMessageId)}`
+  const skillReferences = turnSkills.flatMap((id) => {
+    const skill = runtimeSkills.value.find((candidate) => candidate.id === id)
+    return skill ? [{ name: skill.name, path: skill.id, displayName: skill.label }] : []
+  })
+  const optimisticText = content || skillReferences.map((skill) => `$${skill.displayName ?? skill.name}`).join(' ')
+  draft.value = ''
+  draftByConversationId.delete(conversationId)
+  sending.value = true
+  try {
+    await submitUserMessage(
+      { id: optimisticId, text: optimisticText, ...(skillReferences.length ? { skills: skillReferences } : {}) },
+      {
+        mode: resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
+        input: {
+          content,
+          settings: {
+            ...(selectedModel.value ? { model: selectedModel.value } : {}),
+            ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
+            collaborationMode: selectedCollaborationModeKind.value,
+            ...(turnSkills.length ? { skills: turnSkills } : {}),
+          },
+        },
+      },
+    )
+    selectedSkillsForTurn.value = []
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sending.value = false
+  }
+}
 function updateDraft(value: string): void { draft.value = value; const conversationId = selectedConversation.value?.id; if (!conversationId) return; if (value) draftByConversationId.set(conversationId, value); else draftByConversationId.delete(conversationId) }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
 async function loadComposerOptions(demandId: string): Promise<void> { if (!workspace.value) return; try { const options = await api.composerOptions(workspace.value.id, demandId); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!selectedModel.value && options.models.length) selectedModel.value = options.models[0]! } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; selectedSkillsForTurn.value = [] } }
