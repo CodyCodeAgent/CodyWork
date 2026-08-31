@@ -48,16 +48,17 @@ describe('WorkspaceSetupCoordinator', () => {
     expect(register).toHaveBeenCalledWith('/workspace', 'Demo')
   })
 
-  it('retries only transient runtime failures before registration', async () => {
+  it('never automatically replays a mutating agent after a transport failure', async () => {
     const initialize = vi.fn()
       .mockResolvedValueOnce({ status: 'error', message: 'responseStreamDisconnected: request timed out' })
       .mockResolvedValueOnce({ status: 'initialized', message: 'recovered' })
     const coordinator = new WorkspaceSetupCoordinator(dependencies({ initialize }))
 
     const completed = await coordinator.wait(coordinator.start({ type: 'folder', path: '/workspace' }).id)
-    expect(completed.status).toBe('completed')
-    expect(initialize).toHaveBeenCalledTimes(2)
-    expect(completed.events.some(event => event.type === 'agent.retry')).toBe(true)
+    expect(completed.status).toBe('failed')
+    expect(completed.error).toContain('未自动重试')
+    expect(initialize).toHaveBeenCalledTimes(1)
+    expect(completed.events.some(event => event.type === 'agent.retry')).toBe(false)
   })
 
   it('fails closed when verification does not produce a ready workspace', async () => {

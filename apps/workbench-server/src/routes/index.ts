@@ -179,7 +179,7 @@ function buildRoutes(ctx: AppContext) {
   const routes: { method: string; pattern: string; handler: Handler }[] = []
   const add = (method: string, pattern: string, handler: Handler) => routes.push({ method, pattern, handler })
 
-  add('GET', '/api/health', () => ({ service: 'codywork', runtime: 'codex' }))
+  add('GET', '/api/health', () => ({ service: 'codywork', status: 'ok' }))
 
   add('GET', '/api/runtime/diagnostics', () => conversationService(ctx).diagnostics())
 

@@ -62,10 +62,6 @@ function setupEventText(event: RuntimeEvent): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 2_000)
 }
 
-function retryableSetupError(message: string): boolean {
-  return /reconnecting|responseStreamDisconnected|request timed out|EPIPE|disconnected/i.test(message)
-}
-
 export class WorkspaceSetupCoordinator {
   private readonly jobs = new Map<string, WorkspaceSetupJob>()
   private readonly completions = new Map<string, Promise<void>>()
@@ -136,19 +132,12 @@ export class WorkspaceSetupCoordinator {
       })
       this.stage(job, 'agent', 25, 'AI 正在审阅并准备 CSR Workspace')
 
-      let initialized: WorkspaceInitializationResult | undefined
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        job.events.push({ type: 'agent.attempt', timestamp: this.dependencies.now(), text: `启动 AI 初始化，第 ${attempt}/3 次尝试。` })
-        const result = await this.dependencies.initialize(prepared.path, event => this.appendEvent(job, event), job.prompt)
-        job.response = result.message || job.response
-        if (result.status !== 'error') {
-          initialized = result
-          break
-        }
-        if (!retryableSetupError(result.message) || attempt === 3) throw new Error(result.message)
-        job.events.push({ type: 'agent.retry', timestamp: this.dependencies.now(), text: `AI 连接短暂中断，准备自动重试（${attempt + 1}/3）。` })
+      job.events.push({ type: 'agent.attempt', timestamp: this.dependencies.now(), text: '启动 AI 初始化。写操作不会因连接错误自动重放。' })
+      const initialized = await this.dependencies.initialize(prepared.path, event => this.appendEvent(job, event), job.prompt)
+      job.response = initialized.message || job.response
+      if (initialized.status === 'error') {
+        throw new Error(`${initialized.message}（为避免重复修改 Workspace，本任务未自动重试。）`)
       }
-      if (!initialized) throw new Error('AI Workspace 初始化没有返回结果')
 
       this.stage(job, 'verify', 82, '复检目录、策略文件与 Worktree 容器')
       const check = this.dependencies.inspect(prepared.path).check
