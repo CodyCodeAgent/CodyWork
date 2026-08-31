@@ -1,4 +1,5 @@
 import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand } from './api'
+import type { ConversationState } from '@codycodeagent/cody-web-core/conversation'
 
 export type HistoryMode = 'push' | 'replace' | 'none'
 export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null }
@@ -105,11 +106,17 @@ export function workbenchUrl(current: string, workspaceId: string | null, demand
   return url
 }
 
-export function conversationStatusAfterEvent(current: Conversation['status'], eventType: string): Conversation['status'] {
-  if (eventType === 'turn.started') return 'running'
-  if (eventType === 'approval.requested' || eventType === 'question.requested') return 'awaiting_approval'
-  if (eventType === 'turn.failed') return 'failed'
-  if (eventType === 'turn.interrupted') return 'idle'
-  if (eventType === 'turn.completed') return 'completed'
-  return current
+export function conversationStatusFromState(metadataStatus: Conversation['status'], state: ConversationState | null): Conversation['status'] {
+  if (!state) return metadataStatus
+  if (state.pendingRequests.length > 0) return 'awaiting_approval'
+  const active = state.activeTurnId ? state.turns[state.activeTurnId] : undefined
+  if (active) return active.lifecycle === 'disconnected' ? 'disconnected' : 'running'
+  const latest = Object.values(state.turns).at(-1)
+  if (!latest) return metadataStatus
+  if (latest.lifecycle === 'running' || latest.lifecycle === 'retrying') return 'running'
+  if (latest.lifecycle === 'completed') return 'completed'
+  if (latest.lifecycle === 'failed') return 'failed'
+  if (latest.lifecycle === 'disconnected') return 'disconnected'
+  if (latest.lifecycle === 'interrupted') return 'idle'
+  return metadataStatus
 }

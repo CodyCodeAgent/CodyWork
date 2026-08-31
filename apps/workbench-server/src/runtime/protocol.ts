@@ -177,6 +177,14 @@ export interface CodyWorkRuntime {
   resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>>
   /** Reads native durable history. CodyWork deliberately does not mirror this in SQLite. */
   readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]>
+  /** Authoritative owner-process state. Products may guard actions with this
+   * snapshot but must never persist or independently advance it. */
+  sessionSnapshot?(conversation: ConversationHandle): import('@codycodeagent/cody-web-core/session').CodexSessionSnapshot | null
+  /** Replays unresolved Core requests only on the realtime channel after a browser reconnect. */
+  pendingConversationEvents?(conversation: ConversationHandle): RuntimeEvent[]
+  /** One product stream per attached conversation. Submission callbacks are
+   * not a second broadcast channel. */
+  subscribeConversation?(conversation: ConversationHandle, listener: (event: RuntimeEvent) => void): () => void
   setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>
   respondApproval(conversation: ConversationHandle, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(conversation: ConversationHandle, requestId: string, answer: unknown): Promise<void>
