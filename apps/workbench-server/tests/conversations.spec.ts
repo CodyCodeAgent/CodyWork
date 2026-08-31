@@ -28,7 +28,7 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
-  it('marks turns abandoned by a CodyWork restart disconnected and removes stale approval cards from the live view', async () => {
+  it('marks sessions abandoned by a CodyWork restart disconnected without fabricating native history', async () => {
     class PendingApprovalRuntime extends TestRuntimeAdapter {
       override async readConversation(request: Parameters<TestRuntimeAdapter['readConversation']>[0]) {
         const timestamp = nowIso()
@@ -46,9 +46,11 @@ describe('conversation websocket control plane', () => {
 
     expect(reconcileInterruptedConversations(test.db)).toBe(1)
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('disconnected')
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'turn.failed', turnId: 'turn-pending', data: expect.objectContaining({ cause: 'runtime_restarted' }) }),
-    ]))
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([
+      expect.objectContaining({ type: 'user.completed', turnId: 'turn-pending' }),
+      expect.objectContaining({ type: 'turn.started', turnId: 'turn-pending' }),
+      expect.objectContaining({ type: 'approval.requested', turnId: 'turn-pending' }),
+    ])
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
@@ -56,10 +58,10 @@ describe('conversation websocket control plane', () => {
 
   it('passes clean text, structured selected skills and steer mode to the Runtime', async () => {
     class CapturingRuntime extends TestRuntimeAdapter {
-      requests: Parameters<TestRuntimeAdapter['sendTurn']>[0][] = []
-      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+      requests: Parameters<TestRuntimeAdapter['submitTurn']>[0][] = []
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         this.requests.push(request)
-        return super.sendTurn(request)
+        return super.submitTurn(request)
       }
     }
     const test = await fixture()
@@ -93,10 +95,10 @@ describe('conversation websocket control plane', () => {
 
   it('passes collaboration mode as turn-scoped input without persisting a second owner', async () => {
     class StateRuntime extends TestRuntimeAdapter {
-      requests: Array<Parameters<TestRuntimeAdapter['sendTurn']>[0]> = []
-      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+      requests: Array<Parameters<TestRuntimeAdapter['submitTurn']>[0]> = []
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         this.requests.push(request)
-        return super.sendTurn(request)
+        return super.submitTurn(request)
       }
     }
     const test = await fixture()
@@ -218,7 +220,7 @@ describe('conversation websocket control plane', () => {
     await once(socket, 'open')
     await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })
     await new Promise(resolve => setTimeout(resolve, 50))
-    expect(events).toEqual(['user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
+    expect(events).toEqual(['command.queued', 'command.bound', 'user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
     const history = await (await fetch(`${base}/conversations/${first.data.id}/history`)).json() as { data: { events: { type: string }[] } }
     expect(history.data.events.some(event => event.type === 'assistant.delta')).toBe(true)
     const deletion = await (await fetch(`${base}/conversations/${second.data.id}`, { method: 'DELETE' })).json() as { data: { deleted: boolean } }
@@ -229,32 +231,37 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('resumes a stale Runtime attachment once before sending the same turn', async () => {
-    class RecoveringRuntime extends TestRuntimeAdapter {
-      private failOnce = true
+  it('does not automatically replay a command rejected before native turn binding', async () => {
+    class RejectingRuntime extends TestRuntimeAdapter {
+      submitCalls = 0
 
-      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
-        if (this.failOnce) {
-          this.failOnce = false
-          throw new Error('Codex conversation runtime is not available')
-        }
-        return super.sendTurn(request)
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        this.submitCalls += 1
+        const clientCommandId = request.clientCommandId ?? 'command-rejected'
+        const timestamp = nowIso()
+        request.onEvent?.({
+          id: 'command-failed', type: 'command.failed', conversationId: request.conversation.id,
+          threadId: request.conversation.nativeId, timestamp, atIso: timestamp,
+          data: { clientCommandId, error: 'Codex conversation runtime is not available' },
+        })
+        const failure = Promise.reject(new Error('Codex conversation runtime is not available'))
+        void failure.catch(() => undefined)
+        return { clientCommandId, started: failure, completed: failure }
       }
     }
 
     const test = await fixture()
-    const runtime = new RecoveringRuntime()
+    const runtime = new RejectingRuntime()
     const conversations = new ConversationService(test.db, runtime)
-    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Reconnect safely')
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Do not replay')
 
-    await conversations.send(test.workspaceId, conversation.id, 'continue after reconnect')
+    await conversations.send(test.workspaceId, conversation.id, 'must require an explicit retry')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('completed')
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'assistant.delta', data: expect.objectContaining({ text: expect.stringContaining('continue after reconnect') }) }),
-    ]))
-    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toEqual({ action: 'runtime.resumed' })
+    expect(runtime.submitCalls).toBe(1)
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toBeUndefined()
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
@@ -262,7 +269,18 @@ describe('conversation websocket control plane', () => {
 
   it('does not reconstruct native history from SQLite failure audits', async () => {
     class FailingRuntime extends TestRuntimeAdapter {
-      override async sendTurn(): Promise<never> { throw new Error('response stream disconnected') }
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        const clientCommandId = request.clientCommandId ?? 'command-failed'
+        const timestamp = nowIso()
+        request.onEvent?.({
+          id: 'failed-before-turn', type: 'command.failed', conversationId: request.conversation.id,
+          threadId: request.conversation.nativeId, timestamp, atIso: timestamp,
+          data: { clientCommandId, error: 'response stream disconnected' },
+        })
+        const failure = Promise.reject(new Error('response stream disconnected'))
+        void failure.catch(() => undefined)
+        return { clientCommandId, started: failure, completed: failure }
+      }
     }
 
     const test = await fixture()
@@ -273,18 +291,18 @@ describe('conversation websocket control plane', () => {
 
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
-    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'turn.failed'").get(conversation.id)).toEqual({ action: 'turn.failed' })
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'command.failed'").get(conversation.id)).toEqual({ action: 'command.failed' })
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('keeps a normalized upstream terminal failure failed after sendTurn settles', async () => {
+  it('keeps an upstream operational disconnect distinct from a native terminal failure', async () => {
     class UpstreamFailureRuntime extends TestRuntimeAdapter {
-      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         const timestamp = nowIso()
         const event = {
-          id: 'upstream-terminal', type: 'turn.failed' as const, conversationId: request.conversation.id,
+          id: 'upstream-disconnected', type: 'turn.disconnected' as const, conversationId: request.conversation.id,
           threadId: request.conversation.nativeId, turnId: 'turn-upstream', timestamp, atIso: timestamp,
           data: {
             cause: 'upstream_response_stream_unrecoverable',
@@ -292,7 +310,11 @@ describe('conversation websocket control plane', () => {
           },
         }
         request.onEvent?.(event)
-        return { conversation: request.conversation, finalText: '', events: [event] }
+        return {
+          clientCommandId: request.clientCommandId ?? 'command-upstream',
+          started: Promise.resolve({ threadId: request.conversation.nativeId, turnId: 'turn-upstream' }),
+          completed: Promise.resolve({ conversation: request.conversation, finalText: '', events: [event] }),
+        }
       }
     }
 
@@ -303,14 +325,14 @@ describe('conversation websocket control plane', () => {
     await conversations.send(test.workspaceId, conversation.id, 'do not silently resend')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('disconnected')
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
 
   it('returns an interrupted turn to idle without recording a Runtime failure', async () => {
     class InterruptedRuntime extends TestRuntimeAdapter {
-      override async sendTurn(request: Parameters<TestRuntimeAdapter['sendTurn']>[0]) {
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         const timestamp = nowIso()
         const event = {
           id: 'turn-interrupted', type: 'turn.interrupted' as const, conversationId: request.conversation.id,
@@ -318,7 +340,11 @@ describe('conversation websocket control plane', () => {
           timestamp, atIso: timestamp, data: { status: 'interrupted' },
         }
         request.onEvent?.(event)
-        return { conversation: request.conversation, finalText: '', events: [event] }
+        return {
+          clientCommandId: request.clientCommandId ?? 'command-interrupted',
+          started: Promise.resolve({ threadId: request.conversation.nativeId, turnId: 'turn-1' }),
+          completed: Promise.resolve({ conversation: request.conversation, finalText: '', events: [event] }),
+        }
       }
     }
 

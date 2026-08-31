@@ -388,7 +388,8 @@ function buildRoutes(ctx: AppContext) {
       collaborationMode,
       ...(Array.isArray(c.body.skills) ? { skills: c.body.skills.filter((item: unknown) => typeof item === 'string').slice(0, 20) as string[] } : {}),
     }
-    return conversationService(ctx).send(workspace.id, requiredParam(c, 'conversationId'), content, mode, settings)
+    const clientCommandId = typeof c.body.clientCommandId === 'string' ? c.body.clientCommandId : undefined
+    return conversationService(ctx).send(workspace.id, requiredParam(c, 'conversationId'), content, mode, settings, clientCommandId)
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/interrupt', async (c) => {

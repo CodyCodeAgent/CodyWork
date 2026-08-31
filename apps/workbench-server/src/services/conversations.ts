@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { composerHasContent } from '@codycodeagent/cody-web-core/composer'
 import { resolve } from 'node:path'
 import { WorkbenchDb, ConversationPermissionMode, ConversationRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
@@ -67,15 +66,6 @@ type DemandContext = {
 }
 
 /**
- * A shared App Server process can exit independently of CodyWork's durable
- * conversation metadata. This error is raised before `turn/start` is sent, so
- * re-attaching the native Thread and retrying the same request is safe.
- */
-function isMissingRuntimeAttachment(error: Error): boolean {
-  return error.message.includes('Codex conversation runtime is not available')
-}
-
-/**
  * A native App Server owns active turns and pending server requests only in
  * memory. After CodyWork itself restarts, a persisted `running` or
  * `awaiting_approval` row therefore cannot be resumed safely: accepting the
@@ -88,8 +78,6 @@ export function reconcileInterruptedConversations(db: WorkbenchDb): number {
     .run(nowIso())
   return Number(result.changes)
 }
-
-const RUNTIME_RESTARTED_MESSAGE = 'CodyWork Runtime 已重启，原审批或回复无法恢复，且未自动重发。请确认后重试该消息。'
 
 function toView(row: ConversationRow): ConversationView {
   return {
@@ -126,11 +114,6 @@ export class ConversationService {
   private readonly handles = new Map<string, ConversationHandle>()
   private readonly contexts = new Map<string, RuntimeContext>()
   private readonly listeners = new Map<string, Set<Listener>>()
-  /** Serializes ordinary queue sends per conversation; steering stays attached to the active turn. */
-  private readonly turnChains = new Map<string, Promise<void>>()
-  /** App Server failure notifications, held until the enclosing send settles. */
-  private readonly runtimeFailureMessages = new Map<string, string>()
-
   private runtime: CodyWorkRuntime
 
   constructor(private readonly db: WorkbenchDb, runtime: CodyWorkRuntime, private readonly onTurnFinished?: (workspaceId: string) => void) { this.runtime = runtime }
@@ -172,12 +155,7 @@ export class ConversationService {
     const context = this.contextFor(demand, row.permission_mode)
     try {
       const history = await this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
-      // The native transcript can retain an unresolved approval after the
-      // owning runtime has gone away. Add an in-memory terminal event for the
-      // presentation reducer only; do not mirror it into SQLite or mutate the
-      // native history. This removes the dead card and makes the recovery
-      // choice explicit without fabricating a successful response.
-      return row.status === 'disconnected' ? [...history, ...this.interruptedTurnEvents(row, history)] : history
+      return history
     } catch (error) {
       // App Server cannot read a just-started native thread until its first user
       // turn materializes. Treat only an untouched local conversation as empty.
@@ -265,13 +243,13 @@ export class ConversationService {
     return this.runtime.getComposerOptions(this.contextFor(demand, 'workspace-write'))
   }
 
-  async send(workspaceId: string, conversationId: string, prompt: string, mode: 'queue' | 'steer' = 'queue', settings?: ConversationSendSettings): Promise<{ accepted: true; turnId: string }> {
+  async send(workspaceId: string, conversationId: string, prompt: string, mode: 'queue' | 'steer' = 'queue', settings?: ConversationSendSettings, requestedCommandId?: string): Promise<{ accepted: true; commandId: string }> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
     const text = prompt.trim()
     const requestedSkills = (settings?.skills ?? []).filter(skill => typeof skill === 'string' && skill.trim()).map(skill => skill.trim()).slice(0, 20)
     if (!composerHasContent({ text, skills: requestedSkills })) throw new Error('消息不能为空')
-    const turnId = `turn-${randomUUID()}`
+    const commandId = requestedCommandId?.trim().slice(0, 200) || makeId('command')
     const context = this.contexts.get(conversationId)
     if (!context) throw new Error('会话 Runtime 上下文不可用')
     const selectedSkills = await this.runtime.resolveSkills(context, requestedSkills)
@@ -282,14 +260,24 @@ export class ConversationService {
       ...(selectedSkills.length ? { skills: selectedSkills } : {}),
     }
     this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), conversationId)
-    const run = () => this.runTurn(row, text, turnId, mode, runtimeSettings)
-    const previous = this.turnChains.get(conversationId) ?? Promise.resolve()
-    const scheduled = mode === 'queue' ? previous.catch(() => undefined).then(run) : run()
-    this.turnChains.set(conversationId, scheduled)
-    void scheduled.finally(() => {
-      if (this.turnChains.get(conversationId) === scheduled) this.turnChains.delete(conversationId)
+    const submission = this.runtime.submitTurn({
+      conversation: this.handleFor(row),
+      prompt: text,
+      mode,
+      clientCommandId: commandId,
+      ...(Object.keys(runtimeSettings).length ? { settings: runtimeSettings } : {}),
+      onEvent: event => this.appendRuntimeEvent(event),
     })
-    return { accepted: true, turnId }
+    void submission.started.then((handle) => {
+      this.audit(conversationId, 'turn.bound', { commandId, nativeTurnId: handle.turnId })
+    }).catch((error: unknown) => {
+      this.audit(conversationId, 'command.failed', { commandId, error: error instanceof Error ? error.message : String(error) })
+    })
+    void submission.completed.then(
+      () => this.onTurnFinished?.(row.workspace_id),
+      () => this.onTurnFinished?.(row.workspace_id),
+    )
+    return { accepted: true, commandId: submission.clientCommandId }
   }
 
   async setPermission(workspaceId: string, conversationId: string, mode: ConversationPermissionMode): Promise<ConversationView> {
@@ -345,7 +333,7 @@ export class ConversationService {
   /** Removes CodyWork's local record only. The native Codex Thread is intentionally retained. */
   remove(workspaceId: string, conversationId: string): { deleted: true } {
     const row = this.requireConversation(workspaceId, conversationId)
-    if (row.status === 'running' || row.status === 'awaiting_approval' || this.turnChains.has(conversationId)) {
+    if (row.status === 'running' || row.status === 'awaiting_approval') {
       throw new Error('会话正在执行或等待确认，请先停止后再删除')
     }
     const count = this.db.db.prepare('SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND demand_id = ?').get(workspaceId, row.demand_id) as { count: number }
@@ -359,76 +347,15 @@ export class ConversationService {
     return { deleted: true }
   }
 
-  private async runTurn(row: ConversationRow, prompt: string, turnId: string, submissionMode: 'queue' | 'steer', settings?: RuntimeTurnSettings): Promise<void> {
-    try {
-      await this.sendRuntimeTurn(row, prompt, submissionMode, settings)
-      const current = this.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(row.id) as { status?: string } | undefined
-      // A normalized terminal failure is a successful transport completion of
-      // `sendTurn`, not a successful Codex Turn. Preserve it so the UI can
-      // retain the failed outbox instead of falsely reporting completion.
-      if (current?.status !== 'idle' && current?.status !== 'failed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), row.id)
-    } catch (error) {
-      this.fail(row.id, turnId, error instanceof Error ? error : new Error(String(error)))
-    }
-    this.onTurnFinished?.(row.workspace_id)
-  }
-
-  private async sendRuntimeTurn(row: ConversationRow, prompt: string, submissionMode: 'queue' | 'steer', settings?: RuntimeTurnSettings): Promise<void> {
-    const send = async (): Promise<void> => {
-      await this.runtime.sendTurn({
-        conversation: this.handleFor(row),
-        prompt,
-        mode: submissionMode,
-        ...(settings ? { settings } : {}),
-        onEvent: event => this.appendRuntimeEvent(event),
-      })
-    }
-    try {
-      await send()
-    } catch (cause) {
-      const error = cause instanceof Error ? cause : new Error(String(cause))
-      if (!isMissingRuntimeAttachment(error)) throw error
-
-      // The App Server owns transient thread attachments. Drop only CodyWork's
-      // stale in-memory references, resume the native Codex Thread under the
-      // existing Demand policy, then retry the request once. Do not retry any
-      // other failure: a remote turn may already have started in that case.
-      this.handles.delete(row.id)
-      this.contexts.delete(row.id)
-      await this.ensureHandle(row)
-      this.audit(row.id, 'runtime.resumed', { reason: 'runtime attachment was unavailable' })
-      await send()
-    }
-  }
-
   private appendRuntimeEvent(event: RuntimeEvent): void {
     const data = event.data
     this.publish({ ...event, data })
+    if (event.type === 'command.queued' || event.type === 'command.bound' || event.type === 'turn.started') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('running', nowIso(), event.conversationId)
     if (event.type === 'approval.requested') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('awaiting_approval', nowIso(), event.conversationId)
-    if (event.type === 'turn.failed') {
-      this.runtimeFailureMessages.set(event.conversationId, String(event.data.error ?? 'Codex 未能完成本次回复。'))
-      this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
-    }
-    if (event.type === 'turn.interrupted') {
-      this.runtimeFailureMessages.delete(event.conversationId)
-      this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('idle', nowIso(), event.conversationId)
-    }
-  }
-
-  private fail(conversationId: string, turnId: string, error: Error): void {
-    const message = error.message.slice(0, 1_000)
-    const alreadyPublished = this.runtimeFailureMessages.get(conversationId) === message
-    this.runtimeFailureMessages.delete(conversationId)
-    this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), conversationId)
-    // This is a bounded diagnostic audit, not a mirrored event history. Native
-    // Codex Thread history remains the only durable message timeline.
-    this.audit(conversationId, 'turn.failed', { turnId, error: message })
-    console.warn('[CodyWork] Codex turn failed', { conversationId, turnId, error: message })
-    if (!alreadyPublished) {
-      const row = this.db.db.prepare('SELECT native_id FROM conversations WHERE id = ?').get(conversationId) as { native_id?: string } | undefined
-      const timestamp = nowIso()
-      this.publish({ id: `live:${randomUUID()}`, conversationId, type: 'turn.failed', threadId: row?.native_id ?? '', turnId, timestamp, atIso: timestamp, data: { error: message } })
-    }
+    if (event.type === 'turn.completed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('completed', nowIso(), event.conversationId)
+    if (event.type === 'turn.failed' || event.type === 'command.failed') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('failed', nowIso(), event.conversationId)
+    if (event.type === 'turn.interrupted') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('idle', nowIso(), event.conversationId)
+    if (event.type === 'turn.disconnected' || event.type === 'runtime.disconnected') this.db.db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run('disconnected', nowIso(), event.conversationId)
   }
 
   private publish(event: ConversationEvent): void {
@@ -494,24 +421,4 @@ export class ConversationService {
     this.contexts.set(row.id, context)
   }
 
-  private interruptedTurnEvents(row: ConversationRow, history: RuntimeEvent[]): ConversationEvent[] {
-    const openTurns = new Map<string, RuntimeEvent>()
-    for (const event of history) {
-      if (event.type === 'turn.started' && event.turnId) openTurns.set(event.turnId, event)
-      if ((event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') && event.turnId) openTurns.delete(event.turnId)
-    }
-    const active = [...openTurns.values()].at(-1)
-    if (!active?.turnId) return []
-    const timestamp = nowIso()
-    return [{
-      id: `runtime-restarted:${row.id}:${active.turnId}`,
-      conversationId: row.id,
-      type: 'turn.failed',
-      threadId: row.native_id,
-      turnId: active.turnId,
-      timestamp,
-      atIso: timestamp,
-      data: { cause: 'runtime_restarted', error: RUNTIME_RESTARTED_MESSAGE },
-    }]
-  }
 }
