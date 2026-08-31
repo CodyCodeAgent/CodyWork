@@ -26,17 +26,18 @@
     </div>
     <div class="sidebar-spacer" />
     <button class="sidebar-item" :class="{ active: activePage === 'settings' }" @click="emit('navigate', 'settings')"><span>⚙</span><span class="sidebar-label"><strong>Codex Runtime</strong><small>连接与诊断</small></span></button>
-    <div class="sidebar-note"><span class="status-dot" :class="socketState" /><span><strong>{{ socketState === 'open' ? 'Realtime connected' : 'Codex ready' }}</strong><small>{{ workspace ? 'Worktree policy enforced' : '选择一个 Workspace 开始' }}</small></span></div>
+    <div class="sidebar-note"><span class="status-dot" :class="socketState" /><span><strong>{{ realtimeLabel }}</strong><small>{{ realtimeDetail }}</small></span></div>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Demand, Workspace } from '../api'
 import { demandStatusLabel } from '../workbenchUi'
 
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 
-defineProps<{
+const props = defineProps<{
   workspace: Workspace | null
   workspaces: Workspace[]
   demands: Demand[]
@@ -46,6 +47,19 @@ defineProps<{
   workspacePickerOpen: boolean
   demandExpanded: boolean
 }>()
+
+const realtimeLabel = computed(() => {
+  if (props.socketState === 'open') return 'Realtime connected'
+  if (props.socketState === 'connecting') return 'Realtime connecting…'
+  return 'Realtime disconnected'
+})
+
+const realtimeDetail = computed(() => {
+  if (!props.workspace) return '选择一个 Workspace 开始'
+  if (props.socketState === 'open') return 'Browser WebSocket connected'
+  if (props.socketState === 'connecting') return 'Browser WebSocket reconnecting'
+  return 'Browser WebSocket will reconnect automatically'
+})
 
 const emit = defineEmits<{
   'update:workspacePickerOpen': [value: boolean]
