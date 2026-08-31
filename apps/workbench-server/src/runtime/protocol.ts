@@ -101,6 +101,8 @@ export interface ListNativeThreadsRequest {
 export interface SendTurnRequest {
   conversation: ConversationHandle
   prompt: string
+  /** Stable product command id. This is an outbox identity, never a native Turn id. */
+  clientCommandId?: string
   mode?: 'queue' | 'steer'
   settings?: {
     model?: string
@@ -139,6 +141,12 @@ export interface SendTurnResult {
   events: RuntimeEvent[]
 }
 
+export interface SubmitTurnResult {
+  clientCommandId: string
+  started: Promise<{ threadId: string; turnId: string }>
+  completed: Promise<SendTurnResult>
+}
+
 export interface ReadConversationRequest {
   conversationId: string
   nativeId: string
@@ -153,6 +161,8 @@ export interface CodyWorkRuntime {
   createConversation(request: CreateConversationRequest): Promise<ConversationHandle>
   /** Renames the native Codex Thread owned by this conversation. */
   renameConversation(conversation: ConversationHandle, title: string): Promise<void>
+  /** Accepts an outbox command immediately; Core owns queueing and native Turn binding. */
+  submitTurn(request: SendTurnRequest): SubmitTurnResult
   sendTurn(request: SendTurnRequest): Promise<SendTurnResult>
   interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }>
   close(): Promise<void>

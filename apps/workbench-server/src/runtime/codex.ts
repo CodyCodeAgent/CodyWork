@@ -236,6 +236,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
+    return this.submitTurn(request).completed
+  }
+
+  submitTurn(request: SendTurnRequest): import('./protocol.js').SubmitTurnResult {
     const session = this.require(request.conversation)
     if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
     if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
@@ -249,10 +253,18 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       approvalPolicy: approvalPolicy(session.mode), sandboxPolicy: sandboxPolicy(session.context, session.mode),
       ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
-    try { await this.requireManager().run(session.handle.id, turn, request.mode === 'steer' ? 'steer' : 'queue') } finally { unsubscribe() }
-    const state = reduceConversationEvents(createConversationState(session.binding.threadId), events)
-    const finalText = [...state.messages].reverse().find(message => message.role === 'assistant')?.text ?? ''
-    return { conversation: request.conversation, finalText, events }
+    const submission = this.requireManager().submit(
+      session.handle.id,
+      turn,
+      request.mode === 'steer' ? 'steer' : 'queue',
+      request.clientCommandId,
+    )
+    const completed = submission.completed.then(() => {
+      const state = reduceConversationEvents(createConversationState(session.binding.threadId), events)
+      const finalText = [...state.messages].reverse().find(message => message.role === 'assistant')?.text ?? ''
+      return { conversation: request.conversation, finalText, events }
+    }).finally(unsubscribe)
+    return { clientCommandId: submission.clientCommandId, started: submission.started, completed }
   }
 
   async interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }> {

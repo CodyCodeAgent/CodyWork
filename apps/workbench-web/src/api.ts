@@ -230,8 +230,8 @@ export const api = {
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>
     request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
-  sendMessage: (workspaceId: string, conversationId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }) =>
-    request<{ accepted: true; turnId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { content, mode, ...(settings ?? {}) }),
+  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }) =>
+    request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
   setConversationPermission: (workspaceId: string, conversationId: string, mode: ConversationPermissionMode) =>

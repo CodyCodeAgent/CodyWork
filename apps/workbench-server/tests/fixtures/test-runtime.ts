@@ -13,6 +13,7 @@ import type {
   RuntimePermissionMode,
   SendTurnRequest,
   SendTurnResult,
+  SubmitTurnResult,
   WorkspaceCheckRequest,
   WorkspaceCheckResult,
   WorkspaceInitializationRequest,
@@ -68,24 +69,39 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     })
   }
 
-  async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
+  submitTurn(request: SendTurnRequest): SubmitTurnResult {
     if (!this.conversations.has(request.conversation.id)) throw new Error('conversation does not belong to this adapter')
+    const clientCommandId = request.clientCommandId ?? `command-${randomUUID()}`
     const turnId = `turn-${randomUUID()}`
     const events: RuntimeEvent[] = []
-    const emit = (type: RuntimeEvent['type'], data: Record<string, unknown>): void => {
+    const emit = (type: RuntimeEvent['type'], data: Record<string, unknown>, options: { native?: boolean; turnId?: string } = {}): void => {
       const timestamp = nowIso()
-      const event: RuntimeEvent = { id: randomUUID(), type, conversationId: request.conversation.id, threadId: request.conversation.nativeId, turnId, timestamp, atIso: timestamp, data }
-      events.push(event); request.onEvent?.(event)
+      const event: RuntimeEvent = {
+        id: randomUUID(), type, conversationId: request.conversation.id, threadId: request.conversation.nativeId,
+        ...(options.turnId === '' ? {} : { turnId: options.turnId ?? turnId }),
+        timestamp, atIso: timestamp, data,
+      }
+      if (options.native !== false) events.push(event)
+      request.onEvent?.(event)
     }
-    emit('user.completed', { text: request.prompt, optimistic: true })
-    emit('turn.started', { prompt: request.prompt })
-    emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
-    const context = this.contexts.get(request.conversation.id)
-    emit('assistant.delta', { text: `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}` })
-    emit('tool.completed', { tool: { kind: 'command', title: 'Policy check', status: 'completed', summary: 'csr.policy.check', details: [] } })
-    emit('turn.completed', { status: 'completed' })
-    this.history.set(request.conversation.nativeId, events)
-    return { conversation: request.conversation, finalText: `Test runtime received: ${request.prompt}`, events }
+    emit('command.queued', { clientCommandId, text: request.prompt }, { native: false, turnId: '' })
+    emit('command.bound', { clientCommandId, nativeTurnId: turnId }, { native: false })
+    const completed = Promise.resolve().then(() => {
+      emit('user.completed', { text: request.prompt })
+      emit('turn.started', { prompt: request.prompt })
+      emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
+      const context = this.contexts.get(request.conversation.id)
+      emit('assistant.delta', { text: `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}` })
+      emit('tool.completed', { tool: { kind: 'command', title: 'Policy check', status: 'completed', summary: 'csr.policy.check', details: [] } })
+      emit('turn.completed', { status: 'completed' })
+      this.history.set(request.conversation.nativeId, events)
+      return { conversation: request.conversation, finalText: `Test runtime received: ${request.prompt}`, events }
+    })
+    return { clientCommandId, started: Promise.resolve({ threadId: request.conversation.nativeId, turnId }), completed }
+  }
+
+  async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
+    return this.submitTurn(request).completed
   }
 
   async interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }> { return { supported: this.conversations.has(conversation.id) } }
