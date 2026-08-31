@@ -153,11 +153,19 @@ describe('generic runtime protocol', () => {
     await runtime.setPermission(conversation, 'yolo')
 
     await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT' })).rejects.toThrow('exited')
-    const restored = await runtime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId })
-    const recovered = await runtime.sendTurn({ conversation: restored, prompt: 'hello after reconnect' })
-    expect(recovered.finalText).toBe('CODEX_FIXTURE_OK')
-
+    expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })
+    await expect(runtime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId }))
+      .rejects.toThrow('will not be restarted automatically')
     await runtime.close()
+
+    // A new owning service lifecycle may start one fresh App Server process.
+    // The failed runtime itself must never supervise or respawn the process.
+    const restartedRuntime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd })
+    const restored = await restartedRuntime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId })
+    const recovered = await restartedRuntime.sendTurn({ conversation: restored, prompt: 'hello after service restart' })
+    expect(recovered.finalText).toBe('CODEX_FIXTURE_OK')
+    expect(restartedRuntime.diagnostics()).toMatchObject({ lifecycle: 'running', startCount: 1 })
+    await restartedRuntime.close()
     rmSync(root, { recursive: true, force: true })
     rmSync(appServerCwd, { recursive: true, force: true })
   })
