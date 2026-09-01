@@ -10,6 +10,13 @@ import type { CodexEvent } from '@codycodeagent/cody-web-core/conversation'
 /** Core owns transport lifecycle semantics; CodyWork only renders this state. */
 export type ConversationSocketSnapshot = ConversationBrowserTransportState
 
+/** The page has not attempted the socket yet.  This is deliberately not a
+ * terminal disconnect: rendering `disconnected` before the first connect
+ * caused a visible false-offline flash on every page load. */
+export function initialConversationSocketSnapshot(): ConversationSocketSnapshot {
+  return initialConversationBrowserTransportState()
+}
+
 export type ConversationEventSocket = { close(): void }
 
 type SocketLike = Pick<WebSocket, 'addEventListener' | 'close' | 'send' | 'readyState'>

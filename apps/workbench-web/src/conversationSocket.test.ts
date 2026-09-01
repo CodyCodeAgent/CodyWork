@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { conversationCloseReason, createConversationEventSocket, type ConversationSocketSnapshot } from './conversationSocket'
+import { conversationCloseReason, createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
 
 class FakeSocket {
   static instances: FakeSocket[] = []
@@ -26,6 +26,14 @@ class FakeSocket {
 afterEach(() => { vi.useRealTimers(); FakeSocket.instances = [] })
 
 describe('conversation WebSocket transport', () => {
+  it('starts as connecting rather than claiming an unattempted socket is offline', () => {
+    expect(initialConversationSocketSnapshot()).toMatchObject({
+      status: 'connecting',
+      reconnectAttempt: 0,
+      willReconnect: true,
+    })
+  })
+
   it('keeps retryable browser closes in reconnecting state without fabricating Runtime events', () => {
     vi.useFakeTimers()
     const states: ConversationSocketSnapshot[] = []
