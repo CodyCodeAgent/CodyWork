@@ -50,7 +50,7 @@
           <section class="chat-main">
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
               <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
-              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
+              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
             </div>
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div class="composer">
@@ -91,7 +91,7 @@ import {
   type ComposerSubmitMode,
 } from '@codycodeagent/cody-web-core/composer'
 import type { ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
-import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyComposerOption } from '@codycodeagent/cody-web-core/vue'
+import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyComposerOption, type CodyMessage } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
 import WorkspaceSetupDialog from './components/WorkspaceSetupDialog.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
@@ -549,20 +549,16 @@ async function openBindConversation(): Promise<void> { if (!workspace.value || !
 function closeBindConversation(): void { if (bindingConversation.value) return; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false }
 function selectNativeThread(thread: AvailableNativeThread): void { if (thread.bound) return; boundNativeId.value = thread.nativeId; if (!boundConversationTitle.value.trim()) boundConversationTitle.value = threadTitle(thread) }
 async function bindConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || bindingConversation.value || !canBindNativeThread.value) return; bindingConversation.value = true; modalError.value = ''; try { const created = await api.bindConversation(workspace.value.id, selectedDemand.value.id, { nativeId: boundNativeId.value.trim(), ...(boundConversationTitle.value.trim() ? { title: boundConversationTitle.value.trim() } : {}) }); conversations.value = [created, ...conversations.value]; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; boundNativeId.value = ''; boundConversationTitle.value = ''; await openConversation(created) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { bindingConversation.value = false } }
-async function sendMessage(): Promise<void> {
-  if (!workspace.value || !selectedConversation.value || sending.value) return
+async function submitConversationMessage(
+  content: string,
+  turnSkills: string[],
+  optimisticText: string,
+  skillReferences: NonNullable<CodyMessage['skills']>,
+): Promise<boolean> {
+  if (!workspace.value || !selectedConversation.value || sending.value) return false
   const conversationId = selectedConversation.value.id
-  const content = draft.value.trim()
-  const turnSkills = [...selectedSkillsForTurn.value]
-  if (!composerHasContent({ text: content, skills: turnSkills })) return
+  if (!composerHasContent({ text: optimisticText, skills: turnSkills })) return false
   const optimisticId = `command:${conversationId}:${Date.now().toString(36)}:${String(++nextOptimisticMessageId)}`
-  const skillReferences = turnSkills.flatMap((id) => {
-    const skill = runtimeSkills.value.find((candidate) => candidate.id === id)
-    return skill ? [{ name: skill.name, path: skill.id, displayName: skill.label }] : []
-  })
-  const optimisticText = content || skillReferences.map((skill) => `$${skill.displayName ?? skill.name}`).join(' ')
-  draft.value = ''
-  draftByConversationId.delete(conversationId)
   sending.value = true
   try {
     await submitUserMessage(
@@ -580,12 +576,35 @@ async function sendMessage(): Promise<void> {
         },
       },
     )
-    selectedSkillsForTurn.value = []
+    return true
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
+    return false
   } finally {
     sending.value = false
   }
+}
+async function sendMessage(): Promise<void> {
+  if (!selectedConversation.value || sending.value) return
+  const conversationId = selectedConversation.value.id
+  const content = draft.value.trim()
+  const turnSkills = [...selectedSkillsForTurn.value]
+  if (!composerHasContent({ text: content, skills: turnSkills })) return
+  const skillReferences = turnSkills.flatMap((id) => {
+    const skill = runtimeSkills.value.find((candidate) => candidate.id === id)
+    return skill ? [{ name: skill.name, path: skill.id, displayName: skill.label }] : []
+  })
+  const optimisticText = content || skillReferences.map((skill) => `$${skill.displayName ?? skill.name}`).join(' ')
+  draft.value = ''
+  draftByConversationId.delete(conversationId)
+  if (await submitConversationMessage(content, turnSkills, optimisticText, skillReferences)) selectedSkillsForTurn.value = []
+}
+async function retryFailedMessage(message: CodyMessage): Promise<void> {
+  if (sending.value || message.outbox?.status !== 'failed') return
+  const turnSkills = (message.skills ?? [])
+    .map((skill) => skill.path)
+    .filter((id) => runtimeSkills.value.some((skill) => skill.id === id))
+  await submitConversationMessage(message.text, turnSkills, message.text, message.skills ?? [])
 }
 function updateDraft(value: string): void { draft.value = value; const conversationId = selectedConversation.value?.id; if (!conversationId) return; if (value) draftByConversationId.set(conversationId, value); else draftByConversationId.delete(conversationId) }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
