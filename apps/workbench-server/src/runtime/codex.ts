@@ -17,8 +17,6 @@ import {
   type TurnInput,
 } from '@codycodeagent/cody-web-core/session'
 import {
-  createConversationState,
-  reduceConversationEvents,
   type CodexEvent,
 } from '@codycodeagent/cody-web-core/conversation'
 import { asRecord } from '@codycodeagent/cody-web-core/protocol'
@@ -262,16 +260,6 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const session = this.require(request.conversation)
     if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
     if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
-    const events: RuntimeEvent[] = []
-    const buffered: RuntimeEvent[] = []
-    let nativeTurnId = ''
-    const collect = (event: RuntimeEvent): void => {
-      if (!nativeTurnId) { buffered.push(event); return }
-      if (event.turnId !== nativeTurnId) return
-      events.push(event)
-      request.onEvent?.(event)
-    }
-    const unsubscribe = this.listen(session.handle.id, collect)
     const turn: TurnInput = {
       input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills }),
       ...(session.model ? { model: session.model } : {}),
@@ -286,20 +274,38 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       request.mode === 'steer' ? 'steer' : 'queue',
       request.clientCommandId,
     )
-    const started = submission.started.then(handle => {
+    // Workspace setup and one-shot Skill installation consume progress as a
+    // callback. Keep that observer deliberately passive: Core remains the
+    // only reducer/terminal owner and this adapter only forwards the native
+    // Turn's already-normalized events after its id is known.
+    let nativeTurnId = ''
+    const buffered: RuntimeEvent[] = []
+    const forward = (event: RuntimeEvent): void => {
+      if (!request.onEvent) return
+      if (!nativeTurnId) {
+        buffered.push(event)
+        return
+      }
+      if (event.turnId === nativeTurnId) request.onEvent(event)
+    }
+    const unsubscribe = request.onEvent ? this.listen(session.handle.id, forward) : () => undefined
+    const started = submission.started.then((handle) => {
       nativeTurnId = handle.turnId
-      for (const event of buffered.splice(0)) collect(event)
+      for (const event of buffered.splice(0)) forward(event)
       return handle
     })
-    const completed = submission.completed.then(async () => {
-      await started
-      const state = reduceConversationEvents(createConversationState(session.binding.threadId), events)
-      const terminal = nativeTurnId ? state.turns[nativeTurnId] : undefined
-      if (terminal?.lifecycle === 'failed') {
-        throw new Error(terminal.error || terminal.retryMessage || 'Codex Turn failed')
+    // The shared owner publishes the normalized stream to ConversationService.
+    // Do not buffer and reduce it again here: a second terminal authority in
+    // CodyWork used to produce mismatched Turn ids and duplicate receipts.
+    const completed = submission.completed.then((outcome) => {
+      if (outcome.terminalEvent.type === 'turn.failed') {
+        throw new Error(String(outcome.terminalEvent.data.error || outcome.terminalEvent.data.retryMessage || 'Codex Turn failed'))
       }
-      const finalText = [...state.messages].reverse().find(message => message.role === 'assistant')?.text ?? ''
-      return { conversation: request.conversation, finalText, events }
+      return {
+        conversation: request.conversation,
+        finalText: outcome.assistantText,
+        events: outcome.events.map(event => toRuntimeEvent(event, session.handle.id)),
+      }
     }).finally(unsubscribe)
     return { clientCommandId: submission.clientCommandId, started, completed }
   }
