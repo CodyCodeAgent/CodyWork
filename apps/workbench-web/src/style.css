@@ -280,8 +280,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .demand-chat-page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .chat-topbar { flex: 0 0 auto; }
 .socket-pill { padding: 5px 9px; border-radius: 999px; color: #768298; background: #eef1f5; font-size: 11px; white-space: nowrap; }
-.socket-pill.open { color: #16845a; background: #e7f8ef; }
-.socket-pill.connecting { color: #95691d; background: #fff4d5; }
+.socket-pill.connected { color: #16845a; background: #e7f8ef; }
+.socket-pill.connecting, .socket-pill.reconnecting { color: #95691d; background: #fff4d5; }
+.socket-pill.disconnected { color: #b24652; background: #fff0f1; }
 .chat-layout { display: flex; flex: 1; min-height: 0; background: #f7f8fa; }
 .conversation-sidebar { display: flex; flex-direction: column; width: 268px; flex: 0 0 268px; padding: 18px 12px 12px; background: #fff; border-right: 1px solid var(--line); }
 .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 14px; }

@@ -133,7 +133,7 @@ type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'cha
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
 const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage, retryFailedUserMessage, interrupt: interruptConversationState } = useConversationController()
-const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketConnection = ref<ConversationSocketSnapshot>({ status: 'closed', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null, willReconnect: false }); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
+const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketConnection = ref<ConversationSocketSnapshot>({ status: 'disconnected', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null, willReconnect: false }); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 // Composer state belongs to a conversation. Keeping a single global draft made
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
@@ -144,16 +144,16 @@ const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
 const socketState = computed(() => socketConnection.value.status)
 const socketLabel = computed(() => {
   const state = socketConnection.value
-  if (state.status === 'open') return '实时连接'
-  if (state.status === 'connecting') return state.reconnectAttempt > 0 ? `重连中 · 第 ${state.reconnectAttempt} 次` : '连接中…'
+  if (state.status === 'connected') return '实时连接'
+  if (state.status === 'connecting') return '连接中…'
+  if (state.status === 'reconnecting') return `重连中 · 第 ${state.reconnectAttempt} 次`
   const code = state.closeCode === null ? '' : ` · ${state.closeCode}`
-  return state.willReconnect ? `已断开${code} · 自动重连 #${state.reconnectAttempt}` : `连接已关闭${code}`
+  return `连接已关闭${code}`
 })
 const socketDetail = computed(() => {
   const state = socketConnection.value
-  if (state.status !== 'closed') return socketLabel.value
-  const retry = state.willReconnect && state.retryInMs !== null ? `；${state.retryInMs}ms 后自动重连` : ''
-  return `WebSocket 已关闭（${state.closeCode ?? '无关闭码'}）：${state.closeReason || '未提供原因'}${retry}`
+  if (state.status !== 'disconnected') return socketLabel.value
+  return `WebSocket 已关闭（${state.closeCode ?? '无关闭码'}）：${state.closeReason || '未提供原因'}`
 })
 const isRunning = computed(() => Boolean(conversationState.value.activeTurnId))
 const allSharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
@@ -297,7 +297,7 @@ function demandUrl(demand: Demand): string {
 function clearConversationState(): void {
   selectedConversation.value = null
   resetConversationState()
-  socketConnection.value = { status: 'closed', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null, willReconnect: false }
+  socketConnection.value = { status: 'disconnected', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null, willReconnect: false }
 }
 let workspaceLoadSequence = 0
 async function loadWorkspaces(): Promise<void> {

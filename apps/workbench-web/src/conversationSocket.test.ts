@@ -45,7 +45,7 @@ describe('conversation WebSocket transport', () => {
     first.emit('close', { code: 1006, reason: '' })
 
     expect(events).toEqual(['turn.started'])
-    expect(states.at(-1)).toMatchObject({ status: 'connecting', closeCode: 1006, closeReason: '连接异常中断（未收到关闭帧）', reconnectAttempt: 1, retryInMs: 500, willReconnect: true })
+    expect(states.at(-1)).toMatchObject({ status: 'reconnecting', closeCode: 1006, closeReason: '连接异常中断（未收到关闭帧）', reconnectAttempt: 1, retryInMs: 500, willReconnect: true })
     vi.advanceTimersByTime(500)
     expect(FakeSocket.instances).toHaveLength(2)
 
@@ -65,7 +65,7 @@ describe('conversation WebSocket transport', () => {
 
     left.close()
     expect(rightSocket.closed).toBe(false)
-    expect(rightStates.at(-1)?.status).toBe('open')
+    expect(rightStates.at(-1)?.status).toBe('connected')
     right.close()
   })
 
@@ -84,7 +84,7 @@ describe('conversation WebSocket transport', () => {
     vi.runAllTimers()
 
     expect(FakeSocket.instances).toHaveLength(1)
-    expect(states.at(-1)).toMatchObject({ status: 'closed', closeCode: 4404, willReconnect: false })
+    expect(states.at(-1)).toMatchObject({ status: 'disconnected', closeCode: 4404, willReconnect: false })
   })
 
   it('formats standard and explicit close reasons', () => {

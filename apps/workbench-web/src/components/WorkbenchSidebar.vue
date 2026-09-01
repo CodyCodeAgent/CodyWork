@@ -43,22 +43,22 @@ const props = defineProps<{
   demands: Demand[]
   selectedDemandId: string
   activePage: Page
-  socketState: 'open' | 'connecting' | 'closed'
+  socketState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
   workspacePickerOpen: boolean
   demandExpanded: boolean
 }>()
 
 const realtimeLabel = computed(() => {
-  if (props.socketState === 'open') return 'Realtime connected'
-  if (props.socketState === 'connecting') return 'Realtime connecting…'
+  if (props.socketState === 'connected') return 'Realtime connected'
+  if (props.socketState === 'connecting' || props.socketState === 'reconnecting') return 'Realtime connecting…'
   return 'Realtime disconnected'
 })
 
 const realtimeDetail = computed(() => {
   if (!props.workspace) return '选择一个 Workspace 开始'
-  if (props.socketState === 'open') return 'Browser WebSocket connected'
-  if (props.socketState === 'connecting') return 'Browser WebSocket reconnecting'
-  return 'Browser WebSocket will reconnect automatically'
+  if (props.socketState === 'connected') return 'Browser WebSocket connected'
+  if (props.socketState === 'connecting' || props.socketState === 'reconnecting') return 'Browser WebSocket reconnecting'
+  return 'Browser WebSocket disconnected'
 })
 
 const emit = defineEmits<{
