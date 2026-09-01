@@ -15,6 +15,37 @@ PORT="${CODYWORK_PORT:-3001}"
 ENTRYPOINT="$PROJECT_DIR/apps/workbench-server/dist/index.js"
 mkdir -p "$RUNTIME_DIR"
 
+load_network_environment() {
+  # CodyWork's App Server runs as a detached process, so it cannot rely on an
+  # interactive shell having exported the corporate proxy variables. Read only
+  # the small allowlist needed for outbound model/tool traffic from a local
+  # runtime file. Do not `source` it: the file is configuration, not code.
+  local environment_file="${CODYWORK_NETWORK_ENV_FILE:-$RUNTIME_DIR/codywork.network.env}"
+  [[ -r "$environment_file" ]] || return 0
+
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == export\ * ]] && line="${line#export }"
+    if [[ "$line" != *=* ]]; then
+      echo "Ignoring malformed CodyWork network setting in $environment_file" >&2
+      continue
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|http_proxy|https_proxy|all_proxy|no_proxy)
+        export "$key=$value"
+        ;;
+      *)
+        echo "Ignoring unsupported CodyWork network setting: $key" >&2
+        ;;
+    esac
+  done < "$environment_file"
+  echo "Loaded CodyWork network configuration from $environment_file"
+}
+
 read_pid() {
   [[ -f "$PID_FILE" ]] || return 1
   local pid
@@ -89,6 +120,8 @@ start_service() {
   echo "Starting CodyWork on $HOST:$PORT from $PROJECT_DIR..."
   (
     cd "$PROJECT_DIR"
+    load_network_environment
+    export CODY_SERVICE_ID="${CODY_SERVICE_ID:-codywork}"
     nohup setsid node "$ENTRYPOINT" --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 < /dev/null &
     printf '%s\n' "$!" > "$PID_FILE"
   )
