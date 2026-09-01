@@ -122,9 +122,15 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
 
   constructor(private readonly options: CodexOptions = {}) {}
 
-  async checkConnection(cwd = process.cwd()): Promise<CodexRuntimeInfo> {
-    const host = createAppServerHost({ command: this.command(), cwd, ...(this.options.env ? { env: this.options.env } : {}) })
-    try { await host.ensureInitialized(); return this.getInfo() } finally { await host.dispose() }
+  async checkConnection(): Promise<CodexRuntimeInfo> {
+    // A diagnostics probe must never create a second, short-lived App Server.
+    // Besides violating the one-owner contract, that used to make an operator
+    // pressing "test runtime" look like an unexplained Codex restart in the
+    // process list. If the shared owner already exists, verify its handshake;
+    // otherwise report the configured runtime and let a real conversation own
+    // the first process startup.
+    if (this.host) await this.host.ensureInitialized()
+    return this.getInfo()
   }
 
   async getInfo(): Promise<CodexRuntimeInfo> {
