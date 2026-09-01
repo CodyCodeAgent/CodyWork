@@ -132,12 +132,11 @@ import {
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
-const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage } = useConversationController()
+const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage, retryFailedUserMessage, interrupt: interruptConversationState } = useConversationController()
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketConnection = ref<ConversationSocketSnapshot>({ status: 'closed', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null }); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 // Composer state belongs to a conversation. Keeping a single global draft made
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
-let nextOptimisticMessageId = 0
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
@@ -518,6 +517,9 @@ async function connect(conversation: Conversation): Promise<void> {
       )
       return { clientCommandId: accepted.commandId }
     },
+    interrupt: async () => {
+      await api.interruptConversation(workspaceId, conversation.id)
+    },
     subscribe: (_threadId, listener) => {
       const realtime = createConversationEventSocket({
         url: `${protocol}://${host}/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversation.id)}/events`,
@@ -556,13 +558,11 @@ async function submitConversationMessage(
   skillReferences: NonNullable<CodyMessage['skills']>,
 ): Promise<boolean> {
   if (!workspace.value || !selectedConversation.value || sending.value) return false
-  const conversationId = selectedConversation.value.id
   if (!composerHasContent({ text: optimisticText, skills: turnSkills })) return false
-  const optimisticId = `command:${conversationId}:${Date.now().toString(36)}:${String(++nextOptimisticMessageId)}`
   sending.value = true
   try {
     await submitUserMessage(
-      { id: optimisticId, text: optimisticText, ...(skillReferences.length ? { skills: skillReferences } : {}) },
+      { text: optimisticText, ...(skillReferences.length ? { skills: skillReferences } : {}) },
       {
         mode: resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
         input: {
@@ -604,7 +604,25 @@ async function retryFailedMessage(message: CodyMessage): Promise<void> {
   const turnSkills = (message.skills ?? [])
     .map((skill) => skill.path)
     .filter((id) => runtimeSkills.value.some((skill) => skill.id === id))
-  await submitConversationMessage(message.text, turnSkills, message.text, message.skills ?? [])
+  sending.value = true
+  try {
+    await retryFailedUserMessage(message.id, {
+      mode: resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
+      input: {
+        content: message.text,
+        settings: {
+          ...(selectedModel.value ? { model: selectedModel.value } : {}),
+          ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
+          collaborationMode: selectedCollaborationModeKind.value,
+          ...(turnSkills.length ? { skills: turnSkills } : {}),
+        },
+      },
+    })
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sending.value = false
+  }
 }
 function updateDraft(value: string): void { draft.value = value; const conversationId = selectedConversation.value?.id; if (!conversationId) return; if (value) draftByConversationId.set(conversationId, value); else draftByConversationId.delete(conversationId) }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
@@ -618,7 +636,7 @@ function selectCollaborationMode(name: string): void {
 }
 function selectReasoning(value: string): void { if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)) selectedReasoning.value = value }
 async function selectPermission(value: string): Promise<void> { if (value !== 'read-only' && value !== 'workspace-write' && value !== 'yolo') return; const previous = permission.value; permission.value = value; await savePermission(); if (error.value) permission.value = previous }
-async function interrupt(): Promise<void> { if (workspace.value && selectedConversation.value) await api.interruptConversation(workspace.value.id, selectedConversation.value.id) }
+async function interrupt(): Promise<void> { if (selectedConversation.value) await interruptConversationState() }
 async function copyText(text: string): Promise<void> {
   try {
     if (navigator.clipboard?.writeText) {
