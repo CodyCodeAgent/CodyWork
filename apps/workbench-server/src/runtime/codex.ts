@@ -182,7 +182,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   pendingConversationEvents(conversation: ConversationHandle): RuntimeEvent[] {
     const session = this.sessions.get(conversation.id)
     if (!session || !this.manager) return []
-    return this.manager.listPendingEvents(conversation.id).map(event => toRuntimeEvent(event, conversation.id))
+    // A browser reconnect needs the complete volatile owner attachment, not
+    // only approvals/questions. This includes admitted commands, the active
+    // Turn, and terminal corrections that native thread/read cannot express.
+    return this.manager.listAttachmentEvents(conversation.id).map(event => toRuntimeEvent(event, conversation.id))
   }
 
   subscribeConversation(conversation: ConversationHandle, listener: (event: RuntimeEvent) => void): () => void {
@@ -291,6 +294,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const completed = submission.completed.then(async () => {
       await started
       const state = reduceConversationEvents(createConversationState(session.binding.threadId), events)
+      const terminal = nativeTurnId ? state.turns[nativeTurnId] : undefined
+      if (terminal?.lifecycle === 'failed') {
+        throw new Error(terminal.error || terminal.retryMessage || 'Codex Turn failed')
+      }
       const finalText = [...state.messages].reverse().find(message => message.role === 'assistant')?.text ?? ''
       return { conversation: request.conversation, finalText, events }
     }).finally(unsubscribe)

@@ -18,6 +18,23 @@ import { WorkspaceRegistry } from '../services/workspaceRegistry.js'
 import { WorkspaceSetupCoordinator } from '../services/workspaceSetup.js'
 import { SkillInstallCoordinator } from '../services/skillInstall.js'
 
+export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
+
+function sendConversationSocket(client: WebSocket, payload: unknown): boolean {
+  if (client.readyState !== WebSocket.OPEN) return false
+  if (client.bufferedAmount > CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES) {
+    client.terminate()
+    return false
+  }
+  try {
+    client.send(JSON.stringify(payload))
+    return true
+  } catch {
+    client.terminate()
+    return false
+  }
+}
+
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown
 
 interface Ctx {
@@ -492,9 +509,14 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
   })
   websocket.on('connection', (client: WebSocket, _req: IncomingMessage, workspaceId: string, conversationId: string) => {
     const service = conversationService(ctx)
-    const unsubscribe = service.subscribe(conversationId, (event) => { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'event', event })) })
+    // Each tab is an independent projection client. A slow/background tab is
+    // disconnected on its own instead of retaining an unbounded copy of every
+    // Codex delta and destabilizing the shared Runtime owner.
+    const unsubscribe = service.subscribe(conversationId, (event) => {
+      sendConversationSocket(client, { type: 'event', event })
+    })
     const heartbeat = setInterval(() => {
-      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'heartbeat', atIso: new Date().toISOString() }))
+      sendConversationSocket(client, { type: 'heartbeat', atIso: new Date().toISOString() })
     }, 15_000)
     heartbeat.unref?.()
     client.on('message', (raw) => {
@@ -502,8 +524,8 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
         const message = JSON.parse(String(raw)) as { type?: string; approvalId?: string; outcome?: 'allowed-once' | 'rejected'; requestId?: string; answer?: unknown }
         if (message.type === 'approval' && message.approvalId) void service.approve(workspaceId, conversationId, message.approvalId, message.outcome === 'rejected' ? 'rejected' : 'allowed-once')
         if (message.type === 'question' && message.requestId) void service.answer(workspaceId, conversationId, message.requestId, message.answer)
-        if (message.type === 'ping') client.send(JSON.stringify({ type: 'pong' }))
-      } catch { client.send(JSON.stringify({ type: 'error', error: 'invalid websocket message' })) }
+        if (message.type === 'ping') sendConversationSocket(client, { type: 'pong' })
+      } catch { sendConversationSocket(client, { type: 'error', error: 'invalid websocket message' }) }
     })
     client.on('close', () => { clearInterval(heartbeat); unsubscribe() })
   })
