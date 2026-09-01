@@ -9,7 +9,6 @@ import {
   buildTurnUserInput,
   CodexSessionCatalog,
   CodexSessionManager,
-  CodexThreadCommands,
   type ExecutionContext,
   type ExecutionPolicyProvider,
   type CodexSessionSnapshot,
@@ -166,7 +165,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
 
   async renameConversation(conversation: ConversationHandle, title: string): Promise<void> {
     const session = this.require(conversation)
-    await new CodexThreadCommands(this.requireHost()).renameThread(session.binding.threadId, title)
+    // Native thread mutations belong to the same process-wide SessionManager
+    // that owns this conversation's binding and Turn lifecycle.  Calling the
+    // lower-level command helper here bypassed that owner boundary.
+    await this.requireManager().renameThread(session.binding.threadId, title)
   }
 
   async readConversationSnapshot(request: ReadConversationRequest): Promise<RuntimeConversationSnapshot> {
