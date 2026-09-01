@@ -1,4 +1,5 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
@@ -103,6 +104,52 @@ function json(req: IncomingMessage, res: ServerResponse, code: number, payload: 
     ...corsHeaders(req),
   })
   res.end(JSON.stringify(payload))
+}
+
+const AUTH_COOKIE = 'codywork_session'
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+function requestCookies(req: IncomingMessage): Record<string, string> {
+  const raw = req.headers.cookie
+  if (!raw) return {}
+  return Object.fromEntries(raw.split(';').map(part => {
+    const [key, ...rest] = part.trim().split('=')
+    return [key ?? '', decodeURIComponent(rest.join('='))]
+  }).filter(([key]) => Boolean(key)))
+}
+
+function isLoopbackRequest(req: IncomingMessage): boolean {
+  const address = req.socket.remoteAddress ?? ''
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+}
+
+function passwordsMatch(actual: string, expected: string): boolean {
+  const left = Buffer.from(actual)
+  const right = Buffer.from(expected)
+  return left.length === right.length && timingSafeEqual(left, right)
+}
+
+function loginPage(error = ''): string {
+  const notice = error ? '<p class="error">密码不正确，请重试。</p>' : ''
+  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CodyWork 登录</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#1f2937;font:16px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(360px,calc(100vw - 48px));padding:32px;border:1px solid #dbe2f0;border-radius:18px;background:#fff;box-shadow:0 18px 50px #1e293b18}h1{margin:0 0 8px;font-size:26px}p{color:#64748b;line-height:1.55}.error{color:#b91c1c}label{display:grid;gap:8px;font-weight:600}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit}button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:10px;background:#5b5bf7;color:#fff;font:600 16px inherit;cursor:pointer}</style><main class="card"><h1>CodyWork</h1><p>请输入访问密码以继续。</p>${notice}<form method="post" action="/api/auth/login"><label>访问密码<input name="password" type="password" autofocus required autocomplete="current-password"></label><button type="submit">登录</button></form></main></html>`
+}
+
+function parseLoginPassword(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const contentType = String(req.headers['content-type'] ?? '')
+        if (contentType.includes('application/json')) {
+          const value = JSON.parse(body) as { password?: unknown }
+          return resolve(typeof value.password === 'string' ? value.password : '')
+        }
+        resolve(new URLSearchParams(body).get('password') ?? '')
+      } catch (error) { reject(error) }
+    })
+    req.on('error', reject)
+  })
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -470,6 +517,8 @@ export interface ServerOptions {
   host: string
   port: number
   staticRoot?: string
+  /** When configured, all browser-facing traffic requires a password session. */
+  password?: string
 }
 
 export type StartedWorkbenchServer = Server & {
@@ -481,6 +530,25 @@ export type StartedWorkbenchServer = Server & {
 export function startServer(ctx: AppContext, options: ServerOptions): StartedWorkbenchServer {
   const routes = buildRoutes(ctx)
   const serveStaticAsset = options.staticRoot ? createStaticAssetHandler(options.staticRoot) : null
+  const password = options.password?.trim() || null
+  const sessions = new Map<string, number>()
+  const authenticated = (req: IncomingMessage): boolean => {
+    if (!password) return true
+    const token = requestCookies(req)[AUTH_COOKIE]
+    const expiresAt = token ? sessions.get(token) : undefined
+    if (!expiresAt || expiresAt <= Date.now()) {
+      if (token) sessions.delete(token)
+      return false
+    }
+    return true
+  }
+  const rejectUnauthenticated = (req: IncomingMessage, res: ServerResponse, pathname: string): void => {
+    if (pathname.startsWith('/api/')) json(req, res, 401, { ok: false, error: 'authentication required' })
+    else {
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0' })
+      res.end(loginPage())
+    }
+  }
   const clientsByConversationId = new Map<string, Set<WebSocket>>()
   const closeConversationClients = (conversationId: string, code: number, reason: string): void => {
     const clients = clientsByConversationId.get(conversationId)
@@ -498,6 +566,27 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
       return res.end()
     }
     const url = new URL(req.url ?? '/', 'http://localhost')
+    if (password && req.method === 'GET' && url.pathname === '/auth/login') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0' })
+      return res.end(loginPage())
+    }
+    if (password && req.method === 'POST' && url.pathname === '/api/auth/login') {
+      const submitted = await parseLoginPassword(req).catch(() => '')
+      if (!passwordsMatch(submitted, password)) {
+        if (String(req.headers.accept ?? '').includes('application/json')) return json(req, res, 401, { ok: false, error: 'invalid password' })
+        res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0' })
+        return res.end(loginPage('invalid'))
+      }
+      const token = randomBytes(32).toString('base64url')
+      sessions.set(token, Date.now() + SESSION_TTL_MS)
+      res.writeHead(303, { Location: '/', 'Set-Cookie': `${AUTH_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`, 'Cache-Control': 'no-store, max-age=0' })
+      return res.end()
+    }
+    // The process supervisor checks this endpoint through loopback only. The
+    // externally exposed service never reveals an unauthenticated API.
+    if (password && !(url.pathname === '/api/health' && isLoopbackRequest(req)) && !authenticated(req)) {
+      return rejectUnauthenticated(req, res, url.pathname)
+    }
     const route = routes.find(item => item.method === req.method && match(item.pattern, url.pathname) !== null)
     if (!route) {
       if (!url.pathname.startsWith('/api/') && serveStaticAsset && await serveStaticAsset(req, res, url.pathname)) return
@@ -519,6 +608,11 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
     const origin = req.headers.origin
     if (typeof origin === 'string' && !isAllowedOrigin(origin, req.headers.host)) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    if (!authenticated(req)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
     }

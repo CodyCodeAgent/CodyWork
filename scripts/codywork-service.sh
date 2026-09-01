@@ -46,6 +46,35 @@ load_network_environment() {
   echo "Loaded CodyWork network configuration from $environment_file"
 }
 
+load_service_environment() {
+  # Password/host settings are data-only deployment configuration. Keep this
+  # separate from proxy settings and never source it as shell code.
+  local environment_file="${CODYWORK_SERVICE_ENV_FILE:-$RUNTIME_DIR/service.env}"
+  [[ -r "$environment_file" ]] || return 0
+
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" == export\ * ]] && line="${line#export }"
+    if [[ "$line" != *=* ]]; then
+      echo "Ignoring malformed CodyWork service setting in $environment_file" >&2
+      continue
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    case "$key" in
+      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD)
+        export "$key=$value"
+        ;;
+      *)
+        echo "Ignoring unsupported CodyWork service setting: $key" >&2
+        ;;
+    esac
+  done < "$environment_file"
+  echo "Loaded CodyWork service configuration from $environment_file"
+}
+
 read_pid() {
   [[ -f "$PID_FILE" ]] || return 1
   local pid
@@ -108,6 +137,9 @@ stop_service() {
 
 start_service() {
   local pid command
+  load_service_environment
+  HOST="${CODYWORK_HOST:-$HOST}"
+  PORT="${CODYWORK_PORT:-$PORT}"
   if pid="$(read_pid 2>/dev/null)" && is_our_process "$pid"; then
     echo "CodyWork is already running (PID $pid)."
     return 0

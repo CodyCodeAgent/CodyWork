@@ -25,7 +25,7 @@ const db = new WorkbenchDb(databasePath)
 const reconciled = reconcileDemandOperations(db)
 if (reconciled > 0) console.error(`[codywork] reconciled ${reconciled} interrupted demand operation(s)`)
 const appContext: AppContext = { db }
-const server = startServer(appContext, { host, port, staticRoot })
+const server = startServer(appContext, { host, port, staticRoot, password: process.env.CODYWORK_PASSWORD })
 
 function close() {
   server.closeRealtime(1012, 'service restart')
