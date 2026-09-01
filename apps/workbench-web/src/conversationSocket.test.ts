@@ -26,7 +26,7 @@ class FakeSocket {
 afterEach(() => { vi.useRealTimers(); FakeSocket.instances = [] })
 
 describe('conversation WebSocket transport', () => {
-  it('reports the actual close code/reason and reconnects without fabricating Runtime events', () => {
+  it('keeps retryable browser closes in reconnecting state without fabricating Runtime events', () => {
     vi.useFakeTimers()
     const states: ConversationSocketSnapshot[] = []
     const events: string[] = []
@@ -45,7 +45,7 @@ describe('conversation WebSocket transport', () => {
     first.emit('close', { code: 1006, reason: '' })
 
     expect(events).toEqual(['turn.started'])
-    expect(states.at(-1)).toMatchObject({ status: 'closed', closeCode: 1006, closeReason: '连接异常中断（未收到关闭帧）', reconnectAttempt: 1, retryInMs: 500 })
+    expect(states.at(-1)).toMatchObject({ status: 'connecting', closeCode: 1006, closeReason: '连接异常中断（未收到关闭帧）', reconnectAttempt: 1, retryInMs: 500, willReconnect: true })
     vi.advanceTimersByTime(500)
     expect(FakeSocket.instances).toHaveLength(2)
 

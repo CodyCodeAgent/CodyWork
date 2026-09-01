@@ -73,13 +73,18 @@ export function createConversationEventSocket(options: Options): ConversationEve
         return
       }
       const closeCode = event.closeCode ?? null
+      // A retryable browser close is a transient transport phase, not a
+      // terminal conversation state. Safari routinely does this to background
+      // tabs (often with code 1005); presenting it as "closed" made healthy
+      // multi-tab sessions look like an App Server failure.
+      const willReconnect = event.willReconnect !== false
       options.onState({
-        status: 'closed',
+        status: willReconnect ? 'connecting' : 'closed',
         reconnectAttempt: event.reconnectAttempt ?? 1,
         closeCode,
         closeReason: conversationCloseReason(closeCode ?? 1006, event.closeReason ?? event.error ?? ''),
         retryInMs: event.retryInMs ?? null,
-        willReconnect: event.willReconnect !== false,
+        willReconnect,
       })
     },
   })
