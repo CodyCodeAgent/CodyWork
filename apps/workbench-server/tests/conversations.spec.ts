@@ -63,13 +63,13 @@ describe('conversation websocket control plane', () => {
 
   it('does not present persisted SQLite status as native Runtime state', async () => {
     class PendingApprovalRuntime extends TestRuntimeAdapter {
-      override async readConversation(request: Parameters<TestRuntimeAdapter['readConversation']>[0]) {
+      override async readConversationSnapshot(request: Parameters<TestRuntimeAdapter['readConversationSnapshot']>[0]) {
         const timestamp = nowIso()
-        return [
+        return { watermark: 0, events: [
           { id: 'user', type: 'user.completed' as const, conversationId: request.conversationId, threadId: request.nativeId, turnId: 'turn-pending', timestamp, atIso: timestamp, data: { text: 'inspect this' } },
           { id: 'started', type: 'turn.started' as const, conversationId: request.conversationId, threadId: request.nativeId, turnId: 'turn-pending', timestamp, atIso: timestamp, data: {} },
           { id: 'approval', type: 'approval.requested' as const, conversationId: request.conversationId, threadId: request.nativeId, turnId: 'turn-pending', timestamp, atIso: timestamp, data: { approvalId: 'approval-stale' } },
-        ]
+        ] }
       }
     }
     const test = await fixture()
@@ -78,11 +78,11 @@ describe('conversation websocket control plane', () => {
     test.db.db.prepare("UPDATE conversations SET status = 'awaiting_approval' WHERE id = ?").run(conversation.id)
 
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toMatchObject({ events: [
       expect.objectContaining({ type: 'user.completed', turnId: 'turn-pending' }),
       expect.objectContaining({ type: 'turn.started', turnId: 'turn-pending' }),
       expect.objectContaining({ type: 'approval.requested', turnId: 'turn-pending' }),
-    ])
+    ] })
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
@@ -125,27 +125,22 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('replays unresolved Core requests through realtime subscription, not native history', async () => {
+  it('includes unresolved Core requests in the owner snapshot, not a second realtime replay', async () => {
     class PendingRuntime extends TestRuntimeAdapter {
-      pendingConversationEvents(conversation: Parameters<TestRuntimeAdapter['renameConversation']>[0]) {
+      override async readConversationSnapshot(conversation: Parameters<TestRuntimeAdapter['readConversationSnapshot']>[0]) {
         const timestamp = nowIso()
-        return [{
-          id: 'approval-live', type: 'approval.requested' as const, conversationId: conversation.id,
+        return { watermark: 4, events: [{
+          id: 'approval-live', type: 'approval.requested' as const, conversationId: conversation.conversationId,
           threadId: conversation.nativeId, turnId: 'turn-live', timestamp, atIso: timestamp,
           data: { approvalId: 'approval-live' },
-        }]
+        }] }
       }
     }
     const test = await fixture()
     const conversations = new ConversationService(test.db, new PendingRuntime())
     const conversation = await conversations.create(test.workspaceId, test.demandId, 'Pending request')
-    const events: string[] = []
-    const unsubscribe = conversations.subscribe(conversation.id, event => events.push(event.type))
-
-    expect(events).toEqual(['approval.requested'])
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
-
-    unsubscribe()
+    const snapshot = await conversations.history(test.workspaceId, conversation.id)
+    expect(snapshot).toMatchObject({ watermark: 4, events: [expect.objectContaining({ type: 'approval.requested' })] })
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
@@ -189,8 +184,10 @@ describe('conversation websocket control plane', () => {
     const bound = await conversations.bind(test.workspaceId, test.demandId, { nativeId: 'thread-existing-123', title: 'Existing context' })
     expect(bound.nativeId).toBe('thread-existing-123')
     expect(bound.title).toBe('Existing context')
-    await expect(conversations.history(test.workspaceId, bound.id)).resolves.toEqual([])
-    expect(runtime.resumeCalls).toBe(0)
+    await expect(conversations.history(test.workspaceId, bound.id)).resolves.toEqual({ events: [], watermark: 0 })
+    // Reading is now an owner snapshot, so the first history load attaches
+    // the native thread before it returns its watermark.
+    expect(runtime.resumeCalls).toBe(1)
     await expect(conversations.listAvailableNativeThreads(test.workspaceId, test.demandId)).resolves.toEqual([
       expect.objectContaining({ nativeId: 'thread-existing-123', bound: true }),
       expect.objectContaining({ nativeId: 'thread-unbound-456', bound: false }),
@@ -209,7 +206,7 @@ describe('conversation websocket control plane', () => {
     const first = await conversations.create(test.workspaceId, test.demandId, 'Keep this session')
     const removed = await conversations.create(test.workspaceId, test.demandId, 'Remove this session')
 
-    await expect(conversations.history(test.workspaceId, removed.id)).resolves.toEqual([])
+    await expect(conversations.history(test.workspaceId, removed.id)).resolves.toEqual({ events: [], watermark: 0 })
     await expect(conversations.remove(test.workspaceId, removed.id)).resolves.toEqual({ deleted: true })
     expect(conversations.list(test.workspaceId, test.demandId).map(conversation => conversation.id)).toEqual([first.id])
     await expect(conversations.history(test.workspaceId, removed.id)).rejects.toThrow('会话不存在')
@@ -343,7 +340,7 @@ describe('conversation websocket control plane', () => {
 
     expect(runtime.submitCalls).toBe(1)
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual({ events: [], watermark: 0 })
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toBeUndefined()
 
     test.db.close()
@@ -373,7 +370,7 @@ describe('conversation websocket control plane', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
-    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual([])
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual({ events: [], watermark: 0 })
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'command.failed'").get(conversation.id)).toEqual({ action: 'command.failed' })
 
     test.db.close()

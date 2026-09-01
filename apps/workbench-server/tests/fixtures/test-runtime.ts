@@ -47,7 +47,9 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     return conversation
   }
 
-  async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> { return this.history.get(request.nativeId) ?? [] }
+  async readConversationSnapshot(request: ReadConversationRequest): Promise<{ events: RuntimeEvent[]; watermark: number }> {
+    return { events: this.history.get(request.nativeId) ?? [], watermark: 0 }
+  }
 
   async listNativeThreads(_request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
     return [

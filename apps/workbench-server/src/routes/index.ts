@@ -1,4 +1,4 @@
-import { createServer, IncomingMessage, ServerResponse } from 'node:http'
+import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http'
 import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
@@ -389,7 +389,7 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/workspaces/:id/conversations/:conversationId/history', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return { events: await conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId')) }
+    return conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId'))
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/messages', async (c) => {
@@ -473,9 +473,24 @@ export interface ServerOptions {
   staticRoot?: string
 }
 
-export function startServer(ctx: AppContext, options: ServerOptions) {
+export type StartedWorkbenchServer = Server & {
+  /** Closes browser projections with an intentional service-restart signal
+   * before the HTTP listener goes away. */
+  closeRealtime(code?: number, reason?: string): void
+}
+
+export function startServer(ctx: AppContext, options: ServerOptions): StartedWorkbenchServer {
   const routes = buildRoutes(ctx)
   const serveStaticAsset = options.staticRoot ? createStaticAssetHandler(options.staticRoot) : null
+  const clientsByConversationId = new Map<string, Set<WebSocket>>()
+  const closeConversationClients = (conversationId: string, code: number, reason: string): void => {
+    const clients = clientsByConversationId.get(conversationId)
+    if (!clients) return
+    for (const client of clients) {
+      if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) client.close(code, reason)
+    }
+    clientsByConversationId.delete(conversationId)
+  }
   const server = createServer(async (req, res) => {
     const origin = req.headers.origin
     if (typeof origin === 'string' && !isAllowedOrigin(origin, req.headers.host)) return json(req, res, 403, { ok: false, error: 'origin not allowed' })
@@ -492,6 +507,9 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
     const c: Ctx = { req, res, params: match(route.pattern, url.pathname) ?? {}, body: await readBody(req).catch(() => ({})), query: url.searchParams }
     try {
       const result = await route.handler(c)
+      if (route.pattern === '/api/workspaces/:id/conversations/:conversationId' && req.method === 'DELETE') {
+        closeConversationClients(c.params.conversationId ?? '', 4404, 'conversation deleted')
+      }
       if (!res.writableEnded) json(req, res, 200, { ok: true, data: result })
     } catch (error) {
       if (!res.headersSent) json(req, res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) })
@@ -499,16 +517,28 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
   })
   const websocket = new WebSocketServer({ noServer: true })
   server.on('upgrade', (req, socket, head) => {
+    const origin = req.headers.origin
+    if (typeof origin === 'string' && !isAllowedOrigin(origin, req.headers.host)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
     const url = new URL(req.url ?? '/', 'http://localhost')
     const parts = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/conversations\/([^/]+)\/events$/)
     if (!parts) { socket.destroy(); return }
     const workspaceId = decodeURIComponent(parts[1] ?? '')
     const conversationId = decodeURIComponent(parts[2] ?? '')
-    try { conversationService(ctx).get(workspaceId, conversationId) } catch { socket.destroy(); return }
+    try { conversationService(ctx).get(workspaceId, conversationId) } catch {
+      websocket.handleUpgrade(req, socket, head, client => client.close(4404, 'conversation not found'))
+      return
+    }
     websocket.handleUpgrade(req, socket, head, client => websocket.emit('connection', client, req, workspaceId, conversationId))
   })
   websocket.on('connection', (client: WebSocket, _req: IncomingMessage, workspaceId: string, conversationId: string) => {
     const service = conversationService(ctx)
+    const conversationClients = clientsByConversationId.get(conversationId) ?? new Set<WebSocket>()
+    conversationClients.add(client)
+    clientsByConversationId.set(conversationId, conversationClients)
     // Each tab is an independent projection client. A slow/background tab is
     // disconnected on its own instead of retaining an unbounded copy of every
     // Codex delta and destabilizing the shared Runtime owner.
@@ -522,13 +552,29 @@ export function startServer(ctx: AppContext, options: ServerOptions) {
     client.on('message', (raw) => {
       try {
         const message = JSON.parse(String(raw)) as { type?: string; approvalId?: string; outcome?: 'allowed-once' | 'rejected'; requestId?: string; answer?: unknown }
-        if (message.type === 'approval' && message.approvalId) void service.approve(workspaceId, conversationId, message.approvalId, message.outcome === 'rejected' ? 'rejected' : 'allowed-once')
-        if (message.type === 'question' && message.requestId) void service.answer(workspaceId, conversationId, message.requestId, message.answer)
+        if (message.type === 'approval' && message.approvalId) {
+          void service.approve(workspaceId, conversationId, message.approvalId, message.outcome === 'rejected' ? 'rejected' : 'allowed-once')
+            .catch(error => sendConversationSocket(client, { type: 'error', requestType: 'approval', requestId: message.approvalId, error: error instanceof Error ? error.message : String(error) }))
+        }
+        if (message.type === 'question' && message.requestId) {
+          void service.answer(workspaceId, conversationId, message.requestId, message.answer)
+            .catch(error => sendConversationSocket(client, { type: 'error', requestType: 'question', requestId: message.requestId, error: error instanceof Error ? error.message : String(error) }))
+        }
         if (message.type === 'ping') sendConversationSocket(client, { type: 'pong' })
       } catch { sendConversationSocket(client, { type: 'error', error: 'invalid websocket message' }) }
     })
-    client.on('close', () => { clearInterval(heartbeat); unsubscribe() })
+    client.on('error', () => undefined)
+    client.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribe()
+      conversationClients.delete(client)
+      if (conversationClients.size === 0) clientsByConversationId.delete(conversationId)
+    })
   })
   server.listen(options.port, options.host, () => console.log(`[codywork] server listening on http://${options.host}:${options.port}`))
-  return server
+  const started = server as StartedWorkbenchServer
+  started.closeRealtime = (code = 1012, reason = 'service restart') => {
+    for (const conversationId of [...clientsByConversationId.keys()]) closeConversationClients(conversationId, code, reason)
+  }
+  return started
 }

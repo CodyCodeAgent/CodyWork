@@ -153,6 +153,13 @@ export interface ReadConversationRequest {
   context: RuntimeContext
 }
 
+/** A Core-owned durable history snapshot and the realtime watermark that
+ * bounds it. Products must apply only events newer than this watermark. */
+export interface RuntimeConversationSnapshot {
+  events: RuntimeEvent[]
+  watermark: number
+}
+
 /** CodyWork's product port to the shared Codex runtime. */
 export interface CodyWorkRuntime {
   getInfo(): Promise<CodexRuntimeInfo>
@@ -175,13 +182,12 @@ export interface CodyWorkRuntime {
   getComposerOptions(context: RuntimeContext): Promise<RuntimeComposerOptions>
   /** Resolve opaque Composer skill ids to native structured inputs. */
   resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>>
-  /** Reads native durable history. CodyWork deliberately does not mirror this in SQLite. */
-  readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]>
+  /** Reads a Core-owned durable snapshot. CodyWork deliberately does not
+   * mirror conversation history in SQLite or maintain its own cursor. */
+  readConversationSnapshot(request: ReadConversationRequest): Promise<RuntimeConversationSnapshot>
   /** Authoritative owner-process state. Products may guard actions with this
    * snapshot but must never persist or independently advance it. */
   sessionSnapshot?(conversation: ConversationHandle): import('@codycodeagent/cody-web-core/session').CodexSessionSnapshot | null
-  /** Replays unresolved Core requests only on the realtime channel after a browser reconnect. */
-  pendingConversationEvents?(conversation: ConversationHandle): RuntimeEvent[]
   /** One product stream per attached conversation. Submission callbacks are
    * not a second broadcast channel. */
   subscribeConversation?(conversation: ConversationHandle, listener: (event: RuntimeEvent) => void): () => void

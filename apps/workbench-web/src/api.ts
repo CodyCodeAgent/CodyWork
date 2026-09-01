@@ -229,7 +229,7 @@ export const api = {
   bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>
-    request<{ events: ConversationEvent[] }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
+    request<{ events: ConversationEvent[]; watermark: number }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
   sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }) =>
     request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>

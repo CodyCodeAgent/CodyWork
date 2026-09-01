@@ -28,6 +28,7 @@ const appContext: AppContext = { db }
 const server = startServer(appContext, { host, port, staticRoot })
 
 function close() {
+  server.closeRealtime(1012, 'service restart')
   server.close(() => {
     void appContext.conversations?.getRuntime().close().finally(() => {
       void appContext.dashboards?.dispose().finally(() => {

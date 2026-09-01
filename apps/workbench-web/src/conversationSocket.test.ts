@@ -69,6 +69,24 @@ describe('conversation WebSocket transport', () => {
     right.close()
   })
 
+  it('does not retry a conversation that the server has explicitly removed', () => {
+    vi.useFakeTimers()
+    const states: ConversationSocketSnapshot[] = []
+    createConversationEventSocket({
+      url: 'ws://example.test/events',
+      createSocket: () => new FakeSocket() as unknown as WebSocket,
+      onState: state => states.push(state),
+      onEvent: () => undefined,
+      onConnection: () => undefined,
+    })
+
+    FakeSocket.instances[0]!.emit('close', { code: 4404, reason: 'conversation deleted' })
+    vi.runAllTimers()
+
+    expect(FakeSocket.instances).toHaveLength(1)
+    expect(states.at(-1)).toMatchObject({ status: 'closed', closeCode: 4404, willReconnect: false })
+  })
+
   it('formats standard and explicit close reasons', () => {
     expect(conversationCloseReason(1000, '')).toBe('正常关闭')
     expect(conversationCloseReason(1012, 'service restart')).toBe('service restart')

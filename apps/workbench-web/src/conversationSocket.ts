@@ -10,6 +10,7 @@ export type ConversationSocketSnapshot = {
   closeCode: number | null
   closeReason: string
   retryInMs: number | null
+  willReconnect: boolean
 }
 
 export type ConversationEventSocket = { close(): void }
@@ -42,7 +43,7 @@ export function conversationCloseReason(code: number, reason: string): string {
 /** CodyWork only adapts product frames and presentation. Reconnect, heartbeat,
  * backoff and close authority are shared with CodyWeb through Core. */
 export function createConversationEventSocket(options: Options): ConversationEventSocket {
-  options.onState({ status: 'connecting', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null })
+  options.onState({ status: 'connecting', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null, willReconnect: true })
   return createReconnectingConversationSocket({
     url: options.url,
     ...(options.createSocket ? { createSocket: options.createSocket as (url: string) => WebSocket } : {}),
@@ -68,7 +69,7 @@ export function createConversationEventSocket(options: Options): ConversationEve
       }
       options.onConnection(event)
       if (event.type === 'connected') {
-        options.onState({ status: 'open', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null })
+        options.onState({ status: 'open', reconnectAttempt: 0, closeCode: null, closeReason: '', retryInMs: null, willReconnect: true })
         return
       }
       const closeCode = event.closeCode ?? null
@@ -78,6 +79,7 @@ export function createConversationEventSocket(options: Options): ConversationEve
         closeCode,
         closeReason: conversationCloseReason(closeCode ?? 1006, event.closeReason ?? event.error ?? ''),
         retryInMs: event.retryInMs ?? null,
+        willReconnect: event.willReconnect !== false,
       })
     },
   })

@@ -10,6 +10,7 @@ import type {
   RuntimeContext,
   RuntimeEvent,
   RuntimeComposerOptions,
+  RuntimeConversationSnapshot,
 } from '../runtime/protocol.js'
 
 export interface ConversationView {
@@ -129,21 +130,18 @@ export class ConversationService {
     return toView(row)
   }
 
-  async history(workspaceId: string, conversationId: string): Promise<ConversationEvent[]> {
+  async history(workspaceId: string, conversationId: string): Promise<RuntimeConversationSnapshot> {
     const row = this.requireConversation(workspaceId, conversationId)
+    await this.ensureHandle(row)
     const demand = this.requireDemand(workspaceId, row.demand_id)
     const context = this.contextFor(demand, row.permission_mode)
-    return this.runtime.readConversation({ conversationId, nativeId: row.native_id, context })
+    return this.runtime.readConversationSnapshot({ conversationId, nativeId: row.native_id, context })
   }
 
   subscribe(conversationId: string, listener: Listener): () => void {
     const set = this.listeners.get(conversationId) ?? new Set<Listener>()
     set.add(listener)
     this.listeners.set(conversationId, set)
-    const handle = this.handles.get(conversationId)
-    if (handle) {
-      for (const event of this.runtime.pendingConversationEvents?.(handle) ?? []) listener(event)
-    }
     return () => {
       set.delete(listener)
       if (set.size === 0) this.listeners.delete(conversationId)

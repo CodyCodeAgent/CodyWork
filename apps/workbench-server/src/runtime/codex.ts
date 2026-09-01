@@ -31,6 +31,7 @@ import type {
   ReadConversationRequest,
   ReasoningEffort,
   RuntimeComposerOptions,
+  RuntimeConversationSnapshot,
   RuntimeContext,
   RuntimeEvent,
   RuntimePermissionMode,
@@ -168,22 +169,27 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     await new CodexThreadCommands(this.requireHost()).renameThread(session.binding.threadId, title)
   }
 
-  async readConversation(request: ReadConversationRequest): Promise<RuntimeEvent[]> {
-    await this.ensureRuntime(request.context)
-    return (await this.requireCatalog().readThread(request.nativeId)).map(event => toRuntimeEvent(event, request.conversationId))
+  async readConversationSnapshot(request: ReadConversationRequest): Promise<RuntimeConversationSnapshot> {
+    const manager = await this.ensureRuntime(request.context)
+    let session = this.sessions.get(request.conversationId)
+    if (!session) {
+      const mode = this.modeFromContext(request.context)
+      const binding = { id: request.conversationId, threadId: request.nativeId }
+      await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd()))
+      this.attach(request.conversationId, binding, request.context, mode)
+      session = this.sessions.get(request.conversationId)
+    }
+    if (!session) throw new Error('会话尚未连接 Runtime')
+    if (session.binding.threadId !== request.nativeId) throw new Error('会话绑定与请求的原生 Thread 不一致')
+    const snapshot = await manager.readSnapshot(session.handle.id)
+    return {
+      events: snapshot.events.map(event => toRuntimeEvent(event, request.conversationId)),
+      watermark: snapshot.watermark,
+    }
   }
 
   sessionSnapshot(conversation: ConversationHandle): CodexSessionSnapshot | null {
     return this.manager?.snapshot(conversation.id) ?? null
-  }
-
-  pendingConversationEvents(conversation: ConversationHandle): RuntimeEvent[] {
-    const session = this.sessions.get(conversation.id)
-    if (!session || !this.manager) return []
-    // A browser reconnect needs the complete volatile owner attachment, not
-    // only approvals/questions. This includes admitted commands, the active
-    // Turn, and terminal corrections that native thread/read cannot express.
-    return this.manager.listAttachmentEvents(conversation.id).map(event => toRuntimeEvent(event, conversation.id))
   }
 
   subscribeConversation(conversation: ConversationHandle, listener: (event: RuntimeEvent) => void): () => void {

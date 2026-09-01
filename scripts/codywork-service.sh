@@ -28,6 +28,23 @@ process_cwd() {
   [[ -L "/proc/$pid/cwd" ]] && readlink "/proc/$pid/cwd" 2>/dev/null || true
 }
 
+process_group_id() {
+  local pid="$1"
+  ps -p "$pid" -o pgid= 2>/dev/null | tr -d '[:space:]'
+}
+
+stop_owned_process() {
+  local pid="$1" signal="$2" pgid
+  pgid="$(process_group_id "$pid")"
+  # setsid makes the service PID the leader of a private group. Only then is
+  # it safe to signal the group and clean up its App Server child process.
+  if [[ "$pgid" == "$pid" ]]; then
+    kill "-$signal" -- "-$pgid"
+  else
+    kill "-$signal" "$pid"
+  fi
+}
+
 is_our_process() {
   local pid="$1" command cwd
   kill -0 "$pid" 2>/dev/null || return 1
@@ -46,14 +63,14 @@ stop_service() {
     return 0
   fi
   echo "Stopping CodyWork (PID $pid)..."
-  kill -TERM "$pid"
+  stop_owned_process "$pid" TERM
   for _ in {1..50}; do
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1
   done
   if kill -0 "$pid" 2>/dev/null; then
-    echo "CodyWork did not stop gracefully; sending SIGKILL to PID $pid."
-    kill -KILL "$pid"
+    echo "CodyWork did not stop gracefully; sending SIGKILL to its owned process group."
+    stop_owned_process "$pid" KILL
   fi
   rm -f "$PID_FILE"
 }
@@ -83,13 +100,15 @@ start_service() {
       rm -f "$PID_FILE"
       return 1
     fi
-    if node -e "fetch('http://127.0.0.1:$PORT/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"; then
+    if node -e "fetch('http://127.0.0.1:$PORT/api/health').then(async r=>{const body=await r.json();process.exit(r.ok&&body?.ok===true&&body?.data?.service==='codywork'?0:1)}).catch(()=>process.exit(1))"; then
       echo "CodyWork is running (PID $pid). Log: $LOG_FILE"
       return 0
     fi
     sleep 0.2
   done
   echo "CodyWork process is running but did not become ready. See $LOG_FILE" >&2
+  stop_owned_process "$pid" TERM || true
+  rm -f "$PID_FILE"
   return 1
 }
 

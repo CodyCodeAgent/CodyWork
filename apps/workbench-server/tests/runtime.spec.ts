@@ -114,14 +114,14 @@ describe('generic runtime protocol', () => {
     expect(secondTurnIds.size).toBe(1)
     expect([...firstTurnIds][0]).not.toBe([...secondTurnIds][0])
     await expect(runtime.sendTurn({ conversation, prompt: 'SERVER_CWD' })).resolves.toMatchObject({ finalText: realpathSync(appServerCwd) })
-    const nativeHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
+    const nativeHistory = (await runtime.readConversationSnapshot({ conversationId: conversation.id, nativeId: conversation.nativeId, context })).events
     expect(nativeHistory.slice(0, 4).map(event => event.type)).toEqual(['turn.started', 'user.completed', 'assistant.completed', 'turn.completed'])
     expect(nativeHistory.find(event => event.type === 'assistant.completed' && event.data.text === 'CODEX_FIXTURE_OK')).toMatchObject({
       type: 'assistant.completed',
       data: { text: 'CODEX_FIXTURE_OK' },
     })
-    const catalogHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: 'native-fixture-thread', context })
-    expect(catalogHistory.find(event => event.itemId === 'command-history')?.data.item).toEqual(expect.objectContaining({ type: 'commandExecution', command: 'pnpm test' }))
+    // A snapshot is scoped to the owner binding. It deliberately cannot read
+    // a second native thread under the same product conversation id.
 
     await expect(runtime.sendTurn({
       conversation,
@@ -143,8 +143,10 @@ describe('generic runtime protocol', () => {
       }
     } })
     await approvalRequested
-    const pendingHistory = await runtime.readConversation({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
-    expect(pendingHistory.some(event => event.type === 'approval.requested')).toBe(false)
+    const pendingHistory = (await runtime.readConversationSnapshot({ conversationId: conversation.id, nativeId: conversation.nativeId, context })).events
+    // Owner snapshots include volatile approvals so a reconnect has one
+    // authoritative recovery path instead of a separate websocket replay.
+    expect(pendingHistory.some(event => event.type === 'approval.requested')).toBe(true)
     expect(pendingApprovalId).not.toBe('')
     await runtime.respondApproval(conversation, pendingApprovalId, 'allowed-once')
     const approvalResult = await approvalTurn
