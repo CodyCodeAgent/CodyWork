@@ -11,7 +11,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.37.23",
+    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.37.24",
     "ws": "^8.21.0"
   },
   "devDependencies": {
