@@ -178,7 +178,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .sidebar-panel-toggle:hover, .conversation-panel-toggle:hover { color: #465bd4; background: #f4f6ff; border-color: #bfc9ee; }
 .sidebar-panel-toggle:focus-visible, .conversation-panel-toggle:focus-visible { outline: 3px solid rgba(91,92,240,.22); outline-offset: 2px; }
 .sidebar-panel-toggle svg, .conversation-panel-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.sidebar-panel-toggle { position: absolute; z-index: 30; top: 25px; right: -14px; color: #a9b4c6; background: #191d26; border-color: #303846; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+.sidebar-panel-toggle { position: absolute; z-index: 30; top: 22px; right: 10px; color: #a9b4c6; background: #191d26; border-color: #303846; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
 .sidebar-panel-toggle:hover { color: #dce4ff; background: #252c3a; border-color: #596bb3; }
 .sidebar.collapsed { width: 64px; flex-basis: 64px; padding: 14px 8px 12px; }
 .sidebar.collapsed .brand { justify-content: center; padding: 4px 0 18px; }
