@@ -51,6 +51,7 @@
             </template>
           </aside>
           <section class="chat-main">
+            <ThreadContextUsageFloat :usage="threadContextUsage" />
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
               <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
               <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
@@ -99,6 +100,7 @@ import '@codycodeagent/cody-web-core/vue/style.css'
 import WorkspaceSetupDialog from './components/WorkspaceSetupDialog.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
+import ThreadContextUsageFloat from './components/ThreadContextUsageFloat.vue'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
 import {
@@ -160,6 +162,7 @@ const socketDetail = computed(() => {
   return `WebSocket 已关闭（${state.closeCode ?? '无关闭码'}）：${state.closeReason || '未提供原因'}`
 })
 const isRunning = computed(() => Boolean(conversationState.value.activeTurnId))
+const threadContextUsage = computed(() => conversationState.value.contextUsage)
 const allSharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
 const hiddenConversationEntryCount = computed(() => hiddenMessageCount(allSharedConversationEntries.value.length, visibleConversationEntryCount.value))
 const sharedConversationEntries = computed(() => allSharedConversationEntries.value.slice(
