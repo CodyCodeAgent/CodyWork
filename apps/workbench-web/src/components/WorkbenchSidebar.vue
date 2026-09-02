@@ -1,17 +1,18 @@
 <template>
-  <aside class="sidebar">
+  <aside :class="['sidebar', { collapsed }]">
+    <button class="sidebar-panel-toggle" type="button" :aria-label="collapsed ? '展开工作台导航' : '收起工作台导航'" :aria-expanded="!collapsed" :title="collapsed ? '展开工作台导航' : '收起工作台导航'" @click="emit('update:collapsed', !collapsed)"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="collapsed ? 'm10 6 6 6-6 6' : 'm14 6-6 6 6 6'" /></svg></button>
     <div class="brand"><span class="brand-mark">CW</span><span><strong>CodyWork</strong><small>Codex workbench</small></span></div>
     <div class="sidebar-scroll">
       <template v-if="workspace">
         <div class="switcher-wrap">
-          <button class="switcher" @click="emit('update:workspacePickerOpen', !workspacePickerOpen)"><span class="folder-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><span class="switcher-copy"><strong>{{ workspace.name }}</strong><small>{{ workspace.path }}</small></span><span class="switcher-action">切换</span></button>
+          <button class="switcher" :aria-label="collapsed ? `切换 Workspace：${workspace.name}` : undefined" :title="collapsed ? workspace.name : undefined" @click="emit('update:workspacePickerOpen', !workspacePickerOpen)"><span class="folder-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><span class="switcher-copy"><strong>{{ workspace.name }}</strong><small>{{ workspace.path }}</small></span><span class="switcher-action">切换</span></button>
           <div v-if="workspacePickerOpen" class="switcher-menu">
             <div v-for="item in workspaces" :key="item.id" class="workspace-picker-row"><button class="workspace-picker-select" :class="{ selected: item.id === workspace.id }" @click="emit('selectWorkspace', item)"><span class="folder-mark small">{{ item.name.slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.name }}</strong><small>{{ item.path }}</small></span></button><button class="workspace-picker-remove" type="button" :aria-label="`从 CodyWork 移除 ${item.name}`" @click.stop="emit('removeWorkspace', item)">移除</button></div>
             <button class="menu-create" @click="emit('createWorkspace')">＋ 创建 Workspace</button>
           </div>
         </div>
         <div class="sidebar-section-label"><span>WORKSPACE</span><small>上下文与资产</small></div>
-        <button v-for="item in workspacePages" :key="item.page" class="sidebar-item" :class="{ active: activePage === item.page }" @click="emit('navigate', item.page)"><span>{{ item.icon }}</span><span class="sidebar-label"><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span></button>
+        <button v-for="item in workspacePages" :key="item.page" class="sidebar-item" :class="{ active: activePage === item.page }" :aria-label="collapsed ? item.label : undefined" :title="collapsed ? item.label : undefined" @click="emit('navigate', item.page)"><span>{{ item.icon }}</span><span class="sidebar-label"><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span></button>
         <section class="sidebar-demand-section" aria-label="需求列表">
           <button class="sidebar-section-label sidebar-accordion-trigger" :class="{ expanded: demandExpanded }" type="button" :aria-expanded="demandExpanded" aria-controls="sidebar-demand-list" @click="emit('update:demandExpanded', !demandExpanded)"><span>WORK MODE</span><small>Demand / Worktree</small><em>{{ demands.length }}</em><i class="sidebar-accordion-chevron" aria-hidden="true">⌄</i></button>
           <div v-show="demandExpanded" id="sidebar-demand-list" class="sidebar-subnav">
@@ -21,11 +22,12 @@
           </div>
           <button v-show="demandExpanded" class="sidebar-new-demand" @click="emit('createDemand')"><span aria-hidden="true">＋</span> 新建需求</button>
         </section>
+        <button v-if="collapsed" class="sidebar-rail-demand" type="button" aria-label="打开需求列表" title="打开需求列表" @click="emit('navigate', 'demands')"><span aria-hidden="true">▦</span><em>{{ demands.length }}</em></button>
       </template>
       <template v-else><div class="sidebar-section-label"><span>WORKSPACES</span><small>开始开发</small></div><button class="sidebar-item active" @click="emit('createWorkspace')"><span>＋</span><span class="sidebar-label"><strong>创建 Workspace</strong><small>目录或 Git 仓库</small></span></button></template>
     </div>
     <div class="sidebar-spacer" />
-    <button class="sidebar-item" :class="{ active: activePage === 'settings' }" @click="emit('navigate', 'settings')"><span>⚙</span><span class="sidebar-label"><strong>Codex Runtime</strong><small>连接与诊断</small></span></button>
+    <button class="sidebar-item" :class="{ active: activePage === 'settings' }" :aria-label="collapsed ? 'Codex Runtime' : undefined" :title="collapsed ? 'Codex Runtime' : undefined" @click="emit('navigate', 'settings')"><span>⚙</span><span class="sidebar-label"><strong>Codex Runtime</strong><small>连接与诊断</small></span></button>
     <div class="sidebar-note"><span class="status-dot" :class="socketState" /><span><strong>{{ realtimeLabel }}</strong><small>{{ realtimeDetail }}</small></span></div>
   </aside>
 </template>
@@ -46,6 +48,7 @@ const props = defineProps<{
   socketState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
   workspacePickerOpen: boolean
   demandExpanded: boolean
+  collapsed: boolean
 }>()
 
 const realtimeLabel = computed(() => {
@@ -64,6 +67,7 @@ const realtimeDetail = computed(() => {
 const emit = defineEmits<{
   'update:workspacePickerOpen': [value: boolean]
   'update:demandExpanded': [value: boolean]
+  'update:collapsed': [value: boolean]
   selectWorkspace: [workspace: Workspace]
   removeWorkspace: [workspace: Workspace]
   createWorkspace: []

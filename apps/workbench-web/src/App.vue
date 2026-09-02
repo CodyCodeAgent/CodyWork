@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell codywork-vue" data-testid="codywork-app">
-    <WorkbenchSidebar :workspace="workspace" :workspaces="workspaces" :demands="demands" :selected-demand-id="selectedDemand?.id ?? ''" :active-page="activePage" :socket-state="socketState" :workspace-picker-open="showWorkspacePicker" :demand-expanded="demandNavExpanded" @update:workspace-picker-open="showWorkspacePicker = $event" @update:demand-expanded="demandNavExpanded = $event" @select-workspace="selectWorkspace" @remove-workspace="openDeleteWorkspace" @create-workspace="showCreateWorkspace = true" @create-demand="showCreateDemand = true" @navigate="goTo" @open-demand="openDemand" />
+    <WorkbenchSidebar :workspace="workspace" :workspaces="workspaces" :demands="demands" :selected-demand-id="selectedDemand?.id ?? ''" :active-page="activePage" :socket-state="socketState" :workspace-picker-open="showWorkspacePicker" :demand-expanded="demandNavExpanded" :collapsed="workspaceSidebarCollapsed" @update:workspace-picker-open="showWorkspacePicker = $event" @update:demand-expanded="demandNavExpanded = $event" @update:collapsed="setWorkspaceSidebarCollapsed" @select-workspace="selectWorkspace" @remove-workspace="openDeleteWorkspace" @create-workspace="showCreateWorkspace = true" @create-demand="showCreateDemand = true" @navigate="goTo" @open-demand="openDemand" />
 
     <main class="main">
       <div v-if="error" class="app-error-banner" role="alert"><span>{{ error }}</span><button type="button" aria-label="关闭错误提示" @click="error = ''">×</button></div>
@@ -25,8 +25,10 @@
       <section v-else-if="activePage === 'chat' && selectedDemand" class="demand-chat-page">
         <header class="topbar chat-topbar"><div><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div><div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div></header>
         <div class="chat-layout">
-          <aside class="conversation-sidebar">
-            <div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div></div>
+          <aside :class="['conversation-sidebar', { collapsed: conversationSidebarCollapsed }]">
+            <button v-if="conversationSidebarCollapsed" class="conversation-panel-toggle rail" type="button" :aria-label="'展开会话列表'" aria-expanded="false" title="展开会话列表" @click="setConversationSidebarCollapsed(false)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg><span>会话</span></button>
+            <template v-else>
+            <div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div><button class="conversation-panel-toggle" type="button" :aria-label="'收起会话列表'" aria-expanded="true" title="收起会话列表" @click="setConversationSidebarCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></button></div>
             <div class="conversation-demand"><strong>{{ selectedDemand.name }}</strong><small>{{ selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo' }}</small></div>
             <div class="conversation-list" role="list" aria-label="Demand 会话">
               <div v-for="conversation in conversations" :key="conversation.id" :class="['conversation-row-wrap', { active: conversation.id === selectedConversation?.id, editing: renamingConversationId === conversation.id }]" role="listitem">
@@ -46,6 +48,7 @@
                 </template>
               </div>
             </div>
+            </template>
           </aside>
           <section class="chat-main">
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
@@ -97,6 +100,7 @@ import WorkspaceSetupDialog from './components/WorkspaceSetupDialog.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
+import { readPanelCollapsed, writePanelCollapsed } from './panelState'
 import {
   api,
   type AvailableNativeThread,
@@ -137,7 +141,7 @@ const draft = ref(''); const sending = ref(false); const permission = ref<Conver
 // Composer state belongs to a conversation. Keeping a single global draft made
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
-const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
 const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
@@ -193,6 +197,14 @@ function displayConversationStatus(conversation: Conversation): Conversation['st
     ? conversationState.value
     : null
   return conversationStatusFromState(conversation.status, state)
+}
+function setWorkspaceSidebarCollapsed(collapsed: boolean): void {
+  workspaceSidebarCollapsed.value = collapsed
+  writePanelCollapsed(window.localStorage, 'workspace-sidebar', collapsed)
+}
+function setConversationSidebarCollapsed(collapsed: boolean): void {
+  conversationSidebarCollapsed.value = collapsed
+  writePanelCollapsed(window.localStorage, 'conversation-sidebar', collapsed)
 }
 function conversationWithDisplayStatus(conversation: Conversation): Conversation {
   return { ...conversation, status: displayConversationStatus(conversation) }

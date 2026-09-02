@@ -172,6 +172,33 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
   .workspace-list-actions { width: 100%; margin-left: 58px; }
 }
 
+/* Collapsible navigation rails. Both choices are independent and persisted in the browser. */
+.sidebar, .conversation-sidebar { transition: width 180ms var(--ease), flex-basis 180ms var(--ease), padding 180ms var(--ease); }
+.sidebar-panel-toggle, .conversation-panel-toggle { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #71809a; background: #fff; border: 1px solid #dbe1eb; border-radius: 8px; box-shadow: 0 3px 9px rgba(31,41,55,.09); cursor: pointer; }
+.sidebar-panel-toggle:hover, .conversation-panel-toggle:hover { color: #465bd4; background: #f4f6ff; border-color: #bfc9ee; }
+.sidebar-panel-toggle:focus-visible, .conversation-panel-toggle:focus-visible { outline: 3px solid rgba(91,92,240,.22); outline-offset: 2px; }
+.sidebar-panel-toggle svg, .conversation-panel-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.sidebar-panel-toggle { position: absolute; z-index: 30; top: 25px; right: -14px; color: #a9b4c6; background: #191d26; border-color: #303846; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
+.sidebar-panel-toggle:hover { color: #dce4ff; background: #252c3a; border-color: #596bb3; }
+.sidebar.collapsed { width: 64px; flex-basis: 64px; padding: 14px 8px 12px; }
+.sidebar.collapsed .brand { justify-content: center; padding: 4px 0 18px; }
+.sidebar.collapsed .brand > span:last-child, .sidebar.collapsed .switcher-copy, .sidebar.collapsed .switcher-action, .sidebar.collapsed .sidebar-section-label, .sidebar.collapsed .sidebar-demand-section, .sidebar.collapsed .sidebar-label, .sidebar.collapsed .sidebar-note > span:last-child { display: none; }
+.sidebar.collapsed .switcher { justify-content: center; min-height: 52px; padding: 7px; border-radius: 11px; }
+.sidebar.collapsed .sidebar-item { justify-content: center; min-height: 42px; padding: 7px; }
+.sidebar.collapsed .sidebar-item > span:first-child { width: auto; }
+.sidebar.collapsed .sidebar-note { justify-content: center; padding: 13px 0 2px; }
+.sidebar.collapsed .switcher-menu { left: calc(100% + 8px); right: auto; width: 278px; }
+.sidebar-rail-demand { display: none; }
+.sidebar.collapsed .sidebar-rail-demand { display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; min-height: 39px; margin-top: 8px; color: #b8c4ff; background: #1c2435; border: 1px solid #313f61; border-radius: 9px; }
+.sidebar-rail-demand:hover { background: #252f49; border-color: #566bb9; }
+.sidebar-rail-demand em { min-width: 16px; padding: 1px 4px; color: #d7ddff; background: #354777; border-radius: 999px; font-size: 8px; font-style: normal; }
+.conversation-head { padding-right: 2px; }
+.conversation-panel-toggle { flex: 0 0 auto; }
+.conversation-sidebar.collapsed { width: 44px; flex-basis: 44px; align-items: center; overflow: hidden; padding: 8px 4px; }
+.conversation-panel-toggle.rail { width: 34px; height: 78px; gap: 3px; color: #61708a; background: #f9fafc; border-color: #dfe4ed; box-shadow: none; }
+.conversation-panel-toggle.rail span { font-size: 10px; font-weight: 700; letter-spacing: .12em; writing-mode: vertical-rl; }
+@media (max-width: 560px) { .conversation-sidebar.collapsed { display: none; } }
+
 /* Vue conversation workspace: shared interaction shape with CodyWebUI, CodyWork work-mode shell. */
 .demand-grid { display: grid; gap: 12px; margin-top: 18px; }
 .demand-card { display: flex; align-items: center; gap: 14px; width: 100%; padding: 19px; color: var(--text); background: #fff; border: 1px solid var(--line); border-radius: 13px; text-align: left; }
