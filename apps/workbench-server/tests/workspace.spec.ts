@@ -20,7 +20,7 @@ describe('workspace-only server primitives', () => {
     db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run(makeId('ws'), 'demo', '/tmp/demo', now, now)
     const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]
-    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_audits', 'runtime_settings', 'dashboard_snapshots'])
+    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_audits', 'runtime_settings', 'dashboard_snapshots', 'auth_sessions'])
     const conversationColumns = db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
     expect(conversationColumns.map(column => column.name)).not.toEqual(expect.arrayContaining(['provider', 'last_event_id', 'goal_json', 'plan_json']))
     db.close()

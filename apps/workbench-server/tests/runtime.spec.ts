@@ -42,6 +42,27 @@ describe('generic runtime protocol', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('loads current Demand docs for a new conversation and excludes archived documents', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-demand-docs-'))
+    const demand = join(root, 'worktrees', 'checkout')
+    mkdirSync(join(demand, 'docs', 'history'), { recursive: true })
+    writeFileSync(join(demand, 'docs', 'context.md'), '# Current demand context')
+    writeFileSync(join(demand, 'docs', 'progress.md'), '# Current progress')
+    writeFileSync(join(demand, 'docs', 'decisions.yaml'), 'decision: keep-current-contract')
+    writeFileSync(join(demand, 'docs', 'history', 'previous.md'), '# Stale archived progress')
+    const bundle = resolveInstructionBundle({ workspacePath: root, demandPath: demand })
+    expect(bundle.sources.filter(source => source.kind === 'demand').map(source => source.label)).toEqual([
+      'demand document: context.md',
+      'demand document: decisions.yaml',
+      'demand document: progress.md',
+    ])
+    expect(bundle.systemInstructions).toContain('# Current demand context')
+    expect(bundle.systemInstructions).toContain('# Current progress')
+    expect(bundle.systemInstructions).toContain('keep-current-contract')
+    expect(bundle.systemInstructions).not.toContain('Stale archived progress')
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('exposes standard capabilities and events through the test adapter', async () => {
     const runtime = new TestRuntimeAdapter()
     const info = await runtime.getInfo()

@@ -40,6 +40,44 @@ function source(kind: RuntimeInstructionSource['kind'], path: string, label: str
   return { kind, path, label, sha256: hash(content), content }
 }
 
+const DEMAND_DOCUMENT_EXTENSIONS = new Set(['.md', '.mdx', '.txt', '.json', '.yaml', '.yml'])
+
+/**
+ * Demand documentation is durable shared context. It is intentionally collected
+ * here — where every new native conversation obtains its instructions — rather
+ * than reconstructed by an individual product UI.
+ *
+ * Archived documents are deliberately excluded. They remain available on disk for
+ * audit, but should not silently inflate or contradict the current working brief.
+ */
+function demandDocumentSources(demandPath: string): RuntimeInstructionSource[] {
+  const docsRoot = join(canonicalPath(demandPath), 'docs')
+  if (!existsSync(docsRoot) || !statSync(docsRoot).isDirectory()) return []
+
+  const files: string[] = []
+  const visit = (directory: string, relativeDirectory = ''): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
+      const relativePath = relativeDirectory ? join(relativeDirectory, entry.name) : entry.name
+      const path = join(directory, entry.name)
+      if (!isWithinRoot(docsRoot, path) || entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (relativePath === 'history') continue
+        visit(path, relativePath)
+      } else if (entry.isFile() && DEMAND_DOCUMENT_EXTENSIONS.has(entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase())) {
+        files.push(relativePath)
+      }
+    }
+  }
+  visit(docsRoot)
+
+  const priority = (path: string): number => path === 'context.md' ? 0 : 1
+  return files
+    .sort((left, right) => priority(left) - priority(right) || left.localeCompare(right))
+    .map((relativePath) => source('demand', join(docsRoot, relativePath), `demand document: ${relativePath}`))
+    .filter((item): item is RuntimeInstructionSource => item !== null)
+}
+
 function skillEntries(root: string): InstructionBundle['skills'] {
   if (!existsSync(root) || !statSync(root).isDirectory()) return []
   return readdirSync(root, { withFileTypes: true })
@@ -104,8 +142,7 @@ export function resolveInstructionBundle(input: InstructionBundleInput): Instruc
     if (repositorySource) sources.push(repositorySource)
   }
   if (input.demandPath) {
-    const demandContext = source('demand', join(canonicalPath(input.demandPath), 'docs', 'context.md'), 'demand context')
-    if (demandContext) sources.push(demandContext)
+    sources.push(...demandDocumentSources(input.demandPath))
   }
   const skills = [
     join(workspacePath, '.agents', 'skills'),

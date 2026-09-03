@@ -18,6 +18,7 @@ import { createStaticAssetHandler } from '../http/staticAssets.js'
 import { WorkspaceRegistry } from '../services/workspaceRegistry.js'
 import { WorkspaceSetupCoordinator } from '../services/workspaceSetup.js'
 import { SkillInstallCoordinator } from '../services/skillInstall.js'
+import { AuthSessions } from '../services/authSessions.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -531,16 +532,11 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
   const routes = buildRoutes(ctx)
   const serveStaticAsset = options.staticRoot ? createStaticAssetHandler(options.staticRoot) : null
   const password = options.password?.trim() || null
-  const sessions = new Map<string, number>()
+  const sessions = password ? new AuthSessions(ctx.db, password) : null
   const authenticated = (req: IncomingMessage): boolean => {
     if (!password) return true
     const token = requestCookies(req)[AUTH_COOKIE]
-    const expiresAt = token ? sessions.get(token) : undefined
-    if (!expiresAt || expiresAt <= Date.now()) {
-      if (token) sessions.delete(token)
-      return false
-    }
-    return true
+    return Boolean(token && sessions?.isAuthenticated(token))
   }
   const rejectUnauthenticated = (req: IncomingMessage, res: ServerResponse, pathname: string): void => {
     if (pathname.startsWith('/api/')) json(req, res, 401, { ok: false, error: 'authentication required' })
@@ -578,7 +574,7 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
         return res.end(loginPage('invalid'))
       }
       const token = randomBytes(32).toString('base64url')
-      sessions.set(token, Date.now() + SESSION_TTL_MS)
+      sessions?.create(token, Date.now() + SESSION_TTL_MS)
       res.writeHead(303, { Location: '/', 'Set-Cookie': `${AUTH_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`, 'Cache-Control': 'no-store, max-age=0' })
       return res.end()
     }

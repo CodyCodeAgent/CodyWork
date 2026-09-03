@@ -154,6 +154,14 @@ export class WorkbenchDb {
         last_error TEXT,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS auth_sessions (
+        token_hash TEXT PRIMARY KEY,
+        credential_version TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        expires_at_ms INTEGER NOT NULL,
+        last_seen_at_ms INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS auth_sessions_expires_at_ms ON auth_sessions(expires_at_ms);
     `)
     // Direct cut-over: native Codex threads are the sole conversation history.
     // Rebuild the metadata tables once so no retired provider/event/goal shape
