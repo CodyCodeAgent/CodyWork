@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { WorkbenchDb, makeId, nowIso, type WorkspaceRow } from '../src/db/index.js'
-import { listRepositories, syncRepositoryBaseline } from '../src/services/repositories.js'
+import { clearRepositoryBaselineChanges, ensureCodyWorkControlPlaneIgnored, listRepositories, syncRepositoryBaseline } from '../src/services/repositories.js'
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
@@ -69,6 +69,26 @@ describe('safe repository baseline synchronization', () => {
     expect(result.message).toContain('未提交改动')
     expect(git(test.baseline, ['rev-parse', 'HEAD'])).toBe(before)
     expect(git(test.baseline, ['status', '--porcelain=v1'])).toContain('local-only.md')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('clears only uncommitted baseline changes and preserves a Demand Worktree', () => {
+    const test = createFixture()
+    const demandWorktree = join(test.baseline, 'worktrees', 'demand')
+    ensureCodyWorkControlPlaneIgnored(test.baseline)
+    git(test.baseline, ['worktree', 'add', '-b', 'codex/demand', demandWorktree])
+    writeFileSync(join(demandWorktree, 'demand-only.md'), 'keep this worktree\n')
+    writeFileSync(join(test.baseline, 'README.md'), '# changed baseline\n')
+    writeFileSync(join(test.baseline, 'local-only.md'), 'discard this file\n')
+
+    const result = clearRepositoryBaselineChanges(test.db, test.workspace, test.repository.id)
+
+    expect(result).toMatchObject({ state: 'cleaned', discardedTrackedChanges: 1, discardedUntrackedFiles: 1 })
+    expect(git(test.baseline, ['status', '--porcelain=v1'])).toBe('')
+    expect(git(demandWorktree, ['status', '--porcelain=v1'])).toContain('demand-only.md')
+    expect(() => execFileSync('test', ['-f', join(test.baseline, 'local-only.md')])).toThrow()
+    expect(git(test.baseline, ['worktree', 'list', '--porcelain'])).toContain(demandWorktree)
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })

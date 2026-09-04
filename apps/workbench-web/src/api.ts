@@ -126,6 +126,15 @@ export interface RepositorySyncResult {
   repository: Repository
 }
 
+export interface RepositoryCleanupResult {
+  repositoryId: string
+  state: 'already_clean' | 'cleaned' | 'failed'
+  message: string
+  discardedTrackedChanges: number
+  discardedUntrackedFiles: number
+  repository: Repository
+}
+
 export interface Demand {
   id: string
   name: string
@@ -233,6 +242,8 @@ export const api = {
     request<Repository>('POST', `/api/workspaces/${id}/repositories`, input),
   syncRepository: (workspaceId: string, repositoryId: string) =>
     request<RepositorySyncResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/sync`),
+  clearRepositoryBaseline: (workspaceId: string, repositoryId: string) =>
+    request<RepositoryCleanupResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/clear-baseline`, { confirm: true }),
   listDemands: (id: string) => request<Demand[]>('GET', `/api/workspaces/${id}/demands`),
   importExistingWorktrees: (id: string) => request<ExistingWorktreeImportResult>('POST', `/api/workspaces/${id}/worktrees/import`),
   createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[] }) =>

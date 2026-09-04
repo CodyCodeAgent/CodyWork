@@ -161,6 +161,16 @@ export interface RepositorySyncResult {
   commitsAhead: number | null
 }
 
+export type RepositoryCleanupState = 'already_clean' | 'cleaned' | 'failed'
+
+export interface RepositoryCleanupResult {
+  repository: RepositoryRow
+  state: RepositoryCleanupState
+  message: string
+  discardedTrackedChanges: number
+  discardedUntrackedFiles: number
+}
+
 function repositoryForSync(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): RepositoryRow {
   const repository = db.db.prepare('SELECT * FROM repositories WHERE id = ? AND workspace_id = ? AND present = 1').get(repositoryId, workspace.id) as unknown as RepositoryRow | undefined
   if (!repository) throw new Error('Repo 不存在或已不在当前 Workspace 中')
@@ -229,6 +239,53 @@ export function syncRepositoryBaseline(db: WorkbenchDb, workspace: WorkspaceRow,
       ? saveRepositoryInspection(db, repository, inspection, 'pull_failed', message)
       : repository
     return syncResult(current, ref, 'failed', `同步远端基线失败：${message}`)
+  }
+}
+
+function workingTreeChangeCounts(path: string): { tracked: number; untracked: number } {
+  const entries = runGit(path, ['status', '--porcelain=v1']).split('\n').filter(Boolean)
+  return entries.reduce((counts, entry) => {
+    if (entry.startsWith('?? ')) counts.untracked += 1
+    else counts.tracked += 1
+    return counts
+  }, { tracked: 0, untracked: 0 })
+}
+
+/**
+ * Discards only uncommitted state in a registered baseline repository. This
+ * does not switch branches, move HEAD, fetch, or touch Demand Worktrees. The
+ * explicit exclusion protects CodyWork's managed container even if a legacy
+ * Workspace is missing its local Git ignore rule.
+ */
+export function clearRepositoryBaselineChanges(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): RepositoryCleanupResult {
+  const repository = repositoryForSync(db, workspace, repositoryId)
+  try {
+    const before = workingTreeChangeCounts(repository.baseline_path)
+    if (before.tracked === 0 && before.untracked === 0) {
+      const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+      return { repository: current, state: 'already_clean', message: '基线没有未提交改动，无需清理。', discardedTrackedChanges: 0, discardedUntrackedFiles: 0 }
+    }
+
+    if (repositoryHead(repository.baseline_path)) runGit(repository.baseline_path, ['reset', '--hard', 'HEAD'])
+    // Never use -x: ignored files, including CodyWork's worktrees/, are not
+    // cleanup candidates. The explicit exclusion also protects old setups.
+    runGit(repository.baseline_path, ['clean', '-fd', '--exclude=worktrees/'])
+
+    const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+    return {
+      repository: current,
+      state: 'cleaned',
+      message: `已清理基线的 ${before.tracked} 项已跟踪改动和 ${before.untracked} 项未跟踪文件。Demand Worktree 未被修改。`,
+      discardedTrackedChanges: before.tracked,
+      discardedUntrackedFiles: before.untracked,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const inspection = (() => { try { return inspectRepository(repository.baseline_path) } catch { return null } })()
+    const current = inspection
+      ? saveRepositoryInspection(db, repository, inspection, 'pull_failed', message)
+      : repository
+    return { repository: current, state: 'failed', message: `清理基线变更失败：${message}`, discardedTrackedChanges: 0, discardedUntrackedFiles: 0 }
   }
 }
 

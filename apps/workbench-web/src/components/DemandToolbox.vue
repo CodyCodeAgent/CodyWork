@@ -30,7 +30,7 @@
           <div v-if="repositories.length" class="toolbox-repositories" role="list" aria-label="当前 Demand 的基线仓库">
             <article v-for="repository in repositories" :key="repository.id" class="toolbox-repository" role="listitem">
               <div class="toolbox-repository-head"><div><strong>{{ repository.name }}</strong><small>origin/{{ repository.defaultRef || '未知分支' }}</small></div><span class="repository-state" :data-state="repository.dirty ? 'blocked' : repository.syncStatus === 'pull_failed' ? 'failed' : 'ready'">{{ repository.dirty ? '基线有改动' : repository.syncStatus === 'pull_failed' ? '上次同步失败' : '可安全检查' }}</span></div>
-              <div class="toolbox-repository-action"><p>仅 fetch 并在可快进时更新本地基线。</p><button class="btn" type="button" :disabled="!canSync(repository)" :title="syncTitle(repository)" @click="emit('sync', repository.id)">{{ syncingRepositoryId === repository.id ? '同步中…' : '同步远端基线' }}</button></div>
+              <div class="toolbox-repository-action"><p>{{ repository.dirty ? '基线有未提交改动；清理会丢弃这些改动，不影响 Demand Worktree。' : '仅 fetch 并在可快进时更新本地基线。' }}</p><div class="toolbox-repository-buttons"><button v-if="repository.dirty" class="btn danger" type="button" :disabled="!canClean(repository)" :title="cleanupTitle(repository)" @click="emit('cleanup', repository)">{{ clearingRepositoryId === repository.id ? '清理中…' : '清理基线变更' }}</button><button class="btn" type="button" :disabled="!canSync(repository)" :title="syncTitle(repository)" @click="emit('sync', repository.id)">{{ syncingRepositoryId === repository.id ? '同步中…' : '同步远端基线' }}</button></div></div>
               <p v-if="syncResults[repository.id]" class="repository-result" :data-state="syncResults[repository.id].state" role="status">{{ syncResults[repository.id].message }}</p>
             </article>
           </div>
@@ -54,9 +54,10 @@ const props = defineProps<{
   settleTitle: string
   canAddRepository: boolean
   syncingRepositoryId: string
+  clearingRepositoryId: string
   syncResults: Record<string, RepositorySyncResult>
 }>()
-const emit = defineEmits<{ settle: []; 'add-repository': []; sync: [repositoryId: string] }>()
+const emit = defineEmits<{ settle: []; 'add-repository': []; sync: [repositoryId: string]; cleanup: [repository: Repository] }>()
 const open = ref(false)
 const trigger = ref<HTMLButtonElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
@@ -101,15 +102,25 @@ function addRepository(): void {
   emit('add-repository')
 }
 function canSync(repository: Repository): boolean {
-  return props.syncingRepositoryId === '' && !repository.dirty && Boolean(repository.originUrl && repository.defaultRef)
+  return props.syncingRepositoryId === '' && props.clearingRepositoryId === '' && !repository.dirty && Boolean(repository.originUrl && repository.defaultRef)
 }
 function syncTitle(repository: Repository): string {
   if (props.syncingRepositoryId === repository.id) return '正在同步远端基线'
   if (props.syncingRepositoryId) return '另一个 Repo 正在同步'
+  if (props.clearingRepositoryId) return '正在清理另一个 Repo 的基线变更'
   if (repository.dirty) return '基线有未提交改动，不能安全同步'
   if (!repository.originUrl) return '该 Repo 未配置 origin'
   if (!repository.defaultRef) return '无法确定默认分支'
   return `同步 origin/${repository.defaultRef} 到本地基线`
+}
+function canClean(repository: Repository): boolean {
+  return repository.dirty && props.syncingRepositoryId === '' && props.clearingRepositoryId === ''
+}
+function cleanupTitle(repository: Repository): string {
+  if (props.clearingRepositoryId === repository.id) return '正在清理基线变更'
+  if (props.clearingRepositoryId) return '正在清理另一个 Repo 的基线变更'
+  if (props.syncingRepositoryId) return '另一个 Repo 正在同步'
+  return `丢弃 ${repository.name} 基线仓库中的未提交改动`
 }
 </script>
 
@@ -127,7 +138,7 @@ function syncTitle(repository: Repository): string {
 .token-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }.token-summary div { min-width: 0; padding: 8px; background: #f6f8fb; border-radius: 8px; }.token-summary span, .token-summary strong { display: block; }.token-summary span { color: var(--muted); font-size: 10px; }.token-summary strong { overflow: hidden; margin-top: 3px; color: #3f4d65; font: 700 12px/1.25 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .token-meter { position: relative; height: 7px; margin-top: 11px; background: #e7ebf2; border-radius: 999px; }.token-meter-fill { display: block; height: 100%; min-width: 3px; background: var(--blue); border-radius: inherit; transition: width 220ms ease; }.token-meter-threshold { position: absolute; top: -3px; width: 2px; height: 13px; background: #d79524; border: 2px solid #fff; border-radius: 999px; transform: translateX(-50%); }
 .toolbox-note, .toolbox-action p, .toolbox-repository-action p { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }.toolbox-action { margin-top: 10px; }.toolbox-action strong { color: #2e394b; font-size: 13px; }.toolbox-action p { max-width: 260px; }.toolbox-action .btn, .toolbox-repository-action .btn { flex: 0 0 auto; }
-.toolbox-repositories { display: grid; gap: 9px; margin-top: 12px; }.toolbox-repository { padding: 11px; background: #f8fafc; border: 1px solid #e1e7f0; border-radius: 10px; }.toolbox-repository-head strong, .toolbox-repository-head small { display: block; }.toolbox-repository-head strong { color: #2d394d; font-size: 13px; }.toolbox-repository-head small { margin-top: 3px; color: var(--muted); font: 10px var(--mono); }.toolbox-repository-action { align-items: center; margin-top: 8px; }.toolbox-repository-action p { max-width: 250px; margin: 0; }.repository-result { margin: 9px 0 0; padding: 8px; color: #2e785d; background: #edf9f2; border-radius: 7px; font-size: 11px; line-height: 1.45; }.repository-result[data-state='blocked'] { color: #9d630f; background: #fff5e5; }.repository-result[data-state='failed'] { color: #a63e4c; background: #fff0f1; }
+.toolbox-repositories { display: grid; gap: 9px; margin-top: 12px; }.toolbox-repository { padding: 11px; background: #f8fafc; border: 1px solid #e1e7f0; border-radius: 10px; }.toolbox-repository-head strong, .toolbox-repository-head small { display: block; }.toolbox-repository-head strong { color: #2d394d; font-size: 13px; }.toolbox-repository-head small { margin-top: 3px; color: var(--muted); font: 10px var(--mono); }.toolbox-repository-action { align-items: center; margin-top: 8px; }.toolbox-repository-action p { max-width: 250px; margin: 0; }.toolbox-repository-buttons { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }.repository-result { margin: 9px 0 0; padding: 8px; color: #2e785d; background: #edf9f2; border-radius: 7px; font-size: 11px; line-height: 1.45; }.repository-result[data-state='blocked'] { color: #9d630f; background: #fff5e5; }.repository-result[data-state='failed'] { color: #a63e4c; background: #fff0f1; }
 .text-button { padding: 0; color: #4268cf; background: transparent; border: 0; font-size: 12px; font-weight: 700; }.text-button:disabled { color: var(--muted); }
 @media (max-width: 760px) { .demand-toolbox-panel { right: 0; max-height: calc(100vh - 20px); } }
 @media (prefers-reduced-motion: reduce) { .token-meter-fill { transition: none; } }

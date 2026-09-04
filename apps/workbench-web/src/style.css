@@ -174,12 +174,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 
 /* Collapsible navigation rails. Both choices are independent and persisted in the browser. */
 .sidebar, .conversation-sidebar { transition: width 180ms var(--ease), flex-basis 180ms var(--ease), padding 180ms var(--ease); }
-.sidebar-panel-toggle, .conversation-panel-toggle { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #71809a; background: #fff; border: 1px solid #dbe1eb; border-radius: 8px; box-shadow: 0 3px 9px rgba(31,41,55,.09); cursor: pointer; }
-.sidebar-panel-toggle:hover, .conversation-panel-toggle:hover { color: #465bd4; background: #f4f6ff; border-color: #bfc9ee; }
+.conversation-panel-toggle { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #71809a; background: #fff; border: 1px solid #dbe1eb; border-radius: 8px; box-shadow: 0 3px 9px rgba(31,41,55,.09); cursor: pointer; }
+.conversation-panel-toggle:hover { color: #465bd4; background: #f4f6ff; border-color: #bfc9ee; }
 .sidebar-panel-toggle:focus-visible, .conversation-panel-toggle:focus-visible { outline: 3px solid rgba(91,92,240,.22); outline-offset: 2px; }
 .sidebar-panel-toggle svg, .conversation-panel-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.sidebar-panel-toggle { position: absolute; z-index: 30; top: 22px; right: 10px; color: #a9b4c6; background: #191d26; border-color: #303846; box-shadow: 0 4px 12px rgba(0,0,0,.25); }
-.sidebar-panel-toggle:hover { color: #dce4ff; background: #252c3a; border-color: #596bb3; }
+.sidebar-collapse-footer { padding-top: 8px; margin-top: 8px; border-top: 1px solid #24272e; }
+.sidebar-panel-toggle { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; min-height: 44px; padding: 8px 10px; color: #818b9b; background: transparent; border: 1px solid transparent; border-radius: 9px; font-size: 10px; font-weight: 650; letter-spacing: .02em; text-align: left; transition: color 160ms var(--ease), background 160ms var(--ease), border-color 160ms var(--ease); }
+.sidebar-panel-toggle:hover { color: #dce4ff; background: #1c2029; border-color: #343c4b; }
+.sidebar-collapse-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar.collapsed { width: 64px; flex-basis: 64px; padding: 14px 8px 12px; }
 .sidebar.collapsed .brand { justify-content: center; padding: 4px 0 18px; }
 .sidebar.collapsed .brand > span:last-child, .sidebar.collapsed .switcher-copy, .sidebar.collapsed .switcher-action, .sidebar.collapsed .sidebar-section-label, .sidebar.collapsed .sidebar-demand-section, .sidebar.collapsed .sidebar-label, .sidebar.collapsed .sidebar-note > span:last-child { display: none; }
@@ -187,6 +189,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .sidebar.collapsed .sidebar-item { justify-content: center; min-height: 42px; padding: 7px; }
 .sidebar.collapsed .sidebar-item > span:first-child { width: auto; }
 .sidebar.collapsed .sidebar-note { justify-content: center; padding: 13px 0 2px; }
+.sidebar.collapsed .sidebar-collapse-footer { display: flex; justify-content: center; }
+.sidebar.collapsed .sidebar-panel-toggle { justify-content: center; width: 44px; min-width: 44px; padding: 8px; }
+.sidebar.collapsed .sidebar-collapse-label { display: none; }
 .sidebar.collapsed .switcher-menu { left: calc(100% + 8px); right: auto; width: 278px; }
 .sidebar-rail-demand { display: none; }
 .sidebar.collapsed .sidebar-rail-demand { display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; min-height: 39px; margin-top: 8px; color: #b8c4ff; background: #1c2435; border: 1px solid #313f61; border-radius: 9px; }
@@ -720,6 +725,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .delete-workspace-modal > p { margin: 0 0 11px; color: #536071; font-size: 13px; line-height: 1.6; }
 .delete-workspace-note { padding: 10px 11px; color: #516cae !important; background: #f1f4ff; border: 1px solid #dfe4ff; border-radius: 9px; overflow-wrap: anywhere; }
 .delete-workspace-confirm { color: #8a4a55 !important; font-weight: 650; }
+.baseline-cleanup-modal { width: min(510px, 100%); }
+.baseline-cleanup-modal > p { margin: 0 0 11px; color: #536071; font-size: 13px; line-height: 1.6; }
+.baseline-cleanup-note { padding: 10px 11px; color: #8a4a55 !important; background: #fff1f1; border: 1px solid #f0c5ca; border-radius: 9px; }
+.baseline-cleanup-path { overflow-wrap: anywhere; }
+.baseline-cleanup-path code { color: #667085; font-size: 11px; }
 .btn.danger { color: #fff; background: #c44857; border-color: #c44857; }
 .btn.danger:hover:not(:disabled) { background: #ad3c4a; border-color: #ad3c4a; }
 .chat-scroll { padding-top: 30px; padding-bottom: 36px; }
@@ -797,6 +807,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .sidebar-item .sidebar-icon { width: 32px; }
   .settings-section-label { display: block; height: 1px; padding: 0; margin: 10px 4px 7px; }
   .sidebar-note { justify-content: center; padding: 14px 0 2px; }
+  .sidebar-collapse-footer { display: flex; justify-content: center; }
+  .sidebar-panel-toggle { justify-content: center; width: 44px; min-width: 44px; padding: 8px; }
+  .sidebar-collapse-label { display: none; }
   .switcher-menu { position: fixed; top: 68px; left: 66px; right: auto; width: min(300px, calc(100vw - 80px)); }
   .demand-context-nav, .sidebar-subnav, .sidebar-accordion-chevron { display: none !important; }
   .main { overflow: visible; }
@@ -851,6 +864,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .repository-status.clean { color: #237554; background: #e8f7ef; }
 .repository-status.dirty { color: #a86413; background: #fff2df; }
 .repository-status.sync-failed { color: #af3f4b; background: #fff0f1; }
+.repository-clear-button { min-height: 26px; padding: 3px 7px; color: #9d5530; background: #fff; border: 1px solid #e7bf9c; border-radius: 6px; font-size: 9px; font-weight: 700; white-space: nowrap; }
+.repository-clear-button:hover:not(:disabled) { color: #8c413d; background: #fff6ef; border-color: #d89972; }
 .repository-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px; color: #939ba8; background: #fbfcfd; font-size: 10px; }
 .repository-card-foot .btn { flex: 0 0 auto; }
 .next-step-card { min-height: 235px; }

@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
-import { addRepository, listCachedRepositories, syncRepositoryBaseline } from '../services/repositories.js'
+import { addRepository, clearRepositoryBaselineChanges, listCachedRepositories, syncRepositoryBaseline } from '../services/repositories.js'
 import { delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
 import { CodyWorkCodexRuntime } from '../runtime/codex.js'
 import { runtimeSettings, runtimeSettingsRow, updateRuntimeSettings } from '../runtime/settings.js'
@@ -389,6 +389,29 @@ function buildRoutes(ctx: AppContext) {
       remoteHead: result.remoteHead,
       commitsBehind: result.commitsBehind,
       commitsAhead: result.commitsAhead,
+      repository: {
+        id: result.repository.id,
+        name: result.repository.name,
+        path: result.repository.baseline_path,
+        originUrl: result.repository.origin_url,
+        defaultRef: result.repository.default_ref,
+        syncStatus: result.repository.sync_status,
+        dirty: Boolean(result.repository.dirty),
+      },
+    }
+  })
+
+  add('POST', '/api/workspaces/:id/repositories/:repositoryId/clear-baseline', (c) => {
+    if (c.body?.confirm !== true) throw new Error('清理基线变更需要明确确认')
+    const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    const result = clearRepositoryBaselineChanges(ctx.db, row, requiredParam(c, 'repositoryId'))
+    void dashboardCache(ctx).refresh(row)
+    return {
+      repositoryId: result.repository.id,
+      state: result.state,
+      message: result.message,
+      discardedTrackedChanges: result.discardedTrackedChanges,
+      discardedUntrackedFiles: result.discardedUntrackedFiles,
       repository: {
         id: result.repository.id,
         name: result.repository.name,

@@ -1,6 +1,5 @@
 <template>
   <aside :class="['sidebar', { collapsed }]">
-    <button class="sidebar-panel-toggle" type="button" :aria-label="collapsed ? '展开工作台导航' : '收起工作台导航'" :aria-expanded="!collapsed" :title="collapsed ? '展开工作台导航' : '收起工作台导航'" @click="emit('update:collapsed', !collapsed)"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="collapsed ? 'm10 6 6 6-6 6' : 'm14 6-6 6 6 6'" /></svg></button>
     <div class="brand"><span class="brand-mark">CW</span><span><strong>CodyWork</strong><small>Codex workbench</small></span></div>
     <div class="sidebar-scroll">
       <template v-if="workspace">
@@ -29,6 +28,12 @@
     <div class="sidebar-spacer" />
     <button class="sidebar-item" :class="{ active: activePage === 'settings' }" :aria-label="collapsed ? 'Codex Runtime' : undefined" :title="collapsed ? 'Codex Runtime' : undefined" @click="emit('navigate', 'settings')"><span>⚙</span><span class="sidebar-label"><strong>Codex Runtime</strong><small>连接与诊断</small></span></button>
     <div class="sidebar-note"><span class="status-dot" :class="socketState" /><span><strong>{{ realtimeLabel }}</strong><small>{{ realtimeDetail }}</small></span></div>
+    <div class="sidebar-collapse-footer">
+      <button class="sidebar-panel-toggle" type="button" :aria-label="collapsed ? '展开工作台导航' : '收起工作台导航'" :aria-expanded="!collapsed" :title="collapsed ? '展开工作台导航' : '收起工作台导航'" @click="emit('update:collapsed', !collapsed)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="collapsed ? 'm10 6 6 6-6 6' : 'm14 6-6 6 6 6'" /></svg>
+        <span class="sidebar-collapse-label">{{ collapsed ? '展开导航' : '收起导航' }}</span>
+      </button>
+    </div>
   </aside>
 </template>
 
