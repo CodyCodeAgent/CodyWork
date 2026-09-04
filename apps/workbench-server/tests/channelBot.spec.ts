@@ -126,6 +126,26 @@ describe('CodyWork channel lifecycle', () => {
     expect(applied.map(value => value.turnId)).toEqual(['turn-new'])
   })
 
+  it('observes a newly created empty thread without reading unsupported turn history', async () => {
+    const service = bareService()
+    const applied: ConversationEvent[] = []
+    const history = vi.fn(async () => { throw new Error('list_turns is not supported yet') })
+    service.conversations = {
+      subscribeChannel: (_conversationId: string, callback: (value: ConversationEvent) => void) => {
+        callback(event('thread.attached', { ownerRevision: 1 }))
+        return vi.fn()
+      },
+      history,
+    }
+    service.onConversationEventSafely = (_conversationId: string, value: ConversationEvent) => applied.push(value)
+
+    await service.observe(binding('binding-new'), { emptyHistory: true })
+
+    expect(history).not.toHaveBeenCalled()
+    expect(service.observed.get('conversation-1')?.state).toEqual(createConversationState('thread-1'))
+    expect(applied.map(value => value.type)).toEqual(['thread.attached'])
+  })
+
   it('isolates poison Inbox rows and never replays a failed control command as a Codex prompt', async () => {
     const service = bareService()
     const rows = [inbox('control', '/retry'), inbox('poison', 'bad payload', 'missing-binding'), inbox('good', 'continue', 'binding-1')]

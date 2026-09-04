@@ -428,14 +428,19 @@ export class CodyWorkChannelService {
       return card
     }
     if (kind !== 'channel.pick_session' && kind !== 'channel.pick_new_session') throw new Error('未知绑定步骤')
-    const conversation = kind === 'channel.pick_new_session'
+    const isNewSession = kind === 'channel.pick_new_session'
+    const conversation = isNewSession
       ? await this.conversations.create(workspaceId, demandId, '飞书会话')
       : this.conversations.get(workspaceId, string(action.value.conversationId))
     const binding = this.store.createBinding({
       message: inbox.message, workspaceId, demandId, conversationId: conversation.id, threadId: conversation.nativeId, ownerIdentity: inbox.message.sender.id,
     })
     this.store.updateInbox(inbox.id, 'ready', { bindingId: binding.id })
-    await this.observe(binding)
+    // A thread created by this callback is known to have no history.  Do not
+    // immediately read it back: older Codex App Servers cannot list turns for
+    // a brand-new empty thread and would otherwise leave a durable binding in
+    // place while the Feishu card reports a failed action.
+    await this.observe(binding, { emptyHistory: isNewSession })
     const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。接下来在本对话发送的消息会进入同一个 Codex Thread。`, { color: 'green' })
     await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
     await this.submitInbox(inbox.id, binding)
@@ -487,7 +492,7 @@ export class CodyWorkChannelService {
     }
   }
 
-  private async observe(binding: CodyWorkChannelBinding): Promise<void> {
+  private async observe(binding: CodyWorkChannelBinding, options: { emptyHistory?: boolean } = {}): Promise<void> {
     const existing = this.observed.get(binding.conversationId)
     if (existing) { existing.bindingIds.add(binding.id); return }
     const pending = this.observationInitializations.get(binding.conversationId)
@@ -496,7 +501,7 @@ export class CodyWorkChannelService {
       this.observed.get(binding.conversationId)?.bindingIds.add(binding.id)
       return
     }
-    const initialization = this.initializeObservation(binding)
+    const initialization = this.initializeObservation(binding, options)
     this.observationInitializations.set(binding.conversationId, initialization)
     try {
       await initialization
@@ -505,7 +510,7 @@ export class CodyWorkChannelService {
     }
   }
 
-  private async initializeObservation(binding: CodyWorkChannelBinding): Promise<void> {
+  private async initializeObservation(binding: CodyWorkChannelBinding, options: { emptyHistory?: boolean } = {}): Promise<void> {
     const buffered: ConversationEvent[] = []
     let initialized = false
     const unsubscribe = this.conversations.subscribeChannel(binding.conversationId, event => {
@@ -513,7 +518,9 @@ export class CodyWorkChannelService {
       else this.onConversationEventSafely(binding.conversationId, event)
     })
     try {
-      const snapshot = await this.conversations.history(binding.workspaceId, binding.conversationId)
+      const snapshot = options.emptyHistory
+        ? { events: [] as ConversationEvent[], watermark: 0 }
+        : await this.conversations.history(binding.workspaceId, binding.conversationId)
       const state = reduceConversationEvents(createConversationState(binding.threadId), snapshot.events)
       const observation: ObservedConversation = { state, bindingIds: new Set([binding.id]), unsubscribe }
       this.observed.set(binding.conversationId, observation)
