@@ -15,7 +15,7 @@ export interface CodexRuntimeInfo {
 }
 
 export interface RuntimeInstructionSource {
-  kind: 'platform' | 'charter' | 'workspace' | 'repository' | 'demand' | 'skill'
+  kind: 'platform' | 'charter' | 'workspace' | 'repository' | 'demand' | 'knowledge' | 'skill'
   path?: string
   label: string
   sha256: string

@@ -46,10 +46,12 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-demand-docs-'))
     const demand = join(root, 'worktrees', 'checkout')
     mkdirSync(join(demand, 'docs', 'history'), { recursive: true })
+    mkdirSync(join(root, 'docs', 'guides'), { recursive: true })
     writeFileSync(join(demand, 'docs', 'context.md'), '# Current demand context')
     writeFileSync(join(demand, 'docs', 'progress.md'), '# Current progress')
     writeFileSync(join(demand, 'docs', 'decisions.yaml'), 'decision: keep-current-contract')
     writeFileSync(join(demand, 'docs', 'history', 'previous.md'), '# Stale archived progress')
+    writeFileSync(join(root, 'docs', 'guides', 'evaluation.md'), '# 评估单排查\n\n只在需要排查评估单时读取完整文档。')
     const bundle = resolveInstructionBundle({ workspacePath: root, demandPath: demand })
     expect(bundle.sources.filter(source => source.kind === 'demand').map(source => source.label)).toEqual([
       'demand document: context.md',
@@ -60,6 +62,10 @@ describe('generic runtime protocol', () => {
     expect(bundle.systemInstructions).toContain('# Current progress')
     expect(bundle.systemInstructions).toContain('keep-current-contract')
     expect(bundle.systemInstructions).not.toContain('Stale archived progress')
+    expect(bundle.sources.find(source => source.kind === 'knowledge')).toMatchObject({ label: 'workspace knowledge catalog' })
+    expect(bundle.systemInstructions).toContain('docs/guides/evaluation.md')
+    expect(bundle.systemInstructions).toContain('CodyWork demand startup')
+    expect(bundle.systemInstructions).not.toContain('只在需要排查评估单时读取完整文档。')
     rmSync(root, { recursive: true, force: true })
   })
 
