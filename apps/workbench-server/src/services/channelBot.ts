@@ -90,6 +90,31 @@ function selectionCard(title: string, text: string, actions: Array<{ text: strin
   return feishuSelectionCard(title, text, actions)
 }
 
+function markdownCode(value: string, limit = 1_600): string {
+  const compact = value.trim().slice(0, limit).replaceAll('```', '``\u200b`')
+  return compact ? `\n\n\`\`\`text\n${compact}${value.trim().length > limit ? '\n…' : ''}\n\`\`\`` : ''
+}
+
+function interactiveRequestSummary(kind: 'approval' | 'question', method: string, data: Record<string, unknown>): string {
+  const params = record(data.params)
+  if (kind === 'approval') {
+    const commandValue = params.command
+    const command = Array.isArray(commandValue) ? commandValue.map(string).filter(Boolean).join(' ') : string(commandValue)
+    const cwd = string(params.cwd)
+    const reason = string(params.reason || params.justification || data.reason || data.justification)
+    const lines = [`**${method}**`, 'Codex 请求执行以下操作。']
+    if (command) lines.push(markdownCode(command))
+    if (cwd) lines.push(`工作目录：\`${cwd.slice(0, 1_000)}\``)
+    if (reason) lines.push(`原因：${reason.slice(0, 1_000)}`)
+    return lines.filter(Boolean).join('\n\n')
+  }
+  const questions = Array.isArray(params.questions) ? params.questions : []
+  const first = record(questions[0])
+  const prompt = string(first.question || first.prompt || first.header || params.question || params.prompt)
+  const header = string(first.header)
+  return [`**${method}**`, header && header !== prompt ? header : '', prompt || 'Codex 正在等待你的回答。'].filter(Boolean).join('\n\n')
+}
+
 /**
  * CodyWork's embedded Channel Host. Core owns channel mechanics and Codex owns
  * the native Thread; this service only applies CodyWork authorization, target
@@ -577,8 +602,22 @@ export class CodyWorkChannelService {
     }
     const sourceLink = event.turnId ? this.store.getTurnLinkByConversationTurn(conversationId, event.turnId) : null
     const sourceBinding = sourceLink ? this.bindingOrDetach(observation, sourceLink.bindingId) : null
-    if (sourceBinding && (event.type === 'approval.requested' || event.type === 'question.requested')) {
-      void this.publishRequest(sourceBinding, event).catch(error => this.failAccount(sourceBinding.accountId, 'channel.request.publish', error))
+    if (event.type === 'approval.requested' || event.type === 'question.requested') {
+      // A channel-originated Turn replies only to its source binding. A Turn
+      // started in the browser has no source link, so bridge the request to one
+      // binding per connected account. This keeps Web and Feishu resolution
+      // symmetric without duplicating cards when one account has several chats
+      // bound to the same native Thread.
+      const requestBindings = sourceBinding
+        ? [sourceBinding]
+        : [...observation.bindingIds].reduce<CodyWorkChannelBinding[]>((rows, bindingId) => {
+            const binding = this.bindingOrDetach(observation, bindingId)
+            if (binding && !rows.some(row => row.accountId === binding.accountId)) rows.push(binding)
+            return rows
+          }, [])
+      for (const binding of requestBindings) {
+        void this.publishRequest(binding, event).catch(error => this.failAccount(binding.accountId, 'channel.request.publish', error))
+      }
     }
     if (event.type === 'approval.resolved' || event.type === 'question.resolved') {
       const requestId = string(event.data.requestId ?? event.data.approvalId)
@@ -709,7 +748,11 @@ export class CodyWorkChannelService {
           { text: '拒绝', value: { action: 'channel.approval', requestId, outcome: 'rejected' }, type: 'danger' as const },
         ]
       : this.questionActions(requestId, event.data)
-    const card = feishuTextCard(kind === 'approval' ? 'CodyWork 请求审批' : 'CodyWork 等待回答', `**${method}**\n\n${JSON.stringify(event.data.params ?? event.data, null, 2).slice(0, 10_000)}`, { color: 'orange', actions, note: kind === 'question' && !actions.length ? `请回复：/answer ${requestId} <答案>` : undefined })
+    const card = feishuTextCard(
+      kind === 'approval' ? 'CodyWork 请求审批' : 'CodyWork 等待回答',
+      interactiveRequestSummary(kind, method, event.data),
+      { color: 'orange', actions, note: kind === 'question' && !actions.length ? `请回复：/answer ${requestId} <答案>` : undefined },
+    )
     const sent = await this.enqueue(binding.accountId, { kind: 'send_user_card', targetId: binding.ownerIdentity, payload: { card }, dedupeKey: `request:${binding.accountId}:${requestId}` })
     if (sent.remoteMessageId) this.store.updateInteractiveRequest(binding.accountId, requestId, { status: 'pending', remoteMessageId: sent.remoteMessageId })
   }

@@ -238,6 +238,59 @@ describe('CodyWork channel lifecycle', () => {
     expect(publishRequest).toHaveBeenCalledWith(source, expect.objectContaining({ turnId: 'turn-1' }))
   })
 
+  it('bridges a browser-originated interactive request to one binding per account', () => {
+    const service = bareService()
+    const first = binding('binding-1')
+    const duplicateAccount = binding('binding-2')
+    const otherAccount = { ...binding('binding-3'), accountId: 'account-2' }
+    const rows = new Map([[first.id, first], [duplicateAccount.id, duplicateAccount], [otherAccount.id, otherAccount]])
+    const publishRequest = vi.fn(async () => undefined)
+    service.store = {
+      getTurnLinkByCommand: () => null,
+      getTurnLinkByConversationTurn: () => null,
+      getBinding: (id: string) => rows.get(id),
+    }
+    service.publishRequest = publishRequest
+    service.scheduleRender = vi.fn()
+    service.observed.set('conversation-1', {
+      state: createConversationState('thread-1'), bindingIds: new Set(rows.keys()), unsubscribe: vi.fn(),
+    })
+
+    service.onConversationEvent('conversation-1', event('question.requested', {
+      turnId: 'turn-browser', data: { requestId: 'question-1', method: 'request_user_input' },
+    }))
+
+    expect(publishRequest).toHaveBeenCalledTimes(2)
+    expect(publishRequest.mock.calls.map(([value]: [CodyWorkChannelBinding]) => value.accountId).sort()).toEqual(['account-1', 'account-2'])
+  })
+
+  it('renders approval cards from an allowlisted summary without exposing the environment', async () => {
+    const service = bareService()
+    const value = binding('binding-1')
+    let delivery: any
+    service.store = {
+      saveInteractiveRequest: () => ({ id: 'request-row', status: 'pending', remoteMessageId: '' }),
+      updateInteractiveRequest: vi.fn(),
+    }
+    service.enqueue = vi.fn(async (_accountId: string, input: any) => {
+      delivery = input
+      return { remoteMessageId: 'remote-1' }
+    })
+
+    await service.publishRequest(value, event('approval.requested', {
+      data: {
+        requestId: 'approval-1', method: 'item/commandExecution/requestApproval',
+        params: { command: "/usr/bin/zsh -lc 'sleep 8'", cwd: '/safe/worktree', environment: { PRIVATE_TOKEN: 'must-not-leak' } },
+      },
+    }))
+
+    const rendered = JSON.stringify(delivery.payload.card)
+    expect(rendered).toContain("sleep 8")
+    expect(rendered).toContain('/safe/worktree')
+    expect(rendered).not.toContain('PRIVATE_TOKEN')
+    expect(rendered).not.toContain('must-not-leak')
+  })
+
   it('renders a command failure even when Codex never assigned a turn id', async () => {
     const service = bareService()
     const value = binding('binding-1')
