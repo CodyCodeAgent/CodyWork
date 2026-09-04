@@ -2,7 +2,9 @@ import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand } f
 import type { ConversationState } from '@codycodeagent/cody-web-core/conversation'
 
 export type HistoryMode = 'push' | 'replace' | 'none'
-export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null }
+export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings'
+export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions'
+export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
 
 export function conversationStatusLabel(status: Conversation['status']): string {
@@ -90,19 +92,32 @@ export function dashboardNeedsRefresh(cache: DashboardSnapshot['cache'] | undefi
 
 export function parseWorkbenchRoute(search: string): WorkbenchRoute {
   const params = new URLSearchParams(search)
-  return { workspaceId: params.get('workspace'), demandId: params.get('demand') }
+  const view = params.get('view')
+  const page: WorkbenchStaticPage = view === 'demands' || view === 'knowledge' || view === 'skills' || view === 'settings' ? view : 'dashboard'
+  const section = params.get('settings')
+  const settingsSection: WorkbenchSettingsSection = section === 'runtime' || section === 'quick-actions' ? section : 'overview'
+  return { workspaceId: params.get('workspace'), demandId: params.get('demand'), page, settingsSection }
 }
 
 export function matchDemandRoute(demands: Demand[], id: string): Demand | undefined {
   return demands.find(demand => demand.id === id || demand.worktreeKey === id || demand.branchName === id)
 }
 
-export function workbenchUrl(current: string, workspaceId: string | null, demandId: string | null): URL {
+export function workbenchUrl(current: string, workspaceId: string | null, demandId: string | null, route?: { page?: WorkbenchStaticPage; settingsSection?: WorkbenchSettingsSection }): URL {
   const url = new URL(current)
   if (workspaceId) url.searchParams.set('workspace', workspaceId)
   else url.searchParams.delete('workspace')
-  if (demandId) url.searchParams.set('demand', demandId)
-  else url.searchParams.delete('demand')
+  if (demandId) {
+    url.searchParams.set('demand', demandId)
+    url.searchParams.delete('view')
+    url.searchParams.delete('settings')
+  } else {
+    url.searchParams.delete('demand')
+    if (route?.page && route.page !== 'dashboard') url.searchParams.set('view', route.page)
+    else url.searchParams.delete('view')
+    if (route?.page === 'settings' && route.settingsSection && route.settingsSection !== 'overview') url.searchParams.set('settings', route.settingsSection)
+    else url.searchParams.delete('settings')
+  }
   return url
 }
 

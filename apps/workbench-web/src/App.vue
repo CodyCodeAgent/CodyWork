@@ -16,7 +16,12 @@
       </section>
       <section v-else-if="activePage === 'knowledge'" class="knowledge-page"><header class="topbar"><div><div class="eyebrow">WORKSPACE / KNOWLEDGE</div><h1>知识库</h1></div><button class="btn" @click="loadKnowledge">刷新</button></header><div class="knowledge-body"><div class="knowledge-layout"><article class="knowledge-list-card"><div class="knowledge-list-head"><strong>文档</strong><span>{{ filteredKnowledge.length }}</span></div><div class="knowledge-search"><input v-model="knowledgeQuery" class="input" placeholder="搜索文档…" /></div><button v-for="doc in filteredKnowledge" :key="doc.id" :class="['knowledge-row', { active: selectedKnowledge?.id === doc.id }]" @click="openKnowledge(doc)"><span class="knowledge-file-icon">{{ doc.extension.replace('.', '').slice(0, 4) || 'doc' }}</span><span class="knowledge-row-copy"><strong>{{ doc.name }}</strong><small>{{ doc.relativePath }}</small></span></button><p v-if="!filteredKnowledge.length" class="knowledge-empty">Workspace 中还没有可展示的知识文档。</p></article><article class="knowledge-detail-card"><template v-if="selectedKnowledge"><div class="knowledge-detail-head"><div><div class="card-kicker">{{ selectedKnowledge.extension || 'DOCUMENT' }}</div><h2>{{ selectedKnowledge.name }}</h2><p>{{ selectedKnowledge.path }}</p></div><span class="knowledge-extension">{{ selectedKnowledge.size }} bytes</span></div><pre class="knowledge-content">{{ selectedKnowledge.content ?? '正在读取文档…' }}</pre></template><p v-else class="knowledge-detail-empty">从左侧选择一个文档查看其内容。</p></article></div></div></section>
       <section v-else-if="activePage === 'skills'" class="skills-page"><header class="topbar"><div><div class="eyebrow">WORKSPACE / SKILLS</div><h1>Skills</h1></div><button class="btn" @click="loadSkills">刷新</button></header><div class="skills-body"><div class="skill-install-card"><div><div class="card-kicker">ADD CAPABILITY</div><h2>为当前 Workspace 安装 Skill</h2><p>Skill 会被安装到 Workspace 的 <code>.agents/skills</code>，并且仍受当前 Workspace 写入策略约束。</p></div><div class="skill-install-form"><input v-model="skillSource" class="input" placeholder="Git URL 或 Skill 来源" /><button class="btn primary" :disabled="installingSkill || !skillSource.trim()" @click="installSkill">{{ installingSkill ? '安装中…' : '安装' }}</button></div></div><div v-if="skillJob" class="skill-run-result" :class="skillJob.status">{{ skillJob.message ?? skillJob.status }}<template v-if="skillJob.events.length"> · {{ skillJob.events.length }} 个运行事件</template></div><div class="skills-layout"><article class="skills-list-card"><div class="skills-list-head"><strong>可用 Skills</strong><span>{{ skills.length }}</span></div><button v-for="skill in skills" :key="skill.id" :class="['skill-row', { active: selectedSkill?.id === skill.id }]" @click="openSkill(skill)"><span class="skill-row-copy"><strong>{{ skill.name }}</strong><small>{{ skill.description || skill.path }}</small></span><span :class="['skill-status-pill', skill.status]">{{ skill.status }}</span></button><p v-if="!skills.length" class="skills-empty">还没有发现可用 Skill。</p></article><article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ selectedSkill.source }}</div><h2>{{ selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><pre class="skill-content">{{ selectedSkill.content }}</pre></template><p v-else class="skill-detail-empty">从左侧选择一个 Skill 查看详情。</p></article></div></div></section>
-      <section v-else-if="activePage === 'settings'" class="workspace-page"><header class="topbar"><div><div class="eyebrow">GLOBAL / RUNTIME</div><h1>Codex Runtime</h1></div><button class="btn" :disabled="testingRuntime" @click="testRuntime">{{ testingRuntime ? '检查中…' : '测试连接' }}</button></header><div class="workspace-body"><article class="settings-card"><div class="card-kicker">APP SERVER</div><h2>Codex App Server</h2><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button></article></div></section>
+      <section v-else-if="activePage === 'settings'" class="workspace-page">
+        <header class="topbar"><div><button v-if="settingsSection !== 'overview'" class="back-link" type="button" @click="openSettingsSection('overview')">‹ 返回设置</button><div class="eyebrow">WORKSPACE / SETTINGS</div><h1>{{ settingsTitle }}</h1></div><button v-if="settingsSection === 'runtime'" class="btn" :disabled="testingRuntime" @click="testRuntime">{{ testingRuntime ? '检查中…' : '测试连接' }}</button></header>
+        <SettingsOverview v-if="settingsSection === 'overview'" :action-count="quickActions.length" @open="openSettingsSection" />
+        <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
+        <div v-else class="workspace-body"><article class="settings-card"><div class="card-kicker">APP SERVER</div><h2>Codex App Server</h2><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button></article></div>
+      </section>
       <section v-else-if="activePage === 'demands' && !selectedDemand" class="demands-body">
         <header class="topbar"><div><div class="eyebrow">{{ workspace.name.toUpperCase() }} / WORK MODE</div><h1>需求工作台</h1></div><div class="topbar-actions"><button class="btn" :disabled="importingWorktrees" @click="importExistingWorktrees">{{ importingWorktrees ? '扫描中…' : '扫描已有 Worktree' }}</button><button class="btn primary" @click="showCreateDemand = true">＋ 新建需求</button></div></header>
         <div class="dashboard-note"><div><strong>每个需求都是一个独立执行上下文</strong><p>Codex 可以跨 Repo 协作，但只会读写当前需求登记的 Worktree 根目录。</p></div><code>{{ workspace.path }}</code></div>
@@ -57,6 +62,7 @@
             </div>
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div class="composer">
+              <QuickActionBar :actions="demandQuickActions" :disabled="sending || uploadingImages || !selectedConversation" :feedback="quickActionFeedback" @execute="executeQuickAction" />
               <div class="composer-hint">{{ selectedCollaborationModeKind === 'plan' ? 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。输入 $ 可引用多个 Skill。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="true" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）' : '描述下一步…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 排队）') : '描述你希望完成的事情…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt" />
             </div>
           </section>
@@ -104,10 +110,14 @@ import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import AddDemandRepositoryDialog from './components/AddDemandRepositoryDialog.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
 import DemandToolbox from './components/DemandToolbox.vue'
+import QuickActionBar from './components/QuickActionBar.vue'
+import QuickActionSettings from './components/QuickActionSettings.vue'
+import SettingsOverview from './components/SettingsOverview.vue'
 import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepositories'
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
+import { quickActionsForScene, resolveQuickActionSkills } from './quickActions'
 import {
   api,
   type AvailableNativeThread,
@@ -119,6 +129,8 @@ import {
   type DashboardSnapshot,
   type Demand,
   type KnowledgeDocument,
+  type QuickAction,
+  type QuickActionInput,
   type Repository,
   type RepositorySyncResult,
   type RuntimeSettings,
@@ -141,6 +153,7 @@ import {
   workbenchUrl,
   type HistoryMode,
   type ThreadProject,
+  type WorkbenchSettingsSection,
 } from './workbenchUi'
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 
@@ -152,6 +165,12 @@ const draft = ref(''); const sending = ref(false); const permission = ref<Conver
 const draftByConversationId = new Map<string, string>()
 const composerImagesByConversationId = new Map<string, ComposerImage[]>()
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+const settingsSection = ref<WorkbenchSettingsSection>('overview')
+const quickActions = ref<QuickAction[]>([])
+const selectedQuickActionId = ref('')
+const savingQuickAction = ref(false)
+const quickActionMessage = ref('')
+const quickActionFeedback = ref('')
 const showAddDemandRepository = ref(false)
 const addingDemandRepository = ref(false)
 const selectedDemandRepositoryId = ref('')
@@ -162,6 +181,7 @@ const baselineCleanupPending = ref<Repository | null>(null)
 const clearingRepositoryId = ref('')
 const baselineCleanupError = ref('')
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
+let quickActionFeedbackTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
 const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
 const socketState = computed(() => socketConnection.value.status)
@@ -208,6 +228,8 @@ const sharedConversationEntries = computed(() => allSharedConversationEntries.va
 ))
 const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.trim().toLowerCase(); return query ? knowledge.value.filter(doc => `${doc.name} ${doc.relativePath}`.toLowerCase().includes(query)) : knowledge.value })
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
+const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
+const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : '设置')
 const threadProjects = computed<ThreadProject[]>(() => groupThreadProjects(nativeThreads.value, selectedDemand.value?.repositories.map(repo => repo.worktreePath) ?? []))
 const filteredNativeThreads = computed(() => filterNativeThreads(nativeThreads.value, selectedThreadProject.value, threadQuery.value))
 const canBindNativeThread = computed(() => manualThreadEntry.value ? Boolean(boundNativeId.value.trim()) : filteredNativeThreads.value.some(thread => thread.nativeId === boundNativeId.value && !thread.bound))
@@ -335,11 +357,12 @@ async function showEarlierConversationEntries(): Promise<void> {
   await nextTick()
   if (node) node.scrollTop = previousTop + Math.max(node.scrollHeight - previousHeight, 0)
 }
-function routeParams(): { workspaceId: string | null; demandId: string | null } { return parseWorkbenchRoute(window.location.search) }
+function routeParams() { return parseWorkbenchRoute(window.location.search) }
 function demandFromRoute(id: string): Demand | undefined { return matchDemandRoute(demands.value, id) }
 function updateRoute(demand: Demand | null, mode: HistoryMode): void {
   if (mode === 'none') return
-  const url = workbenchUrl(window.location.href, workspace.value?.id ?? null, demand?.id ?? null)
+  const page = activePage.value === 'chat' ? 'dashboard' : activePage.value
+  const url = workbenchUrl(window.location.href, workspace.value?.id ?? null, demand?.id ?? null, { page, settingsSection: settingsSection.value })
   const next = `${url.pathname}${url.search}${url.hash}`
   if (mode === 'replace') window.history.replaceState({}, '', next)
   else window.history.pushState({}, '', next)
@@ -365,7 +388,7 @@ async function loadWorkspaces(): Promise<void> {
     const active = nextWorkspaces.find((item) => item.id === route.workspaceId)
       ?? nextWorkspaces.find((item) => item.active)
       ?? nextWorkspaces[0]
-    if (active) await selectWorkspace(active, { demandId: route.demandId, history: 'replace' })
+    if (active) await selectWorkspace(active, { demandId: route.demandId, page: route.page, settingsSection: route.settingsSection, history: 'replace' })
   } catch (cause) {
     if (sequence === workspaceLoadSequence) error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -373,6 +396,7 @@ async function loadWorkspaces(): Promise<void> {
   }
 }
 function goTo(page: Exclude<Page, 'chat'>): void {
+  if (page === 'settings') settingsSection.value = 'overview'
   activePage.value = page
   selectedDemand.value = null
   clearConversationState()
@@ -380,9 +404,16 @@ function goTo(page: Exclude<Page, 'chat'>): void {
   if (page === 'dashboard') void refreshDashboard()
   if (page === 'knowledge') void loadKnowledge()
   if (page === 'skills') void loadSkills()
-  if (page === 'settings') void loadRuntime()
+  if (page === 'settings') void loadQuickActions()
 }
-async function selectWorkspace(next: Workspace, options: { demandId?: string | null; history?: HistoryMode } = {}): Promise<void> {
+async function openSettingsSection(section: WorkbenchSettingsSection): Promise<void> {
+  settingsSection.value = section
+  activePage.value = 'settings'
+  updateRoute(null, 'push')
+  if (section === 'runtime') await loadRuntime()
+  if (section === 'quick-actions') await Promise.all([loadQuickActions(), loadSkills()])
+}
+async function selectWorkspace(next: Workspace, options: { demandId?: string | null; page?: Exclude<Page, 'chat'>; settingsSection?: WorkbenchSettingsSection; history?: HistoryMode } = {}): Promise<void> {
   // The list response is already authoritative enough to restore the shell.  Do
   // this before the optional "open" acknowledgement so a transient POST error
   // can never make an existing Workspace look as if it disappeared.
@@ -408,8 +439,16 @@ async function selectWorkspace(next: Workspace, options: { demandId?: string | n
     const requestedDemand = options.demandId ? demandFromRoute(options.demandId) : undefined
     if (requestedDemand) await openDemand(requestedDemand, options.history ?? 'push')
     else {
-      activePage.value = 'dashboard'
+      activePage.value = options.page ?? 'dashboard'
+      settingsSection.value = options.settingsSection ?? 'overview'
       updateRoute(null, options.history ?? 'push')
+      if (activePage.value === 'knowledge') await loadKnowledge()
+      if (activePage.value === 'skills') await loadSkills()
+      if (activePage.value === 'settings') {
+        await loadQuickActions()
+        if (settingsSection.value === 'runtime') await loadRuntime()
+        if (settingsSection.value === 'quick-actions') await loadSkills()
+      }
       if (options.demandId) error.value = '链接中的 Demand 不存在，已打开 Workspace 概览。'
     }
   } catch (cause) {
@@ -485,6 +524,52 @@ async function requestDashboardRefresh(): Promise<void> {
 async function loadKnowledge(): Promise<void> { if (workspace.value) knowledge.value = await api.listKnowledge(workspace.value.id) }
 async function openKnowledge(document: KnowledgeDocument): Promise<void> { if (workspace.value) selectedKnowledge.value = await api.getKnowledge(workspace.value.id, document.id) }
 async function loadSkills(): Promise<void> { if (workspace.value) skills.value = await api.listSkills(workspace.value.id) }
+async function loadQuickActions(): Promise<void> {
+  if (!workspace.value) return
+  try {
+    quickActions.value = await api.listQuickActions(workspace.value.id)
+    if (selectedQuickActionId.value && !quickActions.value.some(action => action.id === selectedQuickActionId.value)) selectedQuickActionId.value = ''
+  } catch (cause) {
+    quickActions.value = []
+    error.value = `快捷指令加载失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+async function saveQuickAction(input: QuickActionInput & { id?: string }): Promise<void> {
+  if (!workspace.value || savingQuickAction.value) return
+  savingQuickAction.value = true
+  quickActionMessage.value = ''
+  try {
+    const { id, ...payload } = input
+    const saved = id
+      ? await api.updateQuickAction(workspace.value.id, id, payload)
+      : await api.createQuickAction(workspace.value.id, payload)
+    const existing = quickActions.value.some(action => action.id === saved.id)
+    quickActions.value = existing
+      ? quickActions.value.map(action => action.id === saved.id ? saved : action)
+      : [...quickActions.value, saved]
+    selectedQuickActionId.value = saved.id
+    quickActionMessage.value = id ? '修改已保存。' : '快捷指令已创建。'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    savingQuickAction.value = false
+  }
+}
+async function deleteQuickAction(id: string): Promise<void> {
+  if (!workspace.value || savingQuickAction.value) return
+  savingQuickAction.value = true
+  quickActionMessage.value = ''
+  try {
+    await api.deleteQuickAction(workspace.value.id, id)
+    quickActions.value = quickActions.value.filter(action => action.id !== id)
+    selectedQuickActionId.value = quickActions.value[0]?.id ?? ''
+    quickActionMessage.value = '快捷指令已删除。'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    savingQuickAction.value = false
+  }
+}
 async function openSkill(skill: WorkspaceSkill): Promise<void> { if (workspace.value) selectedSkill.value = await api.getSkill(workspace.value.id, skill.id) }
 async function installSkill(): Promise<void> {
   if (!workspace.value || !skillSource.value.trim() || installingSkill.value) return
@@ -603,13 +688,13 @@ async function confirmBaselineCleanup(): Promise<void> {
     clearingRepositoryId.value = ''
   }
 }
-async function openDemand(demand: Demand, history: HistoryMode = 'push'): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; updateRoute(demand, history); await Promise.all([loadComposerOptions(demand.id), loadSkills()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; await openConversation(conversations.value[0]!) }
+async function openDemand(demand: Demand, history: HistoryMode = 'push'): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; updateRoute(demand, history); await Promise.all([loadComposerOptions(demand.id), loadSkills(), loadQuickActions()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; await openConversation(conversations.value[0]!) }
 function returnToDemandList(): void { selectedDemand.value = null; clearConversationState(); activePage.value = 'demands'; updateRoute(null, 'push') }
 async function restoreRoute(): Promise<void> {
   const route = routeParams()
   const nextWorkspace = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspace.value
   if (!nextWorkspace) return
-  if (workspace.value?.id !== nextWorkspace.id) { await selectWorkspace(nextWorkspace, { demandId: route.demandId, history: 'none' }); return }
+  if (workspace.value?.id !== nextWorkspace.id) { await selectWorkspace(nextWorkspace, { demandId: route.demandId, page: route.page, settingsSection: route.settingsSection, history: 'none' }); return }
   if (route.demandId) {
     const demand = demandFromRoute(route.demandId)
     if (demand && selectedDemand.value?.id !== demand.id) await openDemand(demand, 'none')
@@ -618,7 +703,15 @@ async function restoreRoute(): Promise<void> {
   }
   selectedDemand.value = null
   clearConversationState()
-  activePage.value = 'dashboard'
+  activePage.value = route.page
+  settingsSection.value = route.settingsSection
+  if (route.page === 'knowledge') await loadKnowledge()
+  if (route.page === 'skills') await loadSkills()
+  if (route.page === 'settings') {
+    await loadQuickActions()
+    if (route.settingsSection === 'runtime') await loadRuntime()
+    if (route.settingsSection === 'quick-actions') await loadSkills()
+  }
 }
 async function connect(conversation: Conversation): Promise<void> {
   visibleConversationEntryCount.value = DEFAULT_VISIBLE_MESSAGE_COUNT
@@ -697,6 +790,7 @@ async function submitConversationMessage(
   optimisticText: string,
   skillReferences: NonNullable<CodyMessage['skills']>,
   images: ComposerImage[] = [],
+  modeOverride?: ComposerSubmitMode,
 ): Promise<boolean> {
   if (!workspace.value || !selectedConversation.value || sending.value) return false
   if (!composerHasContent({ text: optimisticText, skills: turnSkills, images })) return false
@@ -705,7 +799,7 @@ async function submitConversationMessage(
     await submitUserMessage(
       { text: optimisticText, ...(images.length ? { images: images.map(image => image.url) } : {}), ...(skillReferences.length ? { skills: skillReferences } : {}) },
       {
-        mode: resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
+        mode: modeOverride ?? resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
         input: {
           content,
           ...(images.length ? { imageIds: images.map(image => image.id) } : {}),
@@ -724,6 +818,24 @@ async function submitConversationMessage(
     return false
   } finally {
     sending.value = false
+  }
+}
+async function executeQuickAction(action: QuickAction): Promise<void> {
+  if (!selectedConversation.value || sending.value || uploadingImages.value) return
+  const resolved = resolveQuickActionSkills(action, runtimeSkills.value)
+  if (resolved.missing.length) {
+    error.value = `快捷指令“${action.name}”引用的 Skill 已失效：${resolved.missing.join('、')}。请到设置中修复。`
+    return
+  }
+  const skillReferences = resolved.ids.flatMap((id) => {
+    const skill = runtimeSkills.value.find(candidate => candidate.id === id)
+    return skill ? [{ name: skill.name, path: skill.id, displayName: skill.label }] : []
+  })
+  const queued = isRunning.value
+  if (await submitConversationMessage(action.prompt, resolved.ids, action.prompt, skillReferences, [], 'queue')) {
+    quickActionFeedback.value = queued ? `“${action.name}”已加入队列` : `“${action.name}”已发送`
+    if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer)
+    quickActionFeedbackTimer = window.setTimeout(() => { quickActionFeedback.value = '' }, 2_500)
   }
 }
 async function sendMessage(): Promise<void> {
@@ -876,5 +988,5 @@ async function resolveTimelineQuestion(requestId: string, answer: Record<string,
 watch(() => conversationState.value.appliedEventIds.length, () => { void scrollToBottom() })
 let dashboardTimer: number | null = null
 onMounted(() => { void loadWorkspaces(); window.addEventListener('popstate', () => { void restoreRoute() }); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
-onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
+onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
 </script>

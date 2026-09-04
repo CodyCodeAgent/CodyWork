@@ -20,6 +20,8 @@ import { WorkspaceSetupCoordinator } from '../services/workspaceSetup.js'
 import { SkillInstallCoordinator } from '../services/skillInstall.js'
 import { AuthSessions } from '../services/authSessions.js'
 import { ConversationImageUploads } from '../services/imageUploads.js'
+import { createQuickAction, deleteQuickAction, listQuickActions, updateQuickAction } from '../services/quickActions.js'
+import type { QuickActionInput } from '../services/quickActions.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -317,6 +319,26 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/dashboard', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return dashboardCache(ctx).refreshIfStale(row)
+  })
+
+  add('GET', '/api/workspaces/:id/quick-actions', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return listQuickActions(ctx.db, workspace)
+  })
+
+  add('POST', '/api/workspaces/:id/quick-actions', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return createQuickAction(ctx.db, workspace, c.body as unknown as QuickActionInput)
+  })
+
+  add('PATCH', '/api/workspaces/:id/quick-actions/:actionId', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return updateQuickAction(ctx.db, workspace, requiredParam(c, 'actionId'), c.body as unknown as QuickActionInput)
+  })
+
+  add('DELETE', '/api/workspaces/:id/quick-actions/:actionId', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return deleteQuickAction(ctx.db, workspace, requiredParam(c, 'actionId'))
   })
 
   add('POST', '/api/workspaces/:id/dashboard/refresh', (c) => {

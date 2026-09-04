@@ -58,6 +58,17 @@ export interface ConversationRow {
   updated_at: string
 }
 
+export interface QuickActionRow {
+  id: string
+  workspace_id: string
+  name: string
+  prompt: string
+  enabled: number
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
 export class WorkbenchDb {
   readonly db: DatabaseSync
   readonly path: string
@@ -153,6 +164,28 @@ export class WorkbenchDb {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS conversation_images_scope ON conversation_images(workspace_id, conversation_id);
+      CREATE TABLE IF NOT EXISTS quick_actions (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(workspace_id, name)
+      );
+      CREATE INDEX IF NOT EXISTS quick_actions_workspace_order ON quick_actions(workspace_id, sort_order, created_at);
+      CREATE TABLE IF NOT EXISTS quick_action_skills (
+        quick_action_id TEXT NOT NULL REFERENCES quick_actions(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL,
+        PRIMARY KEY(quick_action_id, skill_id)
+      );
+      CREATE TABLE IF NOT EXISTS quick_action_scenes (
+        quick_action_id TEXT NOT NULL REFERENCES quick_actions(id) ON DELETE CASCADE,
+        scene TEXT NOT NULL,
+        PRIMARY KEY(quick_action_id, scene)
+      );
       CREATE TABLE IF NOT EXISTS runtime_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         codex_command TEXT,

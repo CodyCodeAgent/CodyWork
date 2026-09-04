@@ -76,6 +76,31 @@ export interface WorkspaceSkill {
   updatedAt: string
 }
 
+export type QuickActionScene = 'demand-development'
+
+export interface QuickAction {
+  id: string
+  workspaceId: string
+  name: string
+  prompt: string
+  enabled: boolean
+  sortOrder: number
+  skillIds: string[]
+  skills: Array<{ id: string; name: string; status: 'available' | 'missing' | 'unavailable' }>
+  missingSkillIds: string[]
+  scenes: QuickActionScene[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QuickActionInput {
+  name: string
+  prompt: string
+  skillIds: string[]
+  scenes: QuickActionScene[]
+  enabled: boolean
+}
+
 export interface SkillInstallEvent {
   type: string
   timestamp?: string
@@ -235,6 +260,10 @@ export const api = {
   getSkill: (id: string, skillId: string) => request<WorkspaceSkill>('GET', `/api/workspaces/${id}/skills/${encodeURIComponent(skillId)}`),
   installSkill: (id: string, source: string) => request<{ jobId: string; source: string }>('POST', `/api/workspaces/${id}/skills`, { source }),
   skillInstallStatus: (id: string, jobId: string) => request<SkillInstallStatus>('GET', `/api/workspaces/${id}/skills/install/${encodeURIComponent(jobId)}`),
+  listQuickActions: (id: string) => request<QuickAction[]>('GET', `/api/workspaces/${id}/quick-actions`),
+  createQuickAction: (id: string, input: QuickActionInput) => request<QuickAction>('POST', `/api/workspaces/${id}/quick-actions`, input),
+  updateQuickAction: (id: string, actionId: string, input: QuickActionInput) => request<QuickAction>('PATCH', `/api/workspaces/${id}/quick-actions/${encodeURIComponent(actionId)}`, input),
+  deleteQuickAction: (id: string, actionId: string) => request<{ deleted: true }>('DELETE', `/api/workspaces/${id}/quick-actions/${encodeURIComponent(actionId)}`),
   listKnowledge: (id: string) => request<KnowledgeDocument[]>('GET', `/api/workspaces/${id}/knowledge`),
   getKnowledge: (id: string, documentId: string) => request<KnowledgeDocument>('GET', `/api/workspaces/${id}/knowledge/${encodeURIComponent(documentId)}`),
   listRepositories: (id: string) => request<Repository[]>('GET', `/api/workspaces/${id}/repositories`),

@@ -26,7 +26,7 @@
       <template v-else><div class="sidebar-section-label"><span>WORKSPACES</span><small>开始开发</small></div><button class="sidebar-item active" @click="emit('createWorkspace')"><span>＋</span><span class="sidebar-label"><strong>创建 Workspace</strong><small>目录或 Git 仓库</small></span></button></template>
     </div>
     <div class="sidebar-spacer" />
-    <button class="sidebar-item" :class="{ active: activePage === 'settings' }" :aria-label="collapsed ? 'Codex Runtime' : undefined" :title="collapsed ? 'Codex Runtime' : undefined" @click="emit('navigate', 'settings')"><span>⚙</span><span class="sidebar-label"><strong>Codex Runtime</strong><small>连接与诊断</small></span></button>
+    <button class="sidebar-item" :class="{ active: activePage === 'settings' }" :aria-label="collapsed ? '设置' : undefined" :title="collapsed ? '设置' : undefined" @click="emit('navigate', 'settings')"><span>⚙</span><span class="sidebar-label"><strong>设置</strong><small>运行环境与快捷指令</small></span></button>
     <div class="sidebar-note"><span class="status-dot" :class="socketState" /><span><strong>{{ realtimeLabel }}</strong><small>{{ realtimeDetail }}</small></span></div>
     <div class="sidebar-collapse-footer">
       <button class="sidebar-panel-toggle" type="button" :aria-label="collapsed ? '展开工作台导航' : '收起工作台导航'" :aria-expanded="!collapsed" :title="collapsed ? '展开工作台导航' : '收起工作台导航'" @click="emit('update:collapsed', !collapsed)">
