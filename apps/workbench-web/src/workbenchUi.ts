@@ -3,7 +3,7 @@ import type { ConversationState } from '@codycodeagent/cody-web-core/conversatio
 
 export type HistoryMode = 'push' | 'replace' | 'none'
 export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings'
-export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions'
+export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions' | 'feishu'
 export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
 
@@ -131,7 +131,7 @@ export function parseWorkbenchRoute(search: string): WorkbenchRoute {
   const view = params.get('view')
   const page: WorkbenchStaticPage = view === 'demands' || view === 'knowledge' || view === 'skills' || view === 'settings' ? view : 'dashboard'
   const section = params.get('settings')
-  const settingsSection: WorkbenchSettingsSection = section === 'runtime' || section === 'quick-actions' ? section : 'overview'
+  const settingsSection: WorkbenchSettingsSection = section === 'runtime' || section === 'quick-actions' || section === 'feishu' ? section : 'overview'
   return { workspaceId: params.get('workspace'), demandId: params.get('demand'), page, settingsSection }
 }
 

@@ -11,6 +11,13 @@ async function closeServer(server: ReturnType<typeof startServer>): Promise<void
 }
 
 describe('password protected CodyWork service', () => {
+  it('refuses to listen on a non-loopback host without a password', () => {
+    const db = new WorkbenchDb(':memory:')
+    expect(() => startServer({ db }, { host: '0.0.0.0', port: 0 })).toThrow('CODYWORK_PASSWORD is required')
+    expect(() => startServer({ db }, { host: '127.example.com', port: 0 })).toThrow('CODYWORK_PASSWORD is required')
+    db.close()
+  })
+
   it('protects pages and APIs while retaining loopback health checks', async () => {
     const db = new WorkbenchDb(':memory:')
     const server = startServer({ db }, { host: '127.0.0.1', port: 0, password: 'correct horse battery staple' })
@@ -40,6 +47,7 @@ describe('password protected CodyWork service', () => {
     expect(cookie).toContain('codywork_session=')
     expect(cookie).toContain('HttpOnly')
     expect(cookie).toContain('SameSite=Strict')
+    expect(cookie).not.toContain('Secure')
 
     const accepted = await fetch(`${base}/api/workspaces`, { headers: { cookie: cookie ?? '' } })
     expect(accepted.status).toBe(200)
@@ -49,6 +57,20 @@ describe('password protected CodyWork service', () => {
     expect(health.status).toBe(200)
     await expect(health.json()).resolves.toMatchObject({ ok: true, data: { service: 'codywork' } })
 
+    await closeServer(server)
+    db.close()
+  })
+
+  it('marks the browser session Secure behind an HTTPS reverse proxy', async () => {
+    const db = new WorkbenchDb(':memory:')
+    const server = startServer({ db }, { host: '127.0.0.1', port: 0, password: 'correct horse battery staple' })
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('server did not bind')
+    const login = await fetch(`http://127.0.0.1:${address.port}/api/auth/login`, {
+      method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/json', accept: 'application/json', 'x-forwarded-proto': 'https' }, body: JSON.stringify({ password: 'correct horse battery staple' }),
+    })
+    expect(login.headers.get('set-cookie')).toContain('Secure')
     await closeServer(server)
     db.close()
   })

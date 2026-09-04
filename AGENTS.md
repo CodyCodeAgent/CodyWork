@@ -6,6 +6,8 @@
 - Keep Workspace, Repository, Demand, Worktree, product navigation, and policy boundaries in CodyWork.
 - Keep framework-neutral Codex protocol, runtime, event normalization, conversation reconciliation, composer, and reusable conversation presentation in `@codycodeagent/cody-web-core`.
 - Native Codex Thread history is the durable source of truth for conversation messages. Do not add a second message cache or reconstruct ordering in the product UI.
+- Remote channels must reuse Core's provider-neutral Inbox, binding, Turn projection, interactive-request bridge, and durable Outbox contracts. A channel may persist delivery and presentation state, but must not mirror the Codex transcript or create another Turn state machine.
+- Treat browser realtime and external channel connections as independent transports. Never restart the Codex App Server because a browser or channel connection failed, and never silently resend a command whose native admission is uncertain.
 - Preserve unrelated working-tree changes. Never clean, reset, or overwrite a user's repository to prepare a test fixture.
 
 ## Mandatory verification for every feature iteration
@@ -22,6 +24,8 @@ Every functional change must finish with automated checks **and** end-to-end fun
 8. Save a concise run report under `docs/e2e/runs/` using the supplied template. Include environment, revision, cases, result, evidence, defects found, fixes made, and cleanup.
 9. Remove disposable Workspaces, Worktrees, temporary databases, uploaded images, and test processes. Never delete or reset a real user repository as cleanup.
 10. In the final handoff, state exactly which E2E cases passed, which were blocked, and why. Do not say the feature is complete if required E2E coverage was skipped.
+
+For any channel or bot change, also run `E2E-020`. Exercise private chat, an allowlisted group, a topic, target binding, multi-round continuity, attachments, an interactive request, explicit stop/unbind/retry, browser cross-view, and restart recovery. Real external messages require explicit user authorization; when authorized, use the dedicated test app and never expose its secret in screenshots, logs, reports, or commits.
 
 If a feature changes shared Core behavior, first add or update Core-level automated coverage, then verify the affected flow in CodyWork. If CodyWeb consumes the same behavior and its environment is available, also run the corresponding CodyWeb smoke flow; otherwise record that cross-product verification remains blocked rather than assuming it passed.
 

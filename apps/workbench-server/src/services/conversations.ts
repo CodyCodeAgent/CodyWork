@@ -101,6 +101,7 @@ export class ConversationService {
   private readonly handles = new Map<string, ConversationHandle>()
   private readonly contexts = new Map<string, RuntimeContext>()
   private readonly listeners = new Map<string, Set<Listener>>()
+  private readonly channelListeners = new Map<string, Set<Listener>>()
   private readonly runtimeSubscriptions = new Map<string, () => void>()
   private runtime: CodyWorkRuntime
 
@@ -152,6 +153,19 @@ export class ConversationService {
     return () => {
       set.delete(listener)
       if (set.size === 0) this.listeners.delete(conversationId)
+    }
+  }
+
+  /** Shares the owner Runtime stream with server-side channel projections.
+   * It deliberately preserves local image paths; browser subscribers receive
+   * the authenticated public URL projection from `subscribe`. */
+  subscribeChannel(conversationId: string, listener: Listener): () => void {
+    const set = this.channelListeners.get(conversationId) ?? new Set<Listener>()
+    set.add(listener)
+    this.channelListeners.set(conversationId, set)
+    return () => {
+      set.delete(listener)
+      if (set.size === 0) this.channelListeners.delete(conversationId)
     }
   }
 
@@ -359,12 +373,22 @@ export class ConversationService {
     this.handles.delete(conversationId)
     this.contexts.delete(conversationId)
     this.listeners.delete(conversationId)
+    this.channelListeners.delete(conversationId)
     this.runtimeSubscriptions.get(conversationId)?.()
     this.runtimeSubscriptions.delete(conversationId)
     return { deleted: true }
   }
 
   private appendRuntimeEvent(event: RuntimeEvent): void {
+    // Channel projections are side effects of the native Runtime stream. A
+    // broken or stale provider listener must never block the browser's primary
+    // realtime projection (or another channel listener) for the same Thread.
+    for (const listener of this.channelListeners.get(event.conversationId) ?? []) {
+      try { listener(event) }
+      catch (error) {
+        console.error(`[codywork] channel listener failed for ${event.conversationId}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
     this.publish(this.withPublicImageUrls(event))
   }
 
