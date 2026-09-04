@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { api, type FeishuChannelAccount, type FeishuChannelBinding, type FeishuChannelDiagnostics } from '../api'
 
 const accounts = ref<FeishuChannelAccount[]>([])
@@ -60,6 +60,8 @@ const detailsBusy = ref(false)
 const message = ref('')
 const messageType = ref<'ok' | 'error'>('ok')
 let detailsRequestVersion = 0
+let connectionTimer: ReturnType<typeof setTimeout> | null = null
+let connectionPolls = 0
 const form = reactive({ id: '', name: '', appId: '', appSecret: '', domain: 'feishu' as 'feishu' | 'lark', enabled: false, allowAllUsers: false, allowedUserIds: '', allowedConversationIds: '', groupMentionMode: 'always' as 'always' | 'bound', privateConversationMode: 'chat' as 'topic' | 'chat' })
 const selected = computed(() => accounts.value.find(account => account.id === selectedId.value))
 
@@ -74,6 +76,7 @@ async function load(preferredId = selectedId.value): Promise<void> {
   selectedId.value = accounts.value.some(account => account.id === preferredId) ? preferredId : accounts.value[0]?.id ?? ''
   fill(selected.value)
   await refreshDetails()
+  scheduleConnectionRefresh(selectedId.value, true)
 }
 async function select(id: string): Promise<void> {
   selectedId.value = id
@@ -82,6 +85,7 @@ async function select(id: string): Promise<void> {
   fill(selected.value)
   message.value = ''
   await refreshDetails()
+  scheduleConnectionRefresh(id, true)
 }
 function newAccount(): void {
   detailsRequestVersion += 1
@@ -128,7 +132,33 @@ async function remove(): Promise<void> {
   message.value = ''
   try { await api.deleteFeishuAccount(accountId); await load(); messageType.value = 'ok'; message.value = '机器人已删除。' } catch (error) { showError(error) } finally { busy.value = false }
 }
+function scheduleConnectionRefresh(accountId: string, reset = false): void {
+  if (connectionTimer) clearTimeout(connectionTimer)
+  connectionTimer = null
+  if (reset) connectionPolls = 0
+  const account = accounts.value.find(item => item.id === accountId)
+  if (!account?.enabled || !['connecting', 'reconnecting'].includes(account.connectionState) || connectionPolls >= 20) return
+  const delay = Math.min(600 * (1.35 ** connectionPolls), 3_000)
+  connectionPolls += 1
+  connectionTimer = setTimeout(() => {
+    void (async () => {
+      try {
+        const nextAccounts = await api.listFeishuAccounts()
+        if (selectedId.value !== accountId) return
+        accounts.value = nextAccounts
+        const next = nextAccounts.find(item => item.id === accountId)
+        if (next?.connectionState === 'connected' && message.value.includes('正在建立')) message.value = '配置已保存，长连接已建立。'
+        else if (next?.connectionState === 'failed' && next.lastError) showError(new Error(next.lastError))
+        await refreshDetails()
+        scheduleConnectionRefresh(accountId)
+      } catch (error) {
+        showError(error)
+      }
+    })()
+  }, delay)
+}
 onMounted(() => { void load().catch(showError) })
+onUnmounted(() => { if (connectionTimer) clearTimeout(connectionTimer) })
 </script>
 
 <style scoped>

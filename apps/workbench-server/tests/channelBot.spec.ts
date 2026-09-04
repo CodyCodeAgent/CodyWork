@@ -176,6 +176,24 @@ describe('CodyWork channel lifecycle', () => {
     expect(service.store.finishAction).toHaveBeenCalledWith('action-1', 'action_completed')
   })
 
+  it('returns binding progress as a raw card callback while retaining durable delivery', async () => {
+    const service = bareService()
+    const card = { header: { title: { content: '选择 CodyWork 需求' } } }
+    service.store = {
+      claimAction: () => ({ id: 'action-1', created: true, status: 'action_processing' }),
+      finishAction: vi.fn(() => true), audit: vi.fn(),
+    }
+    service.handleBindingAction = vi.fn(async () => card)
+
+    const response = await service.onAction('account-1', {
+      eventId: 'event-1', actorId: 'user-1', remoteMessageId: 'message-1',
+      value: { action: 'channel.pick_workspace', inboxId: 'inbox-1', workspaceId: 'workspace-1' }, option: '',
+    })
+
+    expect(response).toEqual({ card: { type: 'raw', data: card } })
+    expect(service.store.finishAction).toHaveBeenCalledWith('action-1', 'action_completed')
+  })
+
   it('routes interactive requests only to the binding that originated the native Turn', () => {
     const service = bareService()
     const source = binding('binding-1')

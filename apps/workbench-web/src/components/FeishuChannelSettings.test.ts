@@ -18,7 +18,7 @@ function diagnostics(id: string) {
   return { account: account(id), bindings: id === 'second' ? 2 : 1, inbox: { waiting: 0, failed: 0, submitted: 0 }, outbox: { pending: 0, deadLetter: 0 } }
 }
 
-afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks() })
 
 describe('FeishuChannelSettings', () => {
   it('disables reconnect for disabled accounts and documents open_id-only allowlists', async () => {
@@ -78,5 +78,23 @@ describe('FeishuChannelSettings', () => {
 
     expect(wrapper.text()).toContain('诊断读取失败')
     expect(wrapper.find('.metrics').exists()).toBe(false)
+  })
+
+  it('automatically converges a transient connection state without requiring a page refresh', async () => {
+    vi.useFakeTimers()
+    const connecting = { ...account('live', true), connectionState: 'connecting' }
+    const connected = { ...account('live', true), connectionState: 'connected', connectedAt: '2026-09-05T00:00:00.000Z' }
+    api.listFeishuAccounts.mockResolvedValueOnce([connecting]).mockResolvedValue([connected])
+    api.feishuDiagnostics.mockResolvedValue({ ...diagnostics('live'), account: connected })
+    api.listFeishuBindings.mockResolvedValue([])
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+    expect(wrapper.text()).toContain('连接中')
+
+    await vi.advanceTimersByTimeAsync(700)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('已连接')
+    wrapper.unmount()
   })
 })

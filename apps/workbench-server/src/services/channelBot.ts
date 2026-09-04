@@ -374,13 +374,17 @@ export class CodyWorkChannelService {
       return { toast: { type: claim.status === 'action_failed' ? 'error' : 'success', content: claim.status === 'action_failed' ? '该操作此前执行失败，请重新点击后再试' : '该操作已经处理' } }
     }
     try {
-      if (kind.startsWith('channel.pick_')) await this.handleBindingAction(accountId, action)
+      let card: FeishuCard | null = null
+      if (kind.startsWith('channel.pick_')) card = await this.handleBindingAction(accountId, action)
       else if (kind === 'channel.approval') await this.handleApprovalAction(accountId, action)
       else if (kind === 'channel.question') await this.handleQuestionAction(accountId, action)
       else if (kind === 'channel.retry_outbox') this.retryOutbox(accountId, string(action.value.outboxId))
       else throw new Error('未知或已过期的操作')
       this.store.finishAction(claim.id, 'action_completed')
-      return { toast: { type: 'success', content: '已处理' } }
+      // Returning the next card in the callback is the only reliable way to
+      // advance select menus in every Feishu client. The durable Outbox patch
+      // remains the recovery path for reconnects and other devices.
+      return card ? { card: { type: 'raw', data: card } } : { toast: { type: 'success', content: '已处理' } }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.store.finishAction(claim.id, 'action_failed', message)
@@ -395,7 +399,7 @@ export class CodyWorkChannelService {
     return inbox
   }
 
-  private async handleBindingAction(accountId: string, action: FeishuCardAction): Promise<void> {
+  private async handleBindingAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
     const inboxId = string(action.value.inboxId)
     const inbox = this.assertActionOwner(inboxId, action.actorId)
     if (inbox.message.accountId !== accountId || inbox.status !== 'waiting_binding') throw new Error('绑定请求已失效')
@@ -408,7 +412,7 @@ export class CodyWorkChannelService {
         text: demand.name, value: { action: 'channel.pick_demand', inboxId, workspaceId, demandId: demand.id },
       })))
       await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-demand:${workspaceId}`, revision: 1 })
-      return
+      return card
     }
     const workspaceId = string(action.value.workspaceId)
     const demandId = string(action.value.demandId)
@@ -421,7 +425,7 @@ export class CodyWorkChannelService {
       actions.unshift({ text: '+ 新建会话', value: { action: 'channel.pick_new_session', inboxId, workspaceId, demandId, conversationId: '' } })
       const card = selectionCard('选择 CodyWork 会话', `需求：**${demand.name}**\n\n飞书与浏览器将共享同一个原生 Codex Thread。`, actions)
       await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-session:${demandId}`, revision: 2 })
-      return
+      return card
     }
     if (kind !== 'channel.pick_session' && kind !== 'channel.pick_new_session') throw new Error('未知绑定步骤')
     const conversation = kind === 'channel.pick_new_session'
@@ -435,6 +439,7 @@ export class CodyWorkChannelService {
     const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。接下来在本对话发送的消息会进入同一个 Codex Thread。`, { color: 'green' })
     await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
     await this.submitInbox(inbox.id, binding)
+    return card
   }
 
   private async submitInbox(inboxId: string, binding: CodyWorkChannelBinding): Promise<void> {
