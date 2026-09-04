@@ -57,8 +57,77 @@ describe('CodyWork channel persistence', () => {
     expect(duplicateOutbox.id).toBe(item.id)
     const claimed = await store.claim({ provider: 'feishu', accountId: first.item.message.accountId, limit: 10, leaseMs: 1_000, nowIso: new Date().toISOString() })
     expect(claimed).toHaveLength(1)
+    await store.markSending(item.id)
+    expect(store.getOutbox(item.id)).toMatchObject({ status: 'sending', attempts: 1 })
     await store.markSent(item.id, 'remote-1')
     expect(store.getOutbox(item.id)).toMatchObject({ status: 'sent', attempts: 1, remoteMessageId: 'remote-1' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('reclaims an expired sending lease after a process interruption', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_recovery', appSecret: 'secret' })
+    const item = await store.enqueue({ id: 'outbox-recovery', provider: 'feishu', accountId: account.id, kind: 'send_text', targetId: 'chat-1', payload: { text: 'recover me' }, dedupeKey: 'recover-key', terminal: true })
+    const now = new Date('2026-09-05T00:00:00.000Z')
+
+    expect(await store.claim({ provider: 'feishu', accountId: account.id, limit: 1, leaseMs: 1_000, nowIso: now.toISOString() })).toHaveLength(1)
+    await store.markSending(item.id)
+    const reclaimed = await store.claim({ provider: 'feishu', accountId: account.id, limit: 1, leaseMs: 1_000, nowIso: new Date(now.getTime() + 2_000).toISOString() })
+
+    expect(reclaimed).toHaveLength(1)
+    expect(reclaimed[0]).toMatchObject({ id: item.id, status: 'leased', attempts: 2 })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('enforces the phase-one single-bot boundary', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Primary Bot', appId: 'cli_primary', appSecret: 'secret' })
+
+    expect(() => store.saveAccount(null, { name: 'Second Bot', appId: 'cli_second', appSecret: 'secret' })).toThrow('一期只支持一个')
+    expect(store.saveAccount(account.id, { name: 'Renamed Bot', appId: 'cli_primary', appSecret: '' })).toMatchObject({ id: account.id, name: 'Renamed Bot' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('records channel activity without overwriting transport state or its last error', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_runtime', appSecret: 'secret' })
+    store.updateRuntime(account.id, { connectionState: 'reconnecting', error: 'socket closed' })
+    store.updateRuntime(account.id, { delivery: true })
+
+    expect(store.getAccount(account.id)).toMatchObject({ connectionState: 'reconnecting', lastError: 'socket closed' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('reports queued work and retryable deliveries, and can remove a binding by id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_diagnostics', appSecret: 'secret' })
+    const bound = createBindingFixture(db, store, account.id)
+    const claimed = store.claimInbound(inbound(account.id, 'queued-event'))
+    store.updateInbox(claimed.item.id, 'ready', { bindingId: bound.id })
+    const outbox = await store.enqueue({ id: 'outbox-failed', provider: 'feishu', accountId: account.id, kind: 'send_text', targetId: 'chat-1', payload: { text: 'retry me' }, dedupeKey: 'failed-key', terminal: true })
+    await store.claim({ provider: 'feishu', accountId: account.id, limit: 1, leaseMs: 1_000, nowIso: new Date().toISOString() })
+    await store.markSending(outbox.id)
+    await store.markRetry(outbox.id, 'network unavailable', new Date(Date.now() + 1_000).toISOString())
+
+    expect(store.listBindingsForConversation(bound.conversationId)).toMatchObject([{ id: bound.id }])
+    expect(store.diagnostics(account.id)).toMatchObject({
+      inbox: { queued: 1 },
+      outbox: { pending: 1, failures: [{ id: outbox.id, status: 'retry_wait', lastError: 'network unavailable' }] },
+    })
+    expect(store.deleteBindingById(account.id, bound.id)).toMatchObject({ id: bound.id })
+    expect(store.deleteBindingById(account.id, bound.id)).toBeNull()
     db.close()
     rmSync(root, { recursive: true, force: true })
   })

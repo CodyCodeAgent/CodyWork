@@ -311,6 +311,10 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/channels/feishu/accounts/:accountId/bindings', (c) => channelService(ctx).listBindings(requiredParam(c, 'accountId')))
 
+  add('DELETE', '/api/channels/feishu/accounts/:accountId/bindings/:bindingId', (c) => ({
+    unbound: channelService(ctx).unbind(requiredParam(c, 'accountId'), requiredParam(c, 'bindingId')),
+  }))
+
   add('POST', '/api/channels/feishu/accounts/:accountId/outbox/:outboxId/retry', (c) => {
     channelService(ctx).retryOutbox(requiredParam(c, 'accountId'), requiredParam(c, 'outboxId'))
     return { retried: true }
@@ -577,6 +581,13 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/conversations/:conversationId/history', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId'))
+  })
+
+  add('GET', '/api/workspaces/:id/conversations/:conversationId/channel-bindings', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const conversationId = requiredParam(c, 'conversationId')
+    conversationService(ctx).get(workspace.id, conversationId)
+    return channelService(ctx).listConversationBindings(conversationId)
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/images', (c) => {

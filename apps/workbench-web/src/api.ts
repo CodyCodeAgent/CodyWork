@@ -277,13 +277,31 @@ export interface FeishuChannelBinding {
   channelConversationId: string
   channelScope: string
   updatedAtIso: string
+  accountId: string
+  accountName?: string
+  botName?: string
+  connectionState?: string
+  lastError?: string
+  pendingDeliveries?: number
+  deadLetters?: number
+}
+
+export interface FeishuFailedDelivery {
+  id: string
+  kind: string
+  targetId: string
+  status: 'retry_wait' | 'dead_letter'
+  attempts: number
+  lastError: string
+  updatedAt: string
 }
 
 export interface FeishuChannelDiagnostics {
   account: FeishuChannelAccount
+  runtime: { observedConversations: number; initializingConversations: number; bufferedEvents: number }
   bindings: number
-  inbox: { waiting: number; failed: number; submitted: number }
-  outbox: { pending: number; deadLetter: number }
+  inbox: { waiting: number; failed: number; submitted: number; queued: number }
+  outbox: { pending: number; deadLetter: number; failures: FeishuFailedDelivery[] }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -306,6 +324,9 @@ export const api = {
   reconnectFeishuAccount: (id: string) => request<{ reconnected: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/reconnect`),
   feishuDiagnostics: (id: string) => request<FeishuChannelDiagnostics>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/diagnostics`),
   listFeishuBindings: (id: string) => request<FeishuChannelBinding[]>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/bindings`),
+  listConversationChannelBindings: (workspaceId: string, conversationId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/channel-bindings`),
+  unbindFeishuConversation: (accountId: string, bindingId: string) => request<{ unbound: boolean }>('DELETE', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/bindings/${encodeURIComponent(bindingId)}`),
+  retryFeishuOutbox: (accountId: string, outboxId: string) => request<{ retried: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/outbox/${encodeURIComponent(outboxId)}/retry`),
   testRuntime: () => request<{ runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
   runtimeSettings: () => request<RuntimeSettings>('GET', '/api/settings/runtime'),
   updateRuntimeSettings: (patch: { command?: string }) =>

@@ -5,7 +5,7 @@ import FeishuChannelSettings from './FeishuChannelSettings.vue'
 
 const api = vi.hoisted(() => ({
   listFeishuAccounts: vi.fn(), createFeishuAccount: vi.fn(), updateFeishuAccount: vi.fn(), deleteFeishuAccount: vi.fn(),
-  reconnectFeishuAccount: vi.fn(), feishuDiagnostics: vi.fn(), listFeishuBindings: vi.fn(),
+  reconnectFeishuAccount: vi.fn(), feishuDiagnostics: vi.fn(), listFeishuBindings: vi.fn(), retryFeishuOutbox: vi.fn(),
 }))
 
 vi.mock('../api', () => ({ api }))
@@ -15,7 +15,7 @@ function account(id: string, enabled = false) {
 }
 
 function diagnostics(id: string) {
-  return { account: account(id), bindings: id === 'second' ? 2 : 1, inbox: { waiting: 0, failed: 0, submitted: 0 }, outbox: { pending: 0, deadLetter: 0 } }
+  return { account: account(id), bindings: id === 'second' ? 2 : 1, runtime: { observedConversations: id === 'second' ? 2 : 1 }, inbox: { waiting: 0, failed: 0, submitted: 0, queued: 0 }, outbox: { pending: 0, deadLetter: 0, failures: [] } }
 }
 
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks() })
@@ -96,5 +96,23 @@ describe('FeishuChannelSettings', () => {
 
     expect(wrapper.text()).toContain('已连接')
     wrapper.unmount()
+  })
+
+  it('shows durable delivery failures and retries them explicitly', async () => {
+    api.listFeishuAccounts.mockResolvedValue([account('failed', true)])
+    api.feishuDiagnostics.mockResolvedValue({
+      ...diagnostics('failed'),
+      outbox: { pending: 1, deadLetter: 1, failures: [{ id: 'outbox-1', kind: 'send_card', targetId: 'chat-1', status: 'dead_letter', attempts: 5, lastError: 'request failed', updatedAt: '2026-09-05T00:00:00.000Z' }] },
+    })
+    api.listFeishuBindings.mockResolvedValue([])
+    api.retryFeishuOutbox.mockResolvedValue(undefined)
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('request failed')
+    await wrapper.findAll('button').find(button => button.text() === '立即重试')!.trigger('click')
+    await flushPromises()
+
+    expect(api.retryFeishuOutbox).toHaveBeenCalledWith('failed', 'outbox-1')
   })
 })

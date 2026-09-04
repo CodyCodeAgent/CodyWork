@@ -75,6 +75,13 @@
             </template>
           </aside>
           <section class="chat-main">
+            <div v-if="conversationChannelBinding" :class="['channel-session-strip', { warning: channelBindingHasFailure }]">
+              <span class="channel-session-mark">飞</span>
+              <div><strong>飞书已绑定 · {{ channelScopeLabel(conversationChannelBinding.channelScope) }}</strong><small>{{ conversationChannelBinding.botName || conversationChannelBinding.accountName || 'CodyWork Bot' }} · {{ conversationChannelBinding.connectionState === 'connected' ? '长连接正常' : '长连接' + conversationChannelBinding.connectionState }}</small><p v-if="channelBindingHasFailure">{{ conversationChannelBinding.deadLetters }} 条死信，{{ conversationChannelBinding.pendingDeliveries }} 条待投递。可在设置 → 飞书机器人中诊断和重试。</p></div>
+              <button type="button" @click="copyCurrentConversationLink">复制会话链接</button>
+              <button class="danger" type="button" :disabled="unbindingChannel" @click="unbindCurrentChannel">{{ unbindingChannel ? '解绑中…' : '解除绑定' }}</button>
+            </div>
+            <div v-else-if="channelBindingMessage" class="channel-session-feedback" role="status">{{ channelBindingMessage }}</div>
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
               <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
               <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
@@ -148,6 +155,7 @@ import {
   type ComposerOptions,
   type DashboardSnapshot,
   type Demand,
+  type FeishuChannelBinding,
   type KnowledgeDocument,
   type QuickAction,
   type QuickActionInput,
@@ -205,6 +213,9 @@ const repositorySyncResults = ref<Record<string, RepositorySyncResult>>({})
 const baselineCleanupPending = ref<Repository | null>(null)
 const clearingRepositoryId = ref('')
 const baselineCleanupError = ref('')
+const conversationChannelBindings = ref<FeishuChannelBinding[]>([])
+const channelBindingMessage = ref('')
+const unbindingChannel = ref(false)
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 let quickActionFeedbackTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
@@ -246,6 +257,8 @@ const demandBaselineRepositories = computed(() => {
   return repositories.value.filter(repository => included.has(repository.id))
 })
 const threadContextUsage = computed(() => conversationState.value.contextUsage)
+const conversationChannelBinding = computed(() => conversationChannelBindings.value[0] ?? null)
+const channelBindingHasFailure = computed(() => Boolean((conversationChannelBinding.value?.deadLetters ?? 0) > 0 || (conversationChannelBinding.value?.pendingDeliveries ?? 0) > 0 || conversationChannelBinding.value?.lastError))
 const allSharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
 const hiddenConversationEntryCount = computed(() => hiddenMessageCount(allSharedConversationEntries.value.length, visibleConversationEntryCount.value))
 const sharedConversationEntries = computed(() => allSharedConversationEntries.value.slice(
@@ -795,7 +808,32 @@ async function connect(conversation: Conversation): Promise<void> {
     },
   })
 }
-async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; error.value = ''; await connect(conversation); await scrollToBottom(true) }
+async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; conversationChannelBindings.value = []; channelBindingMessage.value = ''; error.value = ''; await Promise.all([connect(conversation), loadConversationChannelBindings(conversation)]); await scrollToBottom(true) }
+async function loadConversationChannelBindings(conversation: Conversation): Promise<void> {
+  const activeWorkspace = workspace.value
+  if (!activeWorkspace) return
+  try {
+    const bindings = await api.listConversationChannelBindings(activeWorkspace.id, conversation.id)
+    if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) conversationChannelBindings.value = bindings
+  } catch (cause) {
+    if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) channelBindingMessage.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+function channelScopeLabel(scope: string): string { return ({ private: '私聊', group: '群聊', topic: '话题' } as Record<string, string>)[scope] ?? scope }
+async function copyCurrentConversationLink(): Promise<void> {
+  try { await copyText(window.location.href); channelBindingMessage.value = '会话链接已复制。' } catch { channelBindingMessage.value = '复制失败，请从浏览器地址栏复制。' }
+}
+async function unbindCurrentChannel(): Promise<void> {
+  const binding = conversationChannelBinding.value
+  if (!binding || unbindingChannel.value || !confirm('解除飞书与当前会话的绑定？不会删除 Demand、Codex Thread 或任何工作成果。')) return
+  unbindingChannel.value = true
+  channelBindingMessage.value = ''
+  try {
+    await api.unbindFeishuConversation(binding.accountId, binding.id)
+    conversationChannelBindings.value = conversationChannelBindings.value.filter(item => item.id !== binding.id)
+    channelBindingMessage.value = '飞书绑定已解除；原生 Codex Thread 和历史仍然保留。'
+  } catch (cause) { channelBindingMessage.value = cause instanceof Error ? cause.message : String(cause) } finally { unbindingChannel.value = false }
+}
 async function workspaceCreated(created: Workspace): Promise<void> {
   showCreateWorkspace.value = false
   const nextWorkspaces = await api.listWorkspaces()

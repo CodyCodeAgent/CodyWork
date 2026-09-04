@@ -227,7 +227,7 @@ describe('CodyWork channel lifecycle', () => {
 
     await service.startAccount('account-1')
 
-    expect(calls).toEqual(['bindings', 'identity', 'provider', 'inbox', 'flush'])
+    expect(calls).toEqual(['bindings', 'identity', 'inbox', 'flush', 'provider'])
     clearInterval(service.runtimes.get('account-1').flushTimer)
   })
 

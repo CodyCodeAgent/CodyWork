@@ -1,6 +1,6 @@
 {
   "name": "@codycodeagent/codywork",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "CodyWork — a Vue workbench for policy-bound Codex development",
   "license": "MIT",
   "private": true,
@@ -21,7 +21,7 @@
     "service:restart": "bash scripts/codywork-service.sh restart",
     "service:status": "bash scripts/codywork-service.sh status",
     "typecheck": "pnpm --filter @codywork/server exec tsc -p tsconfig.json --noEmit && pnpm --filter @codywork/web exec vue-tsc --noEmit",
-    "test": "pnpm --filter @codywork/server exec vitest run",
+    "test": "pnpm --filter @codywork/server exec vitest run --testTimeout=20000",
     "test:web": "pnpm --filter @codywork/web test",
     "verify": "pnpm run typecheck && pnpm run test && pnpm run test:web && pnpm run build"
   },

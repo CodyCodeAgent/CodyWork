@@ -177,6 +177,31 @@ export class CodyWorkChannelService {
 
   listBindings(accountId: string) { return this.store.listBindings(accountId) }
 
+  listConversationBindings(conversationId: string) {
+    const accounts = new Map(this.store.listAccounts().map(account => [account.id, account]))
+    return this.store.listBindingsForConversation(conversationId).map(binding => {
+      const account = accounts.get(binding.accountId)
+      const diagnostics = this.store.diagnostics(binding.accountId)
+      return {
+        ...binding,
+        accountName: account?.name ?? '飞书机器人',
+        botName: account?.botName ?? '',
+        connectionState: account?.connectionState ?? 'idle',
+        lastError: account?.lastError ?? '',
+        pendingDeliveries: diagnostics.outbox.pending,
+        deadLetters: diagnostics.outbox.deadLetter,
+      }
+    })
+  }
+
+  unbind(accountId: string, bindingId: string): boolean {
+    const binding = this.store.deleteBindingById(accountId, bindingId)
+    if (!binding) return false
+    this.detachBindingObservation(binding)
+    this.store.audit(accountId, 'channel.binding.removed', 'channel_binding', bindingId, true, { conversationId: binding.conversationId })
+    return true
+  }
+
   diagnostics(accountId: string) {
     const account = this.store.getAccount(accountId)
     const bindingConversationIds = new Set(this.store.listBindings(accountId).map(binding => binding.conversationId))
@@ -287,6 +312,11 @@ export class CodyWorkChannelService {
       await this.recoverBindings(accountId)
       const identity = await provider.identity()
       this.store.updateRuntime(accountId, { connectionState: 'connecting', botOpenId: identity.id, botName: identity.name })
+      await this.recoverInbox(accountId)
+      await this.flushAndReconcile(accountId)
+      // New external events are consumed only after durable state converges.
+      // This keeps startup recovery deterministic and prevents fresh traffic
+      // from overtaking older Inbox/Outbox work.
       await provider.start({
         onMessage: message => this.onMessage(message),
         onAction: action => this.onAction(accountId, action),
@@ -295,8 +325,6 @@ export class CodyWorkChannelService {
           if (state === 'failed') this.scheduleAccountReconnect(accountId)
         },
       })
-      await this.recoverInbox(accountId)
-      await this.flushAndReconcile(accountId)
     } catch (error) {
       clearInterval(flushTimer)
       provider.stop()
@@ -360,7 +388,7 @@ export class CodyWorkChannelService {
     }
     else if (item.kind === 'reply_image') remoteMessageId = await provider.replyImage(item.targetId, payload.imageKey ?? '', Boolean(payload.replyInThread), uuid)
     else throw new Error(`Unsupported Feishu delivery kind: ${item.kind}`)
-    this.store.updateRuntime(accountId, { connectionState: provider.getState(), delivery: true })
+    this.store.updateRuntime(accountId, { delivery: true })
     return remoteMessageId ? { remoteMessageId } : {}
   }
 

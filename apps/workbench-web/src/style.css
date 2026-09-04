@@ -339,6 +339,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .conversation-status.failed { background: #c35e63; }
 .conversation-foot { padding: 12px 4px 0; color: #9aa4b3; border-top: 1px solid #edf0f3; font-size: 10px; }
 .chat-main { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.channel-session-strip { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 9px max(18px, calc((100% - 820px) / 2)); color: #285646; background: #eef9f4; border-bottom: 1px solid #cfeadd; }
+.channel-session-strip.warning { color: #7e5420; background: #fff8e8; border-bottom-color: #f1dfb4; }
+.channel-session-mark { display: grid; width: 28px; height: 28px; place-items: center; color: #fff; background: #25a76f; border-radius: 8px; font-size: 12px; font-weight: 800; }
+.channel-session-strip.warning .channel-session-mark { background: #d48b2d; }
+.channel-session-strip strong, .channel-session-strip small { display: block; }
+.channel-session-strip small { margin-top: 2px; color: inherit; opacity: .72; font-size: 10px; }
+.channel-session-strip p { margin: 3px 0 0; color: #9a5d16; font-size: 10px; }
+.channel-session-strip button { padding: 6px 9px; color: inherit; background: rgba(255,255,255,.72); border: 1px solid currentColor; border-radius: 8px; font-size: 10px; cursor: pointer; }
+.channel-session-strip button.danger { color: #a8404c; }
+.channel-session-feedback { padding: 7px max(18px, calc((100% - 820px) / 2)); color: #536071; background: #f4f6fa; border-bottom: 1px solid var(--line); font-size: 10px; }
 .chat-scroll { flex: 1; overflow: auto; padding: 28px max(22px, calc((100% - 820px) / 2)); }
 .chat-empty { display: grid; place-items: center; padding: 95px 20px; color: #78869a; text-align: center; }
 .chat-empty .workspace-large-mark { width: 51px; height: 51px; border-radius: 14px; font-size: 16px; }

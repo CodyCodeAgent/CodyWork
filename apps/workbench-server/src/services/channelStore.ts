@@ -71,6 +71,17 @@ type OutboxRow = {
   id: string; provider: string; account_id: string; kind: string; target_id: string; payload_json: string
   dedupe_key: string; status: string; attempts: number; available_at: string; lease_expires_at: string | null
   remote_message_id: string | null; revision: number | null; terminal: number; last_error: string | null
+  created_at: string; updated_at: string
+}
+
+export type ChannelFailedDelivery = {
+  id: string
+  kind: string
+  targetId: string
+  status: 'retry_wait' | 'dead_letter'
+  attempts: number
+  lastError: string
+  updatedAt: string
 }
 
 export type CodyWorkChannelBinding = ReturnType<typeof toBinding>
@@ -173,7 +184,10 @@ export class ChannelStore implements ChannelOutboxStore {
       throw new Error('启用机器人前至少配置一个允许用户，或明确允许所有用户')
     }
     if (id) this.getAccount(id)
-    else if (!input.appSecret?.trim()) throw new Error('App Secret 不能为空')
+    else {
+      if (this.listAccounts().length > 0) throw new Error('一期只支持一个 CodyWork 飞书机器人；请更新或删除现有配置')
+      if (!input.appSecret?.trim()) throw new Error('App Secret 不能为空')
+    }
   }
 
   listAccounts(): ChannelAccount[] {
@@ -234,13 +248,14 @@ export class ChannelStore implements ChannelOutboxStore {
     if (result.changes === 0) throw new Error('飞书机器人不存在')
   }
 
-  updateRuntime(id: string, input: { connectionState: string; error?: string; botOpenId?: string; botName?: string; connected?: boolean; event?: boolean; delivery?: boolean }): void {
+  updateRuntime(id: string, input: { connectionState?: string; error?: string; botOpenId?: string; botName?: string; connected?: boolean; event?: boolean; delivery?: boolean }): void {
     const now = nowIso()
-    this.database.db.prepare(`UPDATE channel_accounts SET connection_state = ?, last_error = ?,
+    this.database.db.prepare(`UPDATE channel_accounts SET connection_state = COALESCE(?, connection_state),
+      last_error = CASE WHEN ? THEN ? ELSE last_error END,
       bot_open_id = COALESCE(?, bot_open_id), bot_name = COALESCE(?, bot_name),
       connected_at = CASE WHEN ? THEN ? ELSE connected_at END, last_event_at = CASE WHEN ? THEN ? ELSE last_event_at END,
       last_delivery_at = CASE WHEN ? THEN ? ELSE last_delivery_at END, updated_at = ? WHERE id = ?`)
-      .run(input.connectionState, input.error?.slice(0, 1_000) || null, input.botOpenId || null, input.botName || null,
+      .run(input.connectionState ?? null, input.error !== undefined ? 1 : 0, input.error?.slice(0, 1_000) || null, input.botOpenId || null, input.botName || null,
         input.connected ? 1 : 0, now, input.event ? 1 : 0, now, input.delivery ? 1 : 0, now, now, id)
   }
 
@@ -257,6 +272,10 @@ export class ChannelStore implements ChannelOutboxStore {
 
   listBindings(accountId: string) {
     return (this.database.db.prepare('SELECT * FROM channel_bindings WHERE account_id = ? ORDER BY updated_at DESC').all(accountId) as unknown as BindingRow[]).map(toBinding)
+  }
+
+  listBindingsForConversation(conversationId: string) {
+    return (this.database.db.prepare('SELECT * FROM channel_bindings WHERE conversation_id = ? ORDER BY updated_at DESC').all(conversationId) as unknown as BindingRow[]).map(toBinding)
   }
 
   hasBindingForConversation(conversationId: string): boolean {
@@ -279,6 +298,13 @@ export class ChannelStore implements ChannelOutboxStore {
 
   deleteBinding(accountId: string, conversationKey: string): boolean {
     return this.database.db.prepare('DELETE FROM channel_bindings WHERE account_id = ? AND conversation_key = ?').run(accountId, conversationKey).changes > 0
+  }
+
+  deleteBindingById(accountId: string, bindingId: string): CodyWorkChannelBinding | null {
+    const binding = this.database.db.prepare('SELECT * FROM channel_bindings WHERE id = ? AND account_id = ?').get(bindingId, accountId) as BindingRow | undefined
+    if (!binding) return null
+    this.database.db.prepare('DELETE FROM channel_bindings WHERE id = ? AND account_id = ?').run(bindingId, accountId)
+    return toBinding(binding)
   }
 
   claimInbound(message: ChannelInboundMessage): { item: ChannelInboxItem; created: boolean } {
@@ -496,7 +522,7 @@ export class ChannelStore implements ChannelOutboxStore {
     this.database.db.exec('BEGIN IMMEDIATE')
     try {
       const rows = this.database.db.prepare(`SELECT * FROM channel_outbox WHERE provider = ? AND account_id = ?
-        AND ((status IN ('pending','retry_wait') AND available_at <= ?) OR (status = 'leased' AND lease_expires_at <= ?))
+        AND ((status IN ('pending','retry_wait') AND available_at <= ?) OR (status IN ('leased','sending') AND lease_expires_at <= ?))
         ORDER BY available_at, created_at LIMIT ?`).all(input.provider, input.accountId, input.nowIso, input.nowIso, input.limit) as unknown as OutboxRow[]
       const claim = this.database.db.prepare("UPDATE channel_outbox SET status = 'leased', attempts = attempts + 1, lease_expires_at = ?, updated_at = ? WHERE id = ?")
       for (const row of rows) claim.run(leaseUntil, input.nowIso, row.id)
@@ -505,6 +531,11 @@ export class ChannelStore implements ChannelOutboxStore {
     } catch (error) {
       this.database.db.exec('ROLLBACK'); throw error
     }
+  }
+
+  async markSending(id: string): Promise<void> {
+    const result = this.database.db.prepare("UPDATE channel_outbox SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'leased'").run(nowIso(), id)
+    if (result.changes === 0) throw new Error('投递 lease 已失效，不能开始发送')
   }
 
   async markSent(id: string, remoteMessageId?: string): Promise<void> {
@@ -541,9 +572,29 @@ export class ChannelStore implements ChannelOutboxStore {
     return {
       bindings: count('channel_bindings'), inbox: {
         waiting: count('channel_inbox', 'waiting_binding'), failed: count('channel_inbox', 'failed'), submitted: count('channel_inbox', 'submitted'),
+        queued: count('channel_inbox', 'ready') + count('channel_inbox', 'submitting') + count('channel_inbox', 'submitted'),
       },
-      outbox: { pending: count('channel_outbox', 'pending') + count('channel_outbox', 'retry_wait'), deadLetter: count('channel_outbox', 'dead_letter') },
+      outbox: {
+        pending: count('channel_outbox', 'pending') + count('channel_outbox', 'leased') + count('channel_outbox', 'sending') + count('channel_outbox', 'retry_wait'),
+        deadLetter: count('channel_outbox', 'dead_letter'),
+        failures: this.listFailedDeliveries(accountId),
+      },
     }
+  }
+
+  listFailedDeliveries(accountId: string, limit = 20): ChannelFailedDelivery[] {
+    const rows = this.database.db.prepare(`SELECT id, kind, target_id, status, attempts, last_error, updated_at
+      FROM channel_outbox WHERE account_id = ? AND status IN ('retry_wait','dead_letter')
+      ORDER BY updated_at DESC LIMIT ?`).all(accountId, Math.max(1, Math.min(100, limit))) as Array<Pick<OutboxRow, 'id' | 'kind' | 'target_id' | 'status' | 'attempts' | 'last_error' | 'updated_at'>>
+    return rows.map(row => ({
+      id: row.id,
+      kind: row.kind,
+      targetId: row.target_id,
+      status: row.status === 'retry_wait' ? 'retry_wait' : 'dead_letter',
+      attempts: row.attempts,
+      lastError: row.last_error ?? '',
+      updatedAt: row.updated_at,
+    }))
   }
 
   audit(accountId: string | null, action: string, targetType: string, targetId: string, success: boolean, metadata: unknown = {}, error = ''): void {
