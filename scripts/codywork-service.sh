@@ -64,7 +64,7 @@ load_service_environment() {
     key="${line%%=*}"
     value="${line#*=}"
     case "$key" in
-      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD)
+      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD|CODYWORK_PUBLIC_ORIGIN)
         export "$key=$value"
         ;;
       *)

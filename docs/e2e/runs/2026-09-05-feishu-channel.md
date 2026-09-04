@@ -11,7 +11,7 @@
 ## Release under test
 
 - CodyWebCore: `v0.38.7` (`4c71aad`).
-- CodyWork: `v0.2.2`, with Server and Web both pinned to Core `v0.38.7`.
+- CodyWork: `v0.2.3`, with Server and Web both pinned to Core `v0.38.7`.
 - Browser: Safari/Chrome through computer-use automation.
 - Persistence: production SQLite channel tables; transcript remains native Codex Thread state.
 - Secrets: configured through the CodyWork credential flow and never copied into this report.
