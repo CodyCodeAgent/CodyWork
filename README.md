@@ -19,6 +19,10 @@ The server listens on `127.0.0.1:3210`; the Vue application is served from
 pnpm verify
 ```
 
+Every functional iteration must also complete the natural-language browser
+regression flow in [`docs/e2e/README.md`](docs/e2e/README.md). The cases are
+written so an AI test executor can run and report them end to end.
+
 ## Production
 
 ```bash
