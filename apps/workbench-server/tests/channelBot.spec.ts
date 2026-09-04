@@ -153,6 +153,21 @@ describe('CodyWork channel lifecycle', () => {
     expect(service.publishRequest).toHaveBeenCalledWith(value, requested)
   })
 
+  it('expires durable pending requests whose turn is already terminal in the owner snapshot', async () => {
+    const service = bareService()
+    const value = binding('binding-1')
+    service.conversations = { history: async () => ({ events: [
+      event('turn.started', { id: 'start', turnId: 'turn-stopped' }),
+      event('approval.requested', { id: 'request', turnId: 'turn-stopped', data: { requestId: '0' } }),
+      event('turn.interrupted', { id: 'stop', turnId: 'turn-stopped' }),
+    ], watermark: 3 }) }
+    service.expireTurnRequests = vi.fn()
+
+    await service.observe(value)
+
+    expect(service.expireTurnRequests).toHaveBeenCalledWith(value.conversationId, 'turn-stopped', 'turn.interrupted')
+  })
+
   it('attaches persisted binding observers before connecting the external provider', async () => {
     const service = bareService()
     const calls: string[] = []

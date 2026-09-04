@@ -567,6 +567,11 @@ export class CodyWorkChannelService {
       this.observed.set(binding.conversationId, observation)
       const buffered = this.pendingConversationEvents.get(binding.conversationId) ?? []
       this.pendingConversationEvents.delete(binding.conversationId)
+      for (const turn of Object.values(state.turns)) {
+        if (turn.lifecycle === 'completed' || turn.lifecycle === 'failed' || turn.lifecycle === 'interrupted') {
+          this.expireTurnRequests(binding.conversationId, turn.id, `turn.${turn.lifecycle}` as ConversationEvent['type'])
+        }
+      }
       const snapshotEventIds = new Set(snapshot.events.map(event => event.id))
       const pendingRequestIds = new Set(state.pendingRequests.map(request => request.id))
       for (const event of snapshot.events) {
