@@ -649,6 +649,9 @@ export class CodyWorkChannelService {
         if (requestBinding) void this.resolveRequest(requestBinding, event, request).catch(error => this.failAccount(requestBinding.accountId, 'channel.request.resolve', error))
       }
     }
+    if (event.turnId && (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted' || event.type === 'turn.disconnected')) {
+      this.expireTurnRequests(conversationId, event.turnId, event.type)
+    }
     for (const bindingId of [...observation.bindingIds]) {
       const binding = this.bindingOrDetach(observation, bindingId)
       if (!binding) continue
@@ -867,6 +870,26 @@ export class CodyWorkChannelService {
         await this.enqueue(binding.accountId, { kind: 'update_card', targetId: request.remoteMessageId, payload: { card: feishuTextCard('CodyWork 请求已处理', '该请求已在 CodyWork 浏览器或飞书端完成。', { color: 'green' }) }, dedupeKey: `request:${request.id}:externally-resolved`, terminal: true })
       }
     } catch { /* browser may have resolved a request not mirrored to Feishu */ }
+  }
+
+  private expireTurnRequests(conversationId: string, turnId: string, terminalType: ConversationEvent['type']): void {
+    const requests = this.store.listPendingInteractiveRequestsForTurn(conversationId, turnId)
+    const message = terminalType === 'turn.interrupted'
+      ? '对应回复已停止，不能再处理这项请求。'
+      : terminalType === 'turn.completed'
+        ? '对应回复已经结束，这项请求已失效。'
+        : '对应回复未能继续，这项请求已失效。'
+    for (const request of requests) {
+      this.store.updateInteractiveRequest(request.accountId, request.id, { status: 'expired' })
+      if (!request.remoteMessageId) continue
+      void this.enqueue(request.accountId, {
+        kind: 'update_card',
+        targetId: request.remoteMessageId,
+        payload: { card: feishuTextCard('CodyWork 请求已结束', message, { color: terminalType === 'turn.interrupted' ? 'grey' : 'red' }) },
+        dedupeKey: `request:${request.id}:terminal:${terminalType}`,
+        terminal: true,
+      }).catch(error => this.failAccount(request.accountId, 'channel.request.expire', error))
+    }
   }
 
   private async handleCommand(binding: CodyWorkChannelBinding, inboxId: string, command: string): Promise<void> {

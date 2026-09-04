@@ -314,6 +314,37 @@ describe('CodyWork channel lifecycle', () => {
     expect(publishRequest.mock.calls.map(([value]: [CodyWorkChannelBinding]) => value.accountId).sort()).toEqual(['account-1', 'account-2'])
   })
 
+  it('expires an unresolved approval when its native turn terminates', async () => {
+    const service = bareService()
+    const value = binding('binding-1')
+    const request = {
+      id: 'request-row', accountId: value.accountId, bindingId: value.id, requestKey: 'request-key', requestId: '0',
+      turnId: 'turn-1', kind: 'approval', remoteMessageId: 'remote-card', requesterIdentity: value.ownerIdentity,
+      status: 'pending', request: {},
+    }
+    service.store = {
+      getTurnLinkByCommand: () => null,
+      getTurnLinkByConversationTurn: () => null,
+      getBinding: () => value,
+      listPendingInteractiveRequestsForTurn: () => [request],
+      updateInteractiveRequest: vi.fn(),
+    }
+    service.enqueue = vi.fn(async () => ({ id: 'outbox-1' }))
+    service.scheduleRender = vi.fn()
+    service.observed.set(value.conversationId, {
+      state: createConversationState(value.threadId), bindingIds: new Set([value.id]),
+    })
+
+    service.onConversationEvent(value.conversationId, event('turn.interrupted', { turnId: 'turn-1' }))
+    await Promise.resolve()
+
+    expect(service.store.updateInteractiveRequest).toHaveBeenCalledWith(value.accountId, request.id, { status: 'expired' })
+    expect(service.enqueue).toHaveBeenCalledWith(value.accountId, expect.objectContaining({
+      kind: 'update_card', targetId: request.remoteMessageId,
+      payload: { card: expect.objectContaining({ header: expect.any(Object) }) },
+    }))
+  })
+
   it('renders approval cards from an allowlisted summary without exposing the environment', async () => {
     const service = bareService()
     const value = binding('binding-1')

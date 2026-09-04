@@ -467,6 +467,14 @@ export class ChannelStore implements ChannelOutboxStore {
     return rows.map(row => this.toInteractiveRequest(row))
   }
 
+  listPendingInteractiveRequestsForTurn(conversationId: string, turnId: string): ChannelInteractiveRequest[] {
+    const rows = this.database.db.prepare(`SELECT requests.* FROM channel_interactive_requests AS requests
+      JOIN channel_bindings AS bindings ON bindings.id = requests.binding_id
+      WHERE bindings.conversation_id = ? AND requests.turn_id = ? AND requests.status = 'pending'
+      ORDER BY requests.created_at`).all(conversationId, turnId) as Array<Record<string, unknown>>
+    return rows.map(row => this.toInteractiveRequest(row))
+  }
+
   updateInteractiveRequest(accountId: string, id: string, patch: { status: string; remoteMessageId?: string }): void {
     this.database.db.prepare('UPDATE channel_interactive_requests SET status = ?, remote_message_id = COALESCE(?, remote_message_id), updated_at = ? WHERE account_id = ? AND id = ?')
       .run(patch.status, patch.remoteMessageId ?? null, nowIso(), accountId, id)

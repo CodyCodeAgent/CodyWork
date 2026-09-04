@@ -124,6 +124,7 @@ describe('CodyWork channel persistence', () => {
     expect(store.getInteractiveRequestByConversation('conversation-1', '0', 'turn-1')).toMatchObject({ id: first.id })
     expect(store.getInteractiveRequestByConversation('conversation-1', '0', 'turn-2')).toMatchObject({ id: afterRestart.id })
     expect(new Set(store.listInteractiveRequestsByConversation('conversation-1', '0').map(row => row.id))).toEqual(new Set([afterRestart.id, first.id]))
+    expect(store.listPendingInteractiveRequestsForTurn('conversation-1', 'turn-2')).toMatchObject([{ id: afterRestart.id }])
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
