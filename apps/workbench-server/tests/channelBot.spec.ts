@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createConversationState } from '@codycodeagent/cody-web-core/conversation'
 import type { ChannelInboundMessage, ChannelInboxItem } from '@codycodeagent/cody-web-core/channel'
 import type { ConversationEvent } from '../src/services/conversations.js'
-import { CodyWorkChannelService } from '../src/services/channelBot.js'
+import { CodyWorkChannelService, feishuProjectionBody } from '../src/services/channelBot.js'
 import type { ChannelAccountSecret, CodyWorkChannelBinding } from '../src/services/channelStore.js'
 
 function binding(id: string, conversationId = 'conversation-1'): CodyWorkChannelBinding {
@@ -46,6 +49,42 @@ function bareService(): any {
 }
 
 describe('CodyWork channel lifecycle', () => {
+  it('removes local Markdown image syntax from Feishu cards while retaining a readable placeholder', () => {
+    expect(feishuProjectionBody({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true, revision: 1,
+      assistantText: 'Done\n\n![CHANNEL IMAGE OK](/safe/image.png)', assistantImages: ['/safe/image.png'], error: '',
+    })).toBe('Done\n\n🖼️ CHANNEL IMAGE OK')
+  })
+
+  it('uploads a durable local image delivery and replies inside its source topic', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'codywork-channel-'))
+    const path = join(root, 'result.png')
+    await writeFile(path, 'synthetic-image')
+    try {
+      const service = bareService()
+      service.store = { updateRuntime: vi.fn() }
+      service.isAllowedChannelImage = vi.fn(async () => true)
+      const provider = {
+        uploadImage: vi.fn(async () => 'image-key'),
+        replyImage: vi.fn(async () => 'remote-image'),
+        sendImage: vi.fn(), getState: () => 'connected',
+      }
+
+      const result = await service.deliver(provider, 'account-1', {
+        id: 'outbox-1', provider: 'feishu', accountId: 'account-1', kind: 'send_local_image', targetId: 'chat-1',
+        payload: { path, root, replyMessageId: 'source-message', replyInThread: true }, dedupeKey: 'image-1',
+        status: 'leased', attempts: 1, availableAtIso: '2026-09-05T00:00:00.000Z',
+      })
+
+      expect(provider.uploadImage).toHaveBeenCalledWith(Buffer.from('synthetic-image'))
+      expect(provider.replyImage).toHaveBeenCalledWith('source-message', 'image-key', true, expect.any(String))
+      expect(provider.sendImage).not.toHaveBeenCalled()
+      expect(result).toEqual({ remoteMessageId: 'remote-image' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('applies the conversation allowlist to group topics as well as root group messages', () => {
     const service = bareService()
     const account = {

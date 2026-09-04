@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { extname, isAbsolute, relative, resolve } from 'node:path'
 import {
   ReliableChannelOutbox,
   channelCommandId,
   channelConversationKey,
   projectChannelTurn,
+  stripMarkdownImages,
   type ChannelInboundMessage,
   type ChannelOutboxItem,
 } from '@codycodeagent/cody-web-core/channel'
@@ -41,6 +42,9 @@ type DeliveryPayload = {
   text?: string
   card?: FeishuCard
   imageKey?: string
+  path?: string
+  root?: string
+  replyMessageId?: string
   replyInThread?: boolean
 }
 
@@ -52,6 +56,7 @@ type CodyWorkInboundMessage = ChannelInboundMessage & {
 }
 
 const PROJECTION_THROTTLE_MS = 700
+const FEISHU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'])
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -78,8 +83,12 @@ function statusColor(status: ReturnType<typeof projectChannelTurn>['status']): s
   return 'blue'
 }
 
+export function feishuProjectionBody(projection: ReturnType<typeof projectChannelTurn>): string {
+  return stripMarkdownImages(projection.assistantText, image => image.alt ? `🖼️ ${image.alt}` : '🖼️ 图片')
+}
+
 function projectionCard(projection: ReturnType<typeof projectChannelTurn>, prompt: string): FeishuCard {
-  const body = projection.assistantText || (projection.error ? `**${projection.error}**` : 'CodyWork 已接收消息，正在等待 Codex 输出…')
+  const body = feishuProjectionBody(projection) || (projection.error ? `**${projection.error}**` : 'CodyWork 已接收消息，正在等待 Codex 输出…')
   return feishuTextCard(`CodyWork · ${statusLabel(projection.status)}`, body, {
     color: statusColor(projection.status),
     note: `问题：${prompt.slice(0, 180)}${prompt.length > 180 ? '…' : ''}`,
@@ -340,6 +349,15 @@ export class CodyWorkChannelService {
     else if (item.kind === 'send_user_card') remoteMessageId = await provider.sendUserCard(item.targetId, payload.card ?? {}, uuid)
     else if (item.kind === 'update_card') await provider.updateCard(item.targetId, payload.card ?? {})
     else if (item.kind === 'send_image') remoteMessageId = await provider.sendImage(item.targetId, payload.imageKey ?? '', uuid)
+    else if (item.kind === 'send_local_image') {
+      const path = payload.path ?? ''
+      const root = payload.root ?? ''
+      if (!await this.isAllowedChannelImage(path, root)) throw new Error('Channel image is outside the bound Demand or uses an unsupported format')
+      const imageKey = await provider.uploadImage(await readFile(path))
+      remoteMessageId = payload.replyMessageId
+        ? await provider.replyImage(payload.replyMessageId, imageKey, payload.replyInThread === true, uuid)
+        : await provider.sendImage(item.targetId, imageKey, uuid)
+    }
     else if (item.kind === 'reply_image') remoteMessageId = await provider.replyImage(item.targetId, payload.imageKey ?? '', Boolean(payload.replyInThread), uuid)
     else throw new Error(`Unsupported Feishu delivery kind: ${item.kind}`)
     this.store.updateRuntime(accountId, { connectionState: provider.getState(), delivery: true })
@@ -521,7 +539,7 @@ export class CodyWorkChannelService {
     const presentation = this.store.createPresentation({ accountId: inbox.message.accountId, bindingId: binding.id, turnLinkId, purpose: 'turn', state: { prompt } })
     this.store.updateInbox(inboxId, 'submitting', { bindingId: binding.id, clientCommandId: commandId })
     await this.observe(binding)
-    const initial = projectionCard({ threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', error: '', terminal: false, revision: 0 }, prompt)
+    const initial = projectionCard({ threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0 }, prompt)
     const sent = await this.enqueue(inbox.message.accountId, {
       kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: inbox.message.conversation.scope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
     })
@@ -753,7 +771,7 @@ export class CodyWorkChannelService {
       const inboxStatus = projection.status === 'completed' ? 'completed' : 'failed'
       this.store.updateInbox(link.inboxId, inboxStatus, { turnId, lastError: projection.error || null })
       this.store.updateTurnLink(link.clientCommandId, { turnId, status: projection.status })
-      if (projection.status === 'completed') await this.publishAssistantImages(binding, observation.state, turnId, presentation)
+      if (projection.status === 'completed') await this.publishAssistantImages(binding, projection, presentation, link.inboxId)
     }
   }
 
@@ -781,17 +799,54 @@ export class CodyWorkChannelService {
     return typed?.id ? this.store.getPresentation(typed.id) : null
   }
 
-  private async publishAssistantImages(binding: CodyWorkChannelBinding, state: ConversationState, turnId: string, presentation: ChannelPresentation): Promise<void> {
-    const runtime = this.runtimes.get(binding.accountId)
-    if (!runtime) return
-    const images = [...new Set(state.messages.filter(message => message.role === 'assistant' && message.turnId === turnId).flatMap(message => message.images ?? []))]
-    for (const [index, path] of images.entries()) {
-      if (!path.startsWith('/')) continue
-      const buffer = await readFile(path).catch(() => null)
-      if (!buffer) continue
-      const imageKey = await runtime.provider.uploadImage(buffer)
-      await this.enqueue(binding.accountId, { kind: 'send_image', targetId: binding.channelConversationId, payload: { imageKey }, dedupeKey: `${presentation.id}:image:${index}`, terminal: true })
+  private async publishAssistantImages(
+    binding: CodyWorkChannelBinding,
+    projection: ReturnType<typeof projectChannelTurn>,
+    presentation: ChannelPresentation,
+    inboxId: string,
+  ): Promise<void> {
+    const workspace = this.workspaces.get(binding.workspaceId)
+    const demand = listDemands(this.database, workspace).find(item => item.id === binding.demandId)
+    if (!demand) return
+    const root = await realpath(demand.path).catch(() => '')
+    if (!root) return
+    const inbox = this.store.getInbox(inboxId)
+    const source = inbox.message as CodyWorkInboundMessage
+    const replyMessageId = source.replyMessageId || inbox.message.messageId
+    const paths = await this.channelImagePaths(root, projection.assistantImages)
+    for (const [index, path] of paths.entries()) {
+      await this.enqueue(binding.accountId, {
+        kind: 'send_local_image',
+        targetId: binding.channelConversationId,
+        payload: {
+          path,
+          root,
+          ...(inbox.message.conversation.scope === 'topic' ? { replyMessageId, replyInThread: true } : {}),
+        },
+        dedupeKey: `${presentation.id}:image:${index}`,
+        terminal: true,
+      })
     }
+  }
+
+  private async channelImagePaths(root: string, candidates: string[]): Promise<string[]> {
+    const paths: string[] = []
+    for (const candidate of [...new Set(candidates)]) {
+      if (!isAbsolute(candidate) || !FEISHU_IMAGE_EXTENSIONS.has(extname(candidate).toLowerCase())) continue
+      const path = await realpath(candidate).catch(() => '')
+      if (!path || !await this.isAllowedChannelImage(path, root)) continue
+      paths.push(path)
+    }
+    return paths
+  }
+
+  private async isAllowedChannelImage(path: string, root: string): Promise<boolean> {
+    if (!isAbsolute(path) || !isAbsolute(root) || !FEISHU_IMAGE_EXTENSIONS.has(extname(path).toLowerCase())) return false
+    const [realRoot, realPath] = await Promise.all([realpath(root).catch(() => ''), realpath(path).catch(() => '')])
+    if (!realRoot || !realPath) return false
+    const inside = relative(realRoot, realPath)
+    if (!inside || inside.startsWith('..') || isAbsolute(inside)) return false
+    return stat(realPath).then(metadata => metadata.isFile() && metadata.size > 0 && metadata.size <= 10 * 1024 * 1024).catch(() => false)
   }
 
   private async publishRequest(binding: CodyWorkChannelBinding, event: ConversationEvent): Promise<void> {
