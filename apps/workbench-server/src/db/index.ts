@@ -320,7 +320,9 @@ export class WorkbenchDb {
         id TEXT PRIMARY KEY,
         account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
         binding_id TEXT NOT NULL REFERENCES channel_bindings(id) ON DELETE CASCADE,
+        request_key TEXT NOT NULL,
         request_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         remote_message_id TEXT,
         requester_identity TEXT NOT NULL,
@@ -328,7 +330,7 @@ export class WorkbenchDb {
         request_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        UNIQUE(account_id, request_id)
+        UNIQUE(account_id, request_key)
       );
       CREATE TABLE IF NOT EXISTS channel_audit_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -343,6 +345,51 @@ export class WorkbenchDb {
       );
       CREATE INDEX IF NOT EXISTS channel_audit_recent ON channel_audit_events(account_id, created_at DESC);
     `)
+    const interactiveRequestColumns = this.db.prepare('PRAGMA table_info(channel_interactive_requests)').all() as { name?: string }[]
+    if (!interactiveRequestColumns.some(column => column.name === 'request_key')) {
+      // App Server request ids are process-local counters and restart from 0.
+      // Rebuild the table so durable identity includes the native Turn instead
+      // of incorrectly suppressing a new request after deployment.
+      this.db.exec('PRAGMA foreign_keys = OFF;')
+      try {
+        this.db.exec(`
+          BEGIN IMMEDIATE;
+          ALTER TABLE channel_interactive_requests RENAME TO channel_interactive_requests_retired;
+          CREATE TABLE channel_interactive_requests (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+            binding_id TEXT NOT NULL REFERENCES channel_bindings(id) ON DELETE CASCADE,
+            request_key TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            remote_message_id TEXT,
+            requester_identity TEXT NOT NULL,
+            status TEXT NOT NULL,
+            request_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(account_id, request_key)
+          );
+          INSERT INTO channel_interactive_requests (
+            id, account_id, binding_id, request_key, request_id, turn_id, kind, remote_message_id,
+            requester_identity, status, request_json, created_at, updated_at
+          ) SELECT id, account_id, binding_id, id, request_id, '', kind, remote_message_id,
+            requester_identity, status, request_json, created_at, updated_at
+          FROM channel_interactive_requests_retired;
+          DROP TABLE channel_interactive_requests_retired;
+          COMMIT;
+        `)
+      } catch (error) {
+        if (this.db.isTransaction) this.db.exec('ROLLBACK;')
+        throw error
+      } finally {
+        this.db.exec('PRAGMA foreign_keys = ON;')
+      }
+    }
+    // Raw approval payloads can contain inherited process environment values.
+    // They are not needed for resolution; scrub records written by older builds.
+    this.db.exec("UPDATE channel_interactive_requests SET request_json = '{}' WHERE request_json <> '{}';")
     // Direct cut-over: native Codex threads are the sole conversation history.
     // Rebuild the metadata tables once so no retired provider/event/goal shape
     // survives in the active schema. Message history is intentionally not copied.

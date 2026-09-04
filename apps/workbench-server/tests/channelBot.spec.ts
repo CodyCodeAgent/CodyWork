@@ -40,7 +40,7 @@ function event(type: ConversationEvent['type'], input: Partial<ConversationEvent
 function bareService(): any {
   const service = Object.create(CodyWorkChannelService.prototype)
   Object.assign(service, {
-    observed: new Map(), observationInitializations: new Map(), renderTimers: new Map(), reconnectTimers: new Map(), runtimes: new Map(),
+    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), reconnectTimers: new Map(), runtimes: new Map(),
   })
   return service
 }
@@ -106,23 +106,20 @@ describe('CodyWork channel lifecycle', () => {
     const service = bareService()
     const calls: string[] = []
     const applied: ConversationEvent[] = []
-    let listener: ((value: ConversationEvent) => void) | undefined
     service.conversations = {
-      subscribeChannel: (_conversationId: string, callback: (value: ConversationEvent) => void) => {
-        calls.push('subscribe'); listener = callback; return vi.fn()
-      },
       history: async () => {
         calls.push('history')
-        listener?.(event('turn.started', { turnId: 'turn-new', ownerRevision: 6 }))
-        listener?.(event('turn.started', { id: 'snapshot-event', turnId: 'turn-old', ownerRevision: 5 }))
+        service.receiveConversationEvent(event('turn.started', { turnId: 'turn-new', ownerRevision: 6 }))
+        service.receiveConversationEvent(event('turn.started', { id: 'snapshot-event', turnId: 'turn-old', ownerRevision: 5 }))
         return { events: [event('turn.started', { id: 'snapshot-event', turnId: 'turn-old', ownerRevision: 5 })], watermark: 5 }
       },
     }
+    service.store = { hasBindingForConversation: () => true }
     service.onConversationEventSafely = (_conversationId: string, value: ConversationEvent) => applied.push(value)
 
     await service.observe(binding('binding-1'))
 
-    expect(calls).toEqual(['subscribe', 'history'])
+    expect(calls).toEqual(['history'])
     expect(applied.map(value => value.turnId)).toEqual(['turn-new'])
   })
 
@@ -130,20 +127,30 @@ describe('CodyWork channel lifecycle', () => {
     const service = bareService()
     const applied: ConversationEvent[] = []
     const history = vi.fn(async () => { throw new Error('list_turns is not supported yet') })
-    service.conversations = {
-      subscribeChannel: (_conversationId: string, callback: (value: ConversationEvent) => void) => {
-        callback(event('thread.attached', { ownerRevision: 1 }))
-        return vi.fn()
-      },
-      history,
-    }
+    service.conversations = { history }
     service.onConversationEventSafely = (_conversationId: string, value: ConversationEvent) => applied.push(value)
 
     await service.observe(binding('binding-new'), { emptyHistory: true })
 
     expect(history).not.toHaveBeenCalled()
     expect(service.observed.get('conversation-1')?.state).toEqual(createConversationState('thread-1'))
-    expect(applied.map(value => value.type)).toEqual(['thread.attached'])
+    expect(applied).toEqual([])
+  })
+
+  it('re-publishes only unresolved interactive requests recovered from the owner snapshot', async () => {
+    const service = bareService()
+    const value = binding('binding-1')
+    const requested = event('approval.requested', { id: 'request-event', turnId: 'turn-pending', data: { requestId: '0', method: 'exec' } })
+    const resolved = event('approval.resolved', { id: 'resolved-event', turnId: 'turn-resolved', data: { requestId: '1' } })
+    service.conversations = { history: async () => ({ events: [requested, event('approval.requested', { id: 'old-request', turnId: 'turn-resolved', data: { requestId: '1', method: 'exec' } }), resolved], watermark: 3 }) }
+    service.store = { getTurnLinkByConversationTurn: () => null, getBinding: () => value }
+    service.publishRequest = vi.fn(async () => undefined)
+
+    await service.observe(value)
+    await Promise.resolve()
+
+    expect(service.publishRequest).toHaveBeenCalledTimes(1)
+    expect(service.publishRequest).toHaveBeenCalledWith(value, requested)
   })
 
   it('attaches persisted binding observers before connecting the external provider', async () => {
@@ -270,7 +277,7 @@ describe('CodyWork channel lifecycle', () => {
     service.publishRequest = publishRequest
     service.scheduleRender = vi.fn()
     service.observed.set('conversation-1', {
-      state: createConversationState('thread-1'), bindingIds: new Set([source.id, other.id]), unsubscribe: vi.fn(),
+      state: createConversationState('thread-1'), bindingIds: new Set([source.id, other.id]),
     })
 
     service.onConversationEvent('conversation-1', event('approval.requested', {
@@ -296,7 +303,7 @@ describe('CodyWork channel lifecycle', () => {
     service.publishRequest = publishRequest
     service.scheduleRender = vi.fn()
     service.observed.set('conversation-1', {
-      state: createConversationState('thread-1'), bindingIds: new Set(rows.keys()), unsubscribe: vi.fn(),
+      state: createConversationState('thread-1'), bindingIds: new Set(rows.keys()),
     })
 
     service.onConversationEvent('conversation-1', event('question.requested', {
@@ -344,7 +351,7 @@ describe('CodyWork channel lifecycle', () => {
     }
     service.renderCommandFailure = renderCommandFailure
     service.observed.set(value.conversationId, {
-      state: createConversationState(value.threadId), bindingIds: new Set([value.id]), unsubscribe: vi.fn(),
+      state: createConversationState(value.threadId), bindingIds: new Set([value.id]),
     })
 
     service.onConversationEvent(value.conversationId, event('command.failed', {
@@ -358,15 +365,13 @@ describe('CodyWork channel lifecycle', () => {
 
   it('removes the observation when its final binding is detached', () => {
     const service = bareService()
-    const unsubscribe = vi.fn()
     const value = binding('binding-1')
     service.observed.set(value.conversationId, {
-      state: createConversationState(value.threadId), bindingIds: new Set([value.id]), unsubscribe,
+      state: createConversationState(value.threadId), bindingIds: new Set([value.id]),
     })
 
     service.detachBindingObservation(value)
 
-    expect(unsubscribe).toHaveBeenCalledOnce()
     expect(service.observed.has(value.conversationId)).toBe(false)
   })
 

@@ -92,7 +92,9 @@ export type ChannelInteractiveRequest = {
   id: string
   accountId: string
   bindingId: string
+  requestKey: string
   requestId: string
+  turnId: string
   kind: 'approval' | 'question'
   remoteMessageId: string
   requesterIdentity: string
@@ -257,6 +259,10 @@ export class ChannelStore implements ChannelOutboxStore {
     return (this.database.db.prepare('SELECT * FROM channel_bindings WHERE account_id = ? ORDER BY updated_at DESC').all(accountId) as unknown as BindingRow[]).map(toBinding)
   }
 
+  hasBindingForConversation(conversationId: string): boolean {
+    return Boolean(this.database.db.prepare('SELECT 1 FROM channel_bindings WHERE conversation_id = ? LIMIT 1').get(conversationId))
+  }
+
   createBinding(input: { message: ChannelInboundMessage; workspaceId: string; demandId: string; conversationId: string; threadId: string; ownerIdentity: string }): ReturnType<typeof toBinding> {
     const key = channelConversationKey(input.message); const now = nowIso(); const id = makeId('binding')
     this.database.db.prepare(`INSERT INTO channel_bindings (
@@ -406,40 +412,64 @@ export class ChannelStore implements ChannelOutboxStore {
     return this.getPresentation(id)
   }
 
-  saveInteractiveRequest(input: { accountId: string; bindingId: string; requestId: string; kind: 'approval' | 'question'; requesterIdentity: string; request: Record<string, unknown> }): ChannelInteractiveRequest {
+  saveInteractiveRequest(input: { accountId: string; bindingId: string; requestKey: string; requestId: string; turnId: string; kind: 'approval' | 'question'; requesterIdentity: string; request: Record<string, unknown> }): ChannelInteractiveRequest {
     const id = makeId('request'); const now = nowIso()
-    this.database.db.prepare(`INSERT INTO channel_interactive_requests (id, account_id, binding_id, request_id, kind, requester_identity, status, request_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT(account_id, request_id) DO NOTHING`)
-      .run(id, input.accountId, input.bindingId, input.requestId, input.kind, input.requesterIdentity, JSON.stringify(input.request), now, now)
-    return this.getInteractiveRequest(input.accountId, input.requestId)
+    this.database.db.prepare(`INSERT INTO channel_interactive_requests (id, account_id, binding_id, request_key, request_id, turn_id, kind, requester_identity, status, request_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?) ON CONFLICT(account_id, request_key) DO NOTHING`)
+      .run(id, input.accountId, input.bindingId, input.requestKey, input.requestId, input.turnId, input.kind, input.requesterIdentity, JSON.stringify(input.request), now, now)
+    return this.getInteractiveRequestByKey(input.accountId, input.requestKey)
   }
 
+  /** Legacy/raw request-id lookup used by the text /answer command and cards
+   * sent by an older deployment. Prefer the newest pending row because native
+   * request counters restart with App Server. */
   getInteractiveRequest(accountId: string, requestId: string): ChannelInteractiveRequest {
-    const row = this.database.db.prepare('SELECT * FROM channel_interactive_requests WHERE account_id = ? AND request_id = ?').get(accountId, requestId) as Record<string, unknown> | undefined
+    const row = this.database.db.prepare("SELECT * FROM channel_interactive_requests WHERE account_id = ? AND request_id = ? ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, created_at DESC LIMIT 1").get(accountId, requestId) as Record<string, unknown> | undefined
     if (!row) throw new Error('交互请求不存在或已过期')
+    return this.toInteractiveRequest(row)
+  }
+
+  getInteractiveRequestById(accountId: string, id: string): ChannelInteractiveRequest {
+    const row = this.database.db.prepare('SELECT * FROM channel_interactive_requests WHERE account_id = ? AND id = ?').get(accountId, id) as Record<string, unknown> | undefined
+    if (!row) throw new Error('交互请求不存在或已过期')
+    return this.toInteractiveRequest(row)
+  }
+
+  private getInteractiveRequestByKey(accountId: string, requestKey: string): ChannelInteractiveRequest {
+    const row = this.database.db.prepare('SELECT * FROM channel_interactive_requests WHERE account_id = ? AND request_key = ?').get(accountId, requestKey) as Record<string, unknown> | undefined
+    if (!row) throw new Error('交互请求不存在或已过期')
+    return this.toInteractiveRequest(row)
+  }
+
+  private toInteractiveRequest(row: Record<string, unknown>): ChannelInteractiveRequest {
     return {
-      id: String(row.id), accountId: String(row.account_id), bindingId: String(row.binding_id), requestId: String(row.request_id),
+      id: String(row.id), accountId: String(row.account_id), bindingId: String(row.binding_id), requestKey: String(row.request_key),
+      requestId: String(row.request_id), turnId: String(row.turn_id ?? ''),
       kind: row.kind === 'question' ? 'question' : 'approval', remoteMessageId: String(row.remote_message_id ?? ''),
       requesterIdentity: String(row.requester_identity), status: String(row.status), request: JSON.parse(String(row.request_json || '{}')) as Record<string, unknown>,
     }
   }
 
-  getInteractiveRequestByConversation(conversationId: string, requestId: string): ChannelInteractiveRequest | null {
+  getInteractiveRequestByConversation(conversationId: string, requestId: string, turnId = ''): ChannelInteractiveRequest | null {
     const row = this.database.db.prepare(`SELECT requests.* FROM channel_interactive_requests AS requests
       JOIN channel_bindings AS bindings ON bindings.id = requests.binding_id
-      WHERE bindings.conversation_id = ? AND requests.request_id = ?
-      ORDER BY requests.created_at LIMIT 1`).get(conversationId, requestId) as Record<string, unknown> | undefined
+      WHERE bindings.conversation_id = ? AND requests.request_id = ? AND (? = '' OR requests.turn_id = ?)
+      ORDER BY CASE WHEN requests.status = 'pending' THEN 0 ELSE 1 END, requests.created_at DESC LIMIT 1`).get(conversationId, requestId, turnId, turnId) as Record<string, unknown> | undefined
     if (!row) return null
-    return {
-      id: String(row.id), accountId: String(row.account_id), bindingId: String(row.binding_id), requestId: String(row.request_id),
-      kind: row.kind === 'question' ? 'question' : 'approval', remoteMessageId: String(row.remote_message_id ?? ''),
-      requesterIdentity: String(row.requester_identity), status: String(row.status), request: JSON.parse(String(row.request_json || '{}')) as Record<string, unknown>,
-    }
+    return this.toInteractiveRequest(row)
   }
 
-  updateInteractiveRequest(accountId: string, requestId: string, patch: { status: string; remoteMessageId?: string }): void {
-    this.database.db.prepare('UPDATE channel_interactive_requests SET status = ?, remote_message_id = COALESCE(?, remote_message_id), updated_at = ? WHERE account_id = ? AND request_id = ?')
-      .run(patch.status, patch.remoteMessageId ?? null, nowIso(), accountId, requestId)
+  listInteractiveRequestsByConversation(conversationId: string, requestId: string, turnId = ''): ChannelInteractiveRequest[] {
+    const rows = this.database.db.prepare(`SELECT requests.* FROM channel_interactive_requests AS requests
+      JOIN channel_bindings AS bindings ON bindings.id = requests.binding_id
+      WHERE bindings.conversation_id = ? AND requests.request_id = ? AND (? = '' OR requests.turn_id = ?)
+      ORDER BY requests.created_at DESC`).all(conversationId, requestId, turnId, turnId) as Array<Record<string, unknown>>
+    return rows.map(row => this.toInteractiveRequest(row))
+  }
+
+  updateInteractiveRequest(accountId: string, id: string, patch: { status: string; remoteMessageId?: string }): void {
+    this.database.db.prepare('UPDATE channel_interactive_requests SET status = ?, remote_message_id = COALESCE(?, remote_message_id), updated_at = ? WHERE account_id = ? AND id = ?')
+      .run(patch.status, patch.remoteMessageId ?? null, nowIso(), accountId, id)
   }
 
   async enqueue(input: Parameters<ChannelOutboxStore['enqueue']>[0]): Promise<ChannelOutboxItem> {

@@ -20,6 +20,7 @@ import {
   ChannelStore,
   type ChannelAccount,
   type ChannelAccountInput,
+  type ChannelInteractiveRequest,
   type CodyWorkChannelBinding,
   type ChannelPresentation,
 } from './channelStore.js'
@@ -34,7 +35,6 @@ type Runtime = {
 type ObservedConversation = {
   state: ConversationState
   bindingIds: Set<string>
-  unsubscribe: () => void
 }
 
 type DeliveryPayload = {
@@ -125,8 +125,10 @@ export class CodyWorkChannelService {
   private readonly runtimes = new Map<string, Runtime>()
   private readonly observed = new Map<string, ObservedConversation>()
   private readonly observationInitializations = new Map<string, Promise<void>>()
+  private readonly pendingConversationEvents = new Map<string, ConversationEvent[]>()
   private readonly renderTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly unsubscribeConversationEvents: () => void
 
   constructor(
     private readonly database: WorkbenchDb,
@@ -134,6 +136,10 @@ export class CodyWorkChannelService {
     private readonly workspaces: WorkspaceRegistry,
   ) {
     this.store = new ChannelStore(database)
+    // One process-lifetime subscription follows ConversationService's owner
+    // event bus. Per-conversation Runtime handles may be resumed/replaced; the
+    // channel projection must not disappear with one of those handles.
+    this.unsubscribeConversationEvents = this.conversations.subscribeAllChannels(event => this.receiveConversationEvent(event))
   }
 
   async start(): Promise<void> {
@@ -148,9 +154,10 @@ export class CodyWorkChannelService {
       runtime.provider.stop()
     }
     this.runtimes.clear()
-    for (const observation of this.observed.values()) observation.unsubscribe()
+    this.unsubscribeConversationEvents()
     this.observed.clear()
     this.observationInitializations.clear()
+    this.pendingConversationEvents.clear()
     for (const timer of this.renderTimers.values()) clearTimeout(timer)
     this.renderTimers.clear()
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer)
@@ -163,7 +170,16 @@ export class CodyWorkChannelService {
 
   diagnostics(accountId: string) {
     const account = this.store.getAccount(accountId)
-    return { account: { ...account, appSecret: undefined }, ...this.store.diagnostics(accountId) }
+    const bindingConversationIds = new Set(this.store.listBindings(accountId).map(binding => binding.conversationId))
+    return {
+      account: { ...account, appSecret: undefined },
+      runtime: {
+        observedConversations: [...bindingConversationIds].filter(id => this.observed.has(id)).length,
+        initializingConversations: [...bindingConversationIds].filter(id => this.observationInitializations.has(id)).length,
+        bufferedEvents: [...bindingConversationIds].reduce((count, id) => count + (this.pendingConversationEvents.get(id)?.length ?? 0), 0),
+      },
+      ...this.store.diagnostics(accountId),
+    }
   }
 
   async saveAccount(id: string | null, input: ChannelAccountInput): Promise<ChannelAccount> {
@@ -257,8 +273,8 @@ export class CodyWorkChannelService {
       // Browser Turns can start as soon as the HTTP server accepts traffic.
       // Attach every persisted binding before the first network await so a
       // transient approval/question cannot fall into the account-start gap.
-      // initializeObservation subscribes before reading history and buffers
-      // owner events until its snapshot has established the reducer baseline.
+      // The process-lifetime owner event tap buffers events while each history
+      // snapshot establishes its reducer baseline.
       await this.recoverBindings(accountId)
       const identity = await provider.identity()
       this.store.updateRuntime(accountId, { connectionState: 'connecting', botOpenId: identity.id, botName: identity.name })
@@ -542,30 +558,44 @@ export class CodyWorkChannelService {
   }
 
   private async initializeObservation(binding: CodyWorkChannelBinding, options: { emptyHistory?: boolean } = {}): Promise<void> {
-    const buffered: ConversationEvent[] = []
-    let initialized = false
-    const unsubscribe = this.conversations.subscribeChannel(binding.conversationId, event => {
-      if (!initialized) buffered.push(event)
-      else this.onConversationEventSafely(binding.conversationId, event)
-    })
     try {
       const snapshot = options.emptyHistory
         ? { events: [] as ConversationEvent[], watermark: 0 }
         : await this.conversations.history(binding.workspaceId, binding.conversationId)
       const state = reduceConversationEvents(createConversationState(binding.threadId), snapshot.events)
-      const observation: ObservedConversation = { state, bindingIds: new Set([binding.id]), unsubscribe }
+      const observation: ObservedConversation = { state, bindingIds: new Set([binding.id]) }
       this.observed.set(binding.conversationId, observation)
-      initialized = true
+      const buffered = this.pendingConversationEvents.get(binding.conversationId) ?? []
+      this.pendingConversationEvents.delete(binding.conversationId)
       const snapshotEventIds = new Set(snapshot.events.map(event => event.id))
+      const pendingRequestIds = new Set(state.pendingRequests.map(request => request.id))
+      for (const event of snapshot.events) {
+        if (event.type !== 'approval.requested' && event.type !== 'question.requested') continue
+        const requestId = string(event.data.requestId ?? event.data.approvalId ?? event.id)
+        if (pendingRequestIds.has(requestId)) this.publishRequestEvent(binding.conversationId, event, observation)
+      }
       for (const event of buffered) {
         const ownerRevision = typeof event.ownerRevision === 'number' ? event.ownerRevision : null
         if (ownerRevision !== null ? ownerRevision <= snapshot.watermark : snapshotEventIds.has(event.id)) continue
         this.onConversationEventSafely(binding.conversationId, event)
       }
     } catch (error) {
-      unsubscribe()
       throw error
     }
+  }
+
+  private receiveConversationEvent(event: ConversationEvent): void {
+    if (this.observed.has(event.conversationId)) {
+      this.onConversationEventSafely(event.conversationId, event)
+      return
+    }
+    if (!this.observationInitializations.has(event.conversationId) && !this.store.hasBindingForConversation(event.conversationId)) return
+    const buffered = this.pendingConversationEvents.get(event.conversationId) ?? []
+    buffered.push(event)
+    // The snapshot will reconcile old history. Keep only a bounded tail to
+    // prevent a broken binding recovery from becoming an unbounded queue.
+    if (buffered.length > 2_000) buffered.splice(0, buffered.length - 2_000)
+    this.pendingConversationEvents.set(event.conversationId, buffered)
   }
 
   private onConversationEventSafely(conversationId: string, event: ConversationEvent): void {
@@ -609,27 +639,15 @@ export class CodyWorkChannelService {
     const sourceLink = event.turnId ? this.store.getTurnLinkByConversationTurn(conversationId, event.turnId) : null
     const sourceBinding = sourceLink ? this.bindingOrDetach(observation, sourceLink.bindingId) : null
     if (event.type === 'approval.requested' || event.type === 'question.requested') {
-      // A channel-originated Turn replies only to its source binding. A Turn
-      // started in the browser has no source link, so bridge the request to one
-      // binding per connected account. This keeps Web and Feishu resolution
-      // symmetric without duplicating cards when one account has several chats
-      // bound to the same native Thread.
-      const requestBindings = sourceBinding
-        ? [sourceBinding]
-        : [...observation.bindingIds].reduce<CodyWorkChannelBinding[]>((rows, bindingId) => {
-            const binding = this.bindingOrDetach(observation, bindingId)
-            if (binding && !rows.some(row => row.accountId === binding.accountId)) rows.push(binding)
-            return rows
-          }, [])
-      for (const binding of requestBindings) {
-        void this.publishRequest(binding, event).catch(error => this.failAccount(binding.accountId, 'channel.request.publish', error))
-      }
+      this.publishRequestEvent(conversationId, event, observation, sourceBinding)
     }
     if (event.type === 'approval.resolved' || event.type === 'question.resolved') {
       const requestId = string(event.data.requestId ?? event.data.approvalId)
-      const request = requestId ? this.store.getInteractiveRequestByConversation(conversationId, requestId) : null
-      const requestBinding = request ? this.bindingOrDetach(observation, request.bindingId) : sourceBinding
-      if (requestBinding) void this.resolveRequest(requestBinding, event).catch(error => this.failAccount(requestBinding.accountId, 'channel.request.resolve', error))
+      const requests = requestId ? this.store.listInteractiveRequestsByConversation(conversationId, requestId, event.turnId ?? '') : []
+      for (const request of requests) {
+        const requestBinding = this.bindingOrDetach(observation, request.bindingId)
+        if (requestBinding) void this.resolveRequest(requestBinding, event, request).catch(error => this.failAccount(requestBinding.accountId, 'channel.request.resolve', error))
+      }
     }
     for (const bindingId of [...observation.bindingIds]) {
       const binding = this.bindingOrDetach(observation, bindingId)
@@ -637,8 +655,34 @@ export class CodyWorkChannelService {
       if (event.turnId) this.scheduleRender(binding, event.turnId, event.type.startsWith('turn.') && ['turn.completed', 'turn.failed', 'turn.interrupted', 'turn.disconnected'].includes(event.type))
     }
     if (observation.bindingIds.size === 0) {
-      observation.unsubscribe()
       this.observed.delete(conversationId)
+    }
+  }
+
+  private publishRequestEvent(
+    conversationId: string,
+    event: ConversationEvent,
+    observation: ObservedConversation,
+    knownSourceBinding?: CodyWorkChannelBinding | null,
+  ): void {
+    const sourceLink = event.turnId ? this.store.getTurnLinkByConversationTurn(conversationId, event.turnId) : null
+    const sourceBinding = knownSourceBinding === undefined
+      ? (sourceLink ? this.bindingOrDetach(observation, sourceLink.bindingId) : null)
+      : knownSourceBinding
+    // A channel-originated Turn replies only to its source binding. A Turn
+    // started in the browser has no source link, so bridge the request to one
+    // binding per connected account. This keeps Web and Feishu resolution
+    // symmetric without duplicating cards when one account has several chats
+    // bound to the same native Thread.
+    const requestBindings = sourceBinding
+      ? [sourceBinding]
+      : [...observation.bindingIds].reduce<CodyWorkChannelBinding[]>((rows, bindingId) => {
+          const binding = this.bindingOrDetach(observation, bindingId)
+          if (binding && !rows.some(row => row.accountId === binding.accountId)) rows.push(binding)
+          return rows
+        }, [])
+    for (const binding of requestBindings) {
+      void this.publishRequest(binding, event).catch(error => this.failAccount(binding.accountId, 'channel.request.publish', error))
     }
   }
 
@@ -654,8 +698,8 @@ export class CodyWorkChannelService {
     if (!observation) return
     observation.bindingIds.delete(binding.id)
     if (observation.bindingIds.size > 0) return
-    observation.unsubscribe()
     this.observed.delete(binding.conversationId)
+    this.pendingConversationEvents.delete(binding.conversationId)
   }
 
   private detachAccountObservations(accountId: string): void {
@@ -745,25 +789,32 @@ export class CodyWorkChannelService {
   private async publishRequest(binding: CodyWorkChannelBinding, event: ConversationEvent): Promise<void> {
     const requestId = string(event.data.requestId ?? event.data.approvalId ?? event.id)
     const kind = event.type === 'approval.requested' ? 'approval' : 'question'
-    const request = this.store.saveInteractiveRequest({ accountId: binding.accountId, bindingId: binding.id, requestId, kind, requesterIdentity: binding.ownerIdentity, request: event.data })
+    const requestKey = [binding.id, event.threadId, event.turnId ?? 'no-turn', kind, requestId].join(':')
+    const request = this.store.saveInteractiveRequest({
+      accountId: binding.accountId, bindingId: binding.id, requestKey, requestId, turnId: event.turnId ?? '', kind,
+      requesterIdentity: binding.ownerIdentity,
+      // Resolution needs only native identity; never persist raw params because
+      // command approvals may carry inherited environment variables.
+      request: { method: string(event.data.method) },
+    })
     if (request.status !== 'pending' || request.remoteMessageId) return
     const method = string(event.data.method) || (kind === 'approval' ? '工具调用' : '需要输入')
     const actions = kind === 'approval'
       ? [
-          { text: '允许一次', value: { action: 'channel.approval', requestId, outcome: 'allowed-once' }, type: 'primary' as const },
-          { text: '拒绝', value: { action: 'channel.approval', requestId, outcome: 'rejected' }, type: 'danger' as const },
+          { text: '允许一次', value: { action: 'channel.approval', interactiveRequestId: request.id, requestId, outcome: 'allowed-once' }, type: 'primary' as const },
+          { text: '拒绝', value: { action: 'channel.approval', interactiveRequestId: request.id, requestId, outcome: 'rejected' }, type: 'danger' as const },
         ]
-      : this.questionActions(requestId, event.data)
+      : this.questionActions(request.id, requestId, event.data)
     const card = feishuTextCard(
       kind === 'approval' ? 'CodyWork 请求审批' : 'CodyWork 等待回答',
       interactiveRequestSummary(kind, method, event.data),
       { color: 'orange', actions, note: kind === 'question' && !actions.length ? `请回复：/answer ${requestId} <答案>` : undefined },
     )
-    const sent = await this.enqueue(binding.accountId, { kind: 'send_user_card', targetId: binding.ownerIdentity, payload: { card }, dedupeKey: `request:${binding.accountId}:${requestId}` })
-    if (sent.remoteMessageId) this.store.updateInteractiveRequest(binding.accountId, requestId, { status: 'pending', remoteMessageId: sent.remoteMessageId })
+    const sent = await this.enqueue(binding.accountId, { kind: 'send_user_card', targetId: binding.ownerIdentity, payload: { card }, dedupeKey: `request:${request.id}` })
+    if (sent.remoteMessageId) this.store.updateInteractiveRequest(binding.accountId, request.id, { status: 'pending', remoteMessageId: sent.remoteMessageId })
   }
 
-  private questionActions(requestId: string, data: Record<string, unknown>): Array<{ text: string; value: Record<string, unknown>; type?: 'primary' }> {
+  private questionActions(interactiveRequestId: string, requestId: string, data: Record<string, unknown>): Array<{ text: string; value: Record<string, unknown>; type?: 'primary' }> {
     const params = record(data.params)
     const questions = Array.isArray(params.questions) ? params.questions : []
     const first = record(questions[0])
@@ -771,41 +822,47 @@ export class CodyWorkChannelService {
     const questionId = string(first.id || first.questionId || params.questionId)
     return options.slice(0, 8).flatMap(option => {
       const row = record(option); const label = string(row.label || row.text || option)
-      return label ? [{ text: label, value: { action: 'channel.question', requestId, questionId, answer: label }, type: 'primary' as const }] : []
+      return label ? [{ text: label, value: { action: 'channel.question', interactiveRequestId, requestId, questionId, answer: label }, type: 'primary' as const }] : []
     })
   }
 
   private async handleApprovalAction(accountId: string, action: FeishuCardAction): Promise<void> {
     const requestId = string(action.value.requestId)
-    const request = this.store.getInteractiveRequest(accountId, requestId)
+    const interactiveRequestId = string(action.value.interactiveRequestId)
+    const request = interactiveRequestId
+      ? this.store.getInteractiveRequestById(accountId, interactiveRequestId)
+      : this.store.getInteractiveRequest(accountId, requestId)
     if (request.status !== 'pending') throw new Error('审批已经处理')
     if (request.requesterIdentity !== action.actorId) throw new Error('只有绑定人可以处理审批')
     const binding = this.store.getBinding(request.bindingId)
     const outcome = action.value.outcome === 'rejected' ? 'rejected' : 'allowed-once'
     await this.conversations.approve(binding.workspaceId, binding.conversationId, requestId, outcome)
-    this.store.updateInteractiveRequest(accountId, requestId, { status: outcome })
+    this.store.updateInteractiveRequest(accountId, request.id, { status: outcome })
     if (action.remoteMessageId) await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: feishuTextCard('审批已处理', outcome === 'allowed-once' ? '已允许一次。' : '已拒绝。', { color: outcome === 'allowed-once' ? 'green' : 'red' }) }, dedupeKey: `request:${request.id}:resolved`, terminal: true })
   }
 
   private async handleQuestionAction(accountId: string, action: FeishuCardAction): Promise<void> {
     const requestId = string(action.value.requestId)
-    const request = this.store.getInteractiveRequest(accountId, requestId)
+    const interactiveRequestId = string(action.value.interactiveRequestId)
+    const request = interactiveRequestId
+      ? this.store.getInteractiveRequestById(accountId, interactiveRequestId)
+      : this.store.getInteractiveRequest(accountId, requestId)
     if (request.status !== 'pending') throw new Error('问题已经回答')
     if (request.requesterIdentity !== action.actorId) throw new Error('只有绑定人可以回答')
     const binding = this.store.getBinding(request.bindingId)
     const questionId = string(action.value.questionId)
     const answer = string(action.value.answer || action.option)
     await this.conversations.answer(binding.workspaceId, binding.conversationId, requestId, questionId ? { answers: { [questionId]: { answers: [answer] } } } : answer)
-    this.store.updateInteractiveRequest(accountId, requestId, { status: 'answered' })
+    this.store.updateInteractiveRequest(accountId, request.id, { status: 'answered' })
   }
 
-  private async resolveRequest(binding: CodyWorkChannelBinding, event: ConversationEvent): Promise<void> {
+  private async resolveRequest(binding: CodyWorkChannelBinding, event: ConversationEvent, knownRequest?: ChannelInteractiveRequest): Promise<void> {
     const requestId = string(event.data.requestId ?? event.data.approvalId)
     if (!requestId) return
     try {
-      const request = this.store.getInteractiveRequest(binding.accountId, requestId)
+      const request = knownRequest ?? this.store.getInteractiveRequest(binding.accountId, requestId)
       if (request.status !== 'pending') return
-      this.store.updateInteractiveRequest(binding.accountId, requestId, { status: 'resolved' })
+      this.store.updateInteractiveRequest(binding.accountId, request.id, { status: 'resolved' })
       if (request.remoteMessageId) {
         await this.enqueue(binding.accountId, { kind: 'update_card', targetId: request.remoteMessageId, payload: { card: feishuTextCard('CodyWork 请求已处理', '该请求已在 CodyWork 浏览器或飞书端完成。', { color: 'green' }) }, dedupeKey: `request:${request.id}:externally-resolved`, terminal: true })
       }
@@ -857,7 +914,7 @@ export class CodyWorkChannelService {
       const request = this.store.getInteractiveRequest(binding.accountId, requestId)
       if (request.requesterIdentity !== inbox.message.sender.id || request.status !== 'pending') throw new Error('问题不存在、已回答或无权处理')
       await this.conversations.answer(binding.workspaceId, binding.conversationId, requestId, answer)
-      this.store.updateInteractiveRequest(binding.accountId, requestId, { status: 'answered' })
+      this.store.updateInteractiveRequest(binding.accountId, request.id, { status: 'answered' })
       this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id }); return
     }
     await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/status、/stop、/retry、/unbind、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })

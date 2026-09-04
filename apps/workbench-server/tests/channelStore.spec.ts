@@ -15,6 +15,20 @@ function inbound(accountId: string, eventId = 'event-1', messageId = `message-${
 }
 
 describe('CodyWork channel persistence', () => {
+  function createBindingFixture(db: WorkbenchDb, store: ChannelStore, accountId: string) {
+    const now = new Date().toISOString()
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
+      .run('workspace-1', 'Workspace', '/tmp/channel-workspace', now, now)
+    db.db.prepare('INSERT INTO demands (id, workspace_id, name, branch_name, worktree_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run('demand-1', 'workspace-1', 'Demand', 'channel-test', 'channel-test', 'in_progress', now, now)
+    db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run('conversation-1', 'demand-1', 'workspace-1', 'thread-1', 'Channel', 'idle', 'workspace-write', 'policy', 'instructions', now, now)
+    return store.createBinding({
+      message: inbound(accountId), workspaceId: 'workspace-1', demandId: 'demand-1', conversationId: 'conversation-1',
+      threadId: 'thread-1', ownerIdentity: 'user-1',
+    })
+  }
+
   it('encrypts credentials and defaults to disabled, deny-by-default access', () => {
     const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
     const path = join(root, 'workspace.db')
@@ -85,6 +99,31 @@ describe('CodyWork channel persistence', () => {
     expect(store.finishAction(first.id, 'action_completed')).toBe(true)
     expect(store.finishAction(first.id, 'action_failed', 'late failure')).toBe(false)
     expect(store.claimAction(account.id, 'action-event-1', {})).toMatchObject({ created: false, status: 'action_completed' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('namespaces process-local request ids by binding and native turn', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_request_identity', appSecret: 'secret' })
+    const binding = createBindingFixture(db, store, account.id)
+    const first = store.saveInteractiveRequest({
+      accountId: account.id, bindingId: binding.id, requestKey: `${binding.id}:turn-1:approval:0`, requestId: '0', turnId: 'turn-1',
+      kind: 'approval', requesterIdentity: 'user-1', request: { method: 'exec' },
+    })
+    store.updateInteractiveRequest(account.id, first.id, { status: 'allowed-once' })
+    const afterRestart = store.saveInteractiveRequest({
+      accountId: account.id, bindingId: binding.id, requestKey: `${binding.id}:turn-2:approval:0`, requestId: '0', turnId: 'turn-2',
+      kind: 'approval', requesterIdentity: 'user-1', request: { method: 'exec' },
+    })
+
+    expect(afterRestart.id).not.toBe(first.id)
+    expect(store.getInteractiveRequest(account.id, '0')).toMatchObject({ id: afterRestart.id, turnId: 'turn-2', status: 'pending' })
+    expect(store.getInteractiveRequestByConversation('conversation-1', '0', 'turn-1')).toMatchObject({ id: first.id })
+    expect(store.getInteractiveRequestByConversation('conversation-1', '0', 'turn-2')).toMatchObject({ id: afterRestart.id })
+    expect(new Set(store.listInteractiveRequestsByConversation('conversation-1', '0').map(row => row.id))).toEqual(new Set([afterRestart.id, first.id]))
     db.close()
     rmSync(root, { recursive: true, force: true })
   })

@@ -102,6 +102,7 @@ export class ConversationService {
   private readonly contexts = new Map<string, RuntimeContext>()
   private readonly listeners = new Map<string, Set<Listener>>()
   private readonly channelListeners = new Map<string, Set<Listener>>()
+  private readonly allChannelListeners = new Set<Listener>()
   private readonly runtimeSubscriptions = new Map<string, () => void>()
   private runtime: CodyWorkRuntime
 
@@ -167,6 +168,14 @@ export class ConversationService {
       set.delete(listener)
       if (set.size === 0) this.channelListeners.delete(conversationId)
     }
+  }
+
+  /** Observes the owner Runtime event bus independently of an individual
+   * conversation handle. Channel hosts use this process-lifetime tap so a
+   * resumed handle cannot silently orphan external projections. */
+  subscribeAllChannels(listener: Listener): () => void {
+    this.allChannelListeners.add(listener)
+    return () => { this.allChannelListeners.delete(listener) }
   }
 
   async create(workspaceId: string, demandId: string, title?: string): Promise<ConversationView> {
@@ -387,6 +396,12 @@ export class ConversationService {
       try { listener(event) }
       catch (error) {
         console.error(`[codywork] channel listener failed for ${event.conversationId}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    for (const listener of this.allChannelListeners) {
+      try { listener(event) }
+      catch (error) {
+        console.error(`[codywork] global channel listener failed for ${event.conversationId}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
     this.publish(this.withPublicImageUrls(event))

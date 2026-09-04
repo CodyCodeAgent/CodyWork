@@ -29,6 +29,25 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('publishes owner events to a process-lifetime channel tap as well as browser subscribers', async () => {
+    const test = await fixture()
+    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Shared owner bus')
+    const channelEvents: string[] = []
+    const browserEvents: string[] = []
+    const unsubscribeChannel = conversations.subscribeAllChannels(event => channelEvents.push(event.type))
+    conversations.subscribe(conversation.id, event => browserEvents.push(event.type))
+
+    await conversations.send(test.workspaceId, conversation.id, 'one owner stream')
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(channelEvents).toEqual(browserEvents)
+    expect(channelEvents).toContain('turn.completed')
+    unsubscribeChannel()
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('accepts image uploads only for the owning conversation and serves them through an opaque URL', async () => {
     const test = await fixture()
     const runtime = new TestRuntimeAdapter()
