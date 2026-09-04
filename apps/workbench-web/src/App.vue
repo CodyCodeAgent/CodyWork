@@ -38,6 +38,7 @@
         <header class="topbar"><div><button v-if="settingsSection !== 'overview'" class="back-link" type="button" @click="openSettingsSection('overview')">‹ 返回设置</button><div class="eyebrow">WORKSPACE / SETTINGS</div><h1>{{ settingsTitle }}</h1></div><button v-if="settingsSection === 'runtime'" class="btn" :disabled="testingRuntime" @click="testRuntime">{{ testingRuntime ? '检查中…' : '测试连接' }}</button></header>
         <SettingsOverview v-if="settingsSection === 'overview'" :action-count="quickActions.length" @open="openSettingsSection" />
         <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
+        <FeishuChannelSettings v-else-if="settingsSection === 'feishu'" />
         <div v-else class="workspace-body"><article class="settings-card"><div class="card-kicker">APP SERVER</div><h2>Codex App Server</h2><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button></article></div>
       </section>
       <section v-else-if="activePage === 'demands' && !selectedDemand" class="demands-body">
@@ -131,6 +132,7 @@ import DemandToolbox from './components/DemandToolbox.vue'
 import QuickActionBar from './components/QuickActionBar.vue'
 import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
+import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
 import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepositories'
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
@@ -253,7 +255,7 @@ const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.tr
 const filteredSkills = computed(() => filterSkills(skills.value, skillQuery.value))
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
 const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
-const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : '设置')
+const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : '设置')
 const threadProjects = computed<ThreadProject[]>(() => groupThreadProjects(nativeThreads.value, selectedDemand.value?.repositories.map(repo => repo.worktreePath) ?? []))
 const filteredNativeThreads = computed(() => filterNativeThreads(nativeThreads.value, selectedThreadProject.value, threadQuery.value))
 const canBindNativeThread = computed(() => manualThreadEntry.value ? Boolean(boundNativeId.value.trim()) : filteredNativeThreads.value.some(thread => thread.nativeId === boundNativeId.value && !thread.bound))

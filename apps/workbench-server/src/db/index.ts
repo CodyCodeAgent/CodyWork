@@ -206,6 +206,142 @@ export class WorkbenchDb {
         last_seen_at_ms INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS auth_sessions_expires_at_ms ON auth_sessions(expires_at_ms);
+      CREATE TABLE IF NOT EXISTS channel_accounts (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        name TEXT NOT NULL,
+        app_id TEXT NOT NULL,
+        secret_cipher TEXT NOT NULL,
+        domain TEXT NOT NULL DEFAULT 'feishu',
+        enabled INTEGER NOT NULL DEFAULT 0,
+        allow_all_users INTEGER NOT NULL DEFAULT 0,
+        allowed_user_ids_json TEXT NOT NULL DEFAULT '[]',
+        allowed_conversation_ids_json TEXT NOT NULL DEFAULT '[]',
+        group_mention_mode TEXT NOT NULL DEFAULT 'always',
+        private_conversation_mode TEXT NOT NULL DEFAULT 'chat',
+        bot_open_id TEXT,
+        bot_name TEXT,
+        connection_state TEXT NOT NULL DEFAULT 'idle',
+        last_error TEXT,
+        connected_at TEXT,
+        last_event_at TEXT,
+        last_delivery_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider, app_id)
+      );
+      CREATE TABLE IF NOT EXISTS channel_bindings (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        conversation_key TEXT NOT NULL,
+        channel_conversation_id TEXT NOT NULL,
+        channel_scope TEXT NOT NULL,
+        channel_root_id TEXT,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        owner_identity TEXT NOT NULL,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider, account_id, conversation_key)
+      );
+      CREATE INDEX IF NOT EXISTS channel_bindings_target ON channel_bindings(workspace_id, demand_id, conversation_id);
+      CREATE TABLE IF NOT EXISTS channel_inbox (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        external_event_id TEXT NOT NULL,
+        external_message_id TEXT NOT NULL,
+        conversation_key TEXT NOT NULL,
+        message_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        binding_id TEXT REFERENCES channel_bindings(id) ON DELETE SET NULL,
+        client_command_id TEXT,
+        turn_id TEXT,
+        last_error TEXT,
+        lease_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider, account_id, external_event_id),
+        UNIQUE(provider, account_id, external_message_id)
+      );
+      CREATE INDEX IF NOT EXISTS channel_inbox_recovery ON channel_inbox(account_id, status, lease_expires_at, created_at);
+      CREATE TABLE IF NOT EXISTS channel_outbox (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at TEXT NOT NULL,
+        lease_expires_at TEXT,
+        remote_message_id TEXT,
+        revision INTEGER,
+        terminal INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(provider, account_id, dedupe_key)
+      );
+      CREATE INDEX IF NOT EXISTS channel_outbox_delivery ON channel_outbox(account_id, status, available_at, lease_expires_at);
+      CREATE TABLE IF NOT EXISTS channel_turn_links (
+        id TEXT PRIMARY KEY,
+        inbox_id TEXT NOT NULL REFERENCES channel_inbox(id) ON DELETE CASCADE,
+        binding_id TEXT NOT NULL REFERENCES channel_bindings(id) ON DELETE CASCADE,
+        client_command_id TEXT NOT NULL,
+        turn_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(client_command_id)
+      );
+      CREATE TABLE IF NOT EXISTS channel_presentations (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        binding_id TEXT NOT NULL REFERENCES channel_bindings(id) ON DELETE CASCADE,
+        turn_link_id TEXT REFERENCES channel_turn_links(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL,
+        remote_message_id TEXT,
+        status TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0,
+        terminal INTEGER NOT NULL DEFAULT 0,
+        state_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS channel_interactive_requests (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        binding_id TEXT NOT NULL REFERENCES channel_bindings(id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        remote_message_id TEXT,
+        requester_identity TEXT NOT NULL,
+        status TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(account_id, request_id)
+      );
+      CREATE TABLE IF NOT EXISTS channel_audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id TEXT,
+        action TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        success INTEGER NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        error TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS channel_audit_recent ON channel_audit_events(account_id, created_at DESC);
     `)
     // Direct cut-over: native Codex threads are the sole conversation history.
     // Rebuild the metadata tables once so no retired provider/event/goal shape

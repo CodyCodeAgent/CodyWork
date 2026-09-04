@@ -229,6 +229,63 @@ export interface RuntimeSettings {
   updatedAt: string
 }
 
+export interface FeishuChannelAccount {
+  id: string
+  provider: 'feishu'
+  name: string
+  appId: string
+  appSecretConfigured: boolean
+  domain: 'feishu' | 'lark'
+  enabled: boolean
+  allowAllUsers: boolean
+  allowedUserIds: string[]
+  allowedConversationIds: string[]
+  groupMentionMode: 'always' | 'bound'
+  privateConversationMode: 'topic' | 'chat'
+  botOpenId: string
+  botName: string
+  connectionState: string
+  lastError: string
+  connectedAt: string | null
+  lastEventAt: string | null
+  lastDeliveryAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FeishuChannelAccountInput {
+  name: string
+  appId: string
+  appSecret?: string
+  domain: 'feishu' | 'lark'
+  enabled: boolean
+  allowAllUsers: boolean
+  allowedUserIds: string[]
+  allowedConversationIds: string[]
+  groupMentionMode: 'always' | 'bound'
+  privateConversationMode: 'topic' | 'chat'
+}
+
+export interface FeishuChannelBinding {
+  id: string
+  conversationKey: string
+  workspaceId: string
+  demandId: string
+  conversationId: string
+  threadId: string
+  ownerIdentity: string
+  channelConversationId: string
+  channelScope: string
+  updatedAtIso: string
+}
+
+export interface FeishuChannelDiagnostics {
+  account: FeishuChannelAccount
+  bindings: number
+  inbox: { waiting: number; failed: number; submitted: number }
+  outbox: { pending: number; deadLetter: number }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, cache: 'no-store' }
   if (body !== undefined) {
@@ -242,6 +299,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  listFeishuAccounts: () => request<FeishuChannelAccount[]>('GET', '/api/channels/feishu/accounts'),
+  createFeishuAccount: (input: FeishuChannelAccountInput) => request<FeishuChannelAccount>('POST', '/api/channels/feishu/accounts', input),
+  updateFeishuAccount: (id: string, input: FeishuChannelAccountInput) => request<FeishuChannelAccount>('PATCH', `/api/channels/feishu/accounts/${encodeURIComponent(id)}`, input),
+  deleteFeishuAccount: (id: string) => request<{ deleted: true }>('DELETE', `/api/channels/feishu/accounts/${encodeURIComponent(id)}`),
+  reconnectFeishuAccount: (id: string) => request<{ reconnected: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/reconnect`),
+  feishuDiagnostics: (id: string) => request<FeishuChannelDiagnostics>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/diagnostics`),
+  listFeishuBindings: (id: string) => request<FeishuChannelBinding[]>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/bindings`),
   testRuntime: () => request<{ runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
   runtimeSettings: () => request<RuntimeSettings>('GET', '/api/settings/runtime'),
   updateRuntimeSettings: (patch: { command?: string }) =>

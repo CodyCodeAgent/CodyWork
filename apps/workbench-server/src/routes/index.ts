@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { isIP } from 'node:net'
 import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
@@ -22,6 +23,7 @@ import { AuthSessions } from '../services/authSessions.js'
 import { ConversationImageUploads } from '../services/imageUploads.js'
 import { createQuickAction, deleteQuickAction, listQuickActions, updateQuickAction } from '../services/quickActions.js'
 import type { QuickActionInput } from '../services/quickActions.js'
+import { CodyWorkChannelService } from '../services/channelBot.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -58,6 +60,7 @@ export interface AppContext {
   workspaceSetup?: WorkspaceSetupCoordinator
   skillInstalls?: SkillInstallCoordinator
   images?: ConversationImageUploads
+  channels?: CodyWorkChannelService
 }
 
 export function normalizeRepositoryInput(body: Record<string, unknown>): {
@@ -229,6 +232,30 @@ function workspaceRegistry(ctx: AppContext): WorkspaceRegistry {
   return ctx.workspaces
 }
 
+export function channelService(ctx: AppContext): CodyWorkChannelService {
+  if (!ctx.channels) ctx.channels = new CodyWorkChannelService(ctx.db, conversationService(ctx), workspaceRegistry(ctx))
+  return ctx.channels
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean) : []
+}
+
+function channelAccountInput(body: Record<string, unknown>) {
+  return {
+    name: typeof body.name === 'string' ? body.name : '',
+    appId: typeof body.appId === 'string' ? body.appId : '',
+    ...(typeof body.appSecret === 'string' ? { appSecret: body.appSecret } : {}),
+    domain: body.domain === 'lark' ? 'lark' as const : 'feishu' as const,
+    enabled: body.enabled === true,
+    allowAllUsers: body.allowAllUsers === true,
+    allowedUserIds: stringArray(body.allowedUserIds),
+    allowedConversationIds: stringArray(body.allowedConversationIds),
+    groupMentionMode: body.groupMentionMode === 'bound' ? 'bound' as const : 'always' as const,
+    privateConversationMode: body.privateConversationMode === 'topic' ? 'topic' as const : 'chat' as const,
+  }
+}
+
 function getWorkspace(ctx: AppContext, id: string): WorkspaceRow {
   return workspaceRegistry(ctx).get(id)
 }
@@ -263,6 +290,31 @@ function buildRoutes(ctx: AppContext) {
   const add = (method: string, pattern: string, handler: Handler) => routes.push({ method, pattern, handler })
 
   add('GET', '/api/health', () => ({ service: 'codywork', status: 'ok' }))
+
+  add('GET', '/api/channels/feishu/accounts', () => channelService(ctx).listAccounts())
+
+  add('POST', '/api/channels/feishu/accounts', async (c) => channelService(ctx).saveAccount(null, channelAccountInput(c.body)))
+
+  add('PATCH', '/api/channels/feishu/accounts/:accountId', async (c) => channelService(ctx).saveAccount(requiredParam(c, 'accountId'), channelAccountInput(c.body)))
+
+  add('DELETE', '/api/channels/feishu/accounts/:accountId', async (c) => {
+    await channelService(ctx).deleteAccount(requiredParam(c, 'accountId'))
+    return { deleted: true }
+  })
+
+  add('POST', '/api/channels/feishu/accounts/:accountId/reconnect', async (c) => {
+    await channelService(ctx).reconnect(requiredParam(c, 'accountId'))
+    return { reconnected: true }
+  })
+
+  add('GET', '/api/channels/feishu/accounts/:accountId/diagnostics', (c) => channelService(ctx).diagnostics(requiredParam(c, 'accountId')))
+
+  add('GET', '/api/channels/feishu/accounts/:accountId/bindings', (c) => channelService(ctx).listBindings(requiredParam(c, 'accountId')))
+
+  add('POST', '/api/channels/feishu/accounts/:accountId/outbox/:outboxId/retry', (c) => {
+    channelService(ctx).retryOutbox(requiredParam(c, 'accountId'), requiredParam(c, 'outboxId'))
+    return { retried: true }
+  })
 
   add('GET', '/api/runtime/diagnostics', () => conversationService(ctx).diagnostics())
 
@@ -640,6 +692,17 @@ export interface ServerOptions {
   password?: string
 }
 
+export function isLoopbackBindHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/gu, '')
+  return normalized === 'localhost' || normalized === '::1'
+    || (isIP(normalized) === 4 && normalized.split('.')[0] === '127')
+}
+
+function requestIsSecure(req: IncomingMessage): boolean {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim().toLowerCase()
+  return forwardedProto === 'https' || Boolean((req.socket as IncomingMessage['socket'] & { encrypted?: boolean }).encrypted)
+}
+
 export type StartedWorkbenchServer = Server & {
   /** Closes browser projections with an intentional service-restart signal
    * before the HTTP listener goes away. */
@@ -647,9 +710,12 @@ export type StartedWorkbenchServer = Server & {
 }
 
 export function startServer(ctx: AppContext, options: ServerOptions): StartedWorkbenchServer {
+  const password = options.password?.trim() || null
+  if (!password && !isLoopbackBindHost(options.host)) {
+    throw new Error('CODYWORK_PASSWORD is required when CodyWork listens on a non-loopback host')
+  }
   const routes = buildRoutes(ctx)
   const serveStaticAsset = options.staticRoot ? createStaticAssetHandler(options.staticRoot) : null
-  const password = options.password?.trim() || null
   const sessions = password ? new AuthSessions(ctx.db, password) : null
   const authenticated = (req: IncomingMessage): boolean => {
     if (!password) return true
@@ -693,7 +759,8 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
       }
       const token = randomBytes(32).toString('base64url')
       sessions?.create(token, Date.now() + SESSION_TTL_MS)
-      res.writeHead(303, { Location: '/', 'Set-Cookie': `${AUTH_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`, 'Cache-Control': 'no-store, max-age=0' })
+      const secure = requestIsSecure(req) ? '; Secure' : ''
+      res.writeHead(303, { Location: '/', 'Set-Cookie': `${AUTH_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secure}`, 'Cache-Control': 'no-store, max-age=0' })
       return res.end()
     }
     // The process supervisor checks this endpoint through loopback only. The
