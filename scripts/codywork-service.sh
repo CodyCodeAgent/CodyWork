@@ -144,7 +144,13 @@ start_service() {
     echo "CodyWork is already running (PID $pid)."
     return 0
   fi
-  if ss -lnt | grep -Eq ":${PORT}[[:space:]]"; then
+  local port_in_use=false
+  if command -v ss >/dev/null 2>&1; then
+    ss -lnt | grep -Eq ":${PORT}[[:space:]]" && port_in_use=true
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 && port_in_use=true
+  fi
+  if [[ "$port_in_use" == true ]]; then
     echo "Port $PORT is already in use; refusing to start CodyWork." >&2
     return 1
   fi
@@ -154,7 +160,13 @@ start_service() {
     cd "$PROJECT_DIR"
     load_network_environment
     export CODY_SERVICE_ID="${CODY_SERVICE_ID:-codywork}"
-    nohup setsid node "$ENTRYPOINT" --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 < /dev/null &
+    if command -v setsid >/dev/null 2>&1; then
+      nohup setsid node "$ENTRYPOINT" --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 < /dev/null &
+    else
+      # macOS does not ship `setsid`. The PID remains individually owned and
+      # stop_owned_process deliberately falls back to signalling just it.
+      nohup node "$ENTRYPOINT" --host "$HOST" --port "$PORT" >> "$LOG_FILE" 2>&1 < /dev/null &
+    fi
     printf '%s\n' "$!" > "$PID_FILE"
   )
   pid="$(read_pid)"
