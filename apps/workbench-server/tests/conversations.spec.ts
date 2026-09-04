@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { ConversationService } from '../src/services/conversations.js'
+import { ConversationImageUploads } from '../src/services/imageUploads.js'
 import { startServer } from '../src/routes/index.js'
 
 async function fixture() {
@@ -28,6 +29,106 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('accepts image uploads only for the owning conversation and serves them through an opaque URL', async () => {
+    const test = await fixture()
+    const runtime = new TestRuntimeAdapter()
+    const uploads = new ConversationImageUploads(test.db, join(test.root, 'uploads'))
+    const conversations = new ConversationService(test.db, runtime, undefined, (workspaceId, conversationId, path) => uploads.urlForPath(workspaceId, conversationId, path))
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Attachment owner')
+    const server = startServer({ db: test.db, conversations, images: uploads }, { host: '127.0.0.1', port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('server did not bind')
+    const base = `http://127.0.0.1:${address.port}/api/workspaces/${test.workspaceId}/conversations/${conversation.id}`
+
+    const upload = await fetch(`${base}/images`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'screen.png', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }),
+    })
+    expect(upload.status).toBe(200)
+    const payload = await upload.json() as { data: { id: string; url: string } }
+    expect(payload.data.url).not.toContain(test.root)
+    const image = await fetch(`http://127.0.0.1:${address.port}${payload.data.url}`)
+    expect(image.headers.get('content-type')).toBe('image/png')
+    expect(Buffer.from(await image.arrayBuffer()).length).toBeGreaterThan(0)
+
+    const sent = await fetch(`${base}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content: '', images: [payload.data.id] }),
+    })
+    expect(sent.status).toBe(200)
+
+    await new Promise(resolve => setImmediate(resolve))
+    const history = await (await fetch(`${base}/history`)).json() as { data: { events: Array<{ type: string; data: { images?: string[] } }> } }
+    expect(history.data.events.find(event => event.type === 'user.completed')?.data.images).toEqual([payload.data.url])
+
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('keeps uploaded images scoped to the conversation and maps native paths back to opaque URLs', async () => {
+    const test = await fixture()
+    const uploads = new ConversationImageUploads(test.db, join(test.root, 'uploads'))
+    const conversations = new ConversationService(
+      test.db,
+      new TestRuntimeAdapter(),
+      undefined,
+      (workspaceId, conversationId, path) => uploads.urlForPath(workspaceId, conversationId, path),
+    )
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Image turn')
+    const uploaded = uploads.upload(test.workspaceId, conversation.id, {
+      name: 'proof.png',
+      dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    })
+    const localImages = uploads.resolveForTurn(test.workspaceId, conversation.id, [uploaded.id])
+
+    await conversations.send(test.workspaceId, conversation.id, '', 'queue', undefined, undefined, localImages)
+
+    const history = await conversations.history(test.workspaceId, conversation.id)
+    expect(history.events.find(event => event.type === 'user.completed')?.data.images).toEqual([uploaded.url])
+    expect(uploaded.url).not.toContain(test.root)
+    expect(() => uploads.resolveForTurn(test.workspaceId, 'other-conversation', [uploaded.id])).toThrow('不属于当前会话')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('refreshes live Demand contexts when a repository Worktree is added', async () => {
+    class ContextTrackingRuntime extends TestRuntimeAdapter {
+      updatedContexts: Array<{ conversationId: string; writableRoots: string[] }> = []
+      override async updateContext(conversation: Parameters<TestRuntimeAdapter['updateContext']>[0], context: Parameters<TestRuntimeAdapter['updateContext']>[1]): Promise<void> {
+        this.updatedContexts.push({ conversationId: conversation.id, writableRoots: context.effectivePolicy.writableRoots })
+        await super.updateContext(conversation, context)
+      }
+    }
+    const test = await fixture()
+    const runtime = new ContextTrackingRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Existing session')
+    const now = nowIso()
+    const additionalRepositoryId = makeId('repo')
+    const additionalBaseline = join(test.root, 'services', 'additional')
+    const additionalWorktree = join(test.root, 'worktrees', 'verify', 'services', 'additional')
+    mkdirSync(additionalBaseline, { recursive: true })
+    mkdirSync(additionalWorktree, { recursive: true })
+    test.db.db.prepare('INSERT INTO repositories (id, workspace_id, name, baseline_path, origin_url, default_ref, inspected_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(additionalRepositoryId, test.workspaceId, 'additional', additionalBaseline, null, 'main', now)
+    test.db.db.prepare('INSERT INTO demand_repositories (demand_id, repository_id, branch_name, worktree_path, base_ref, base_commit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(test.demandId, additionalRepositoryId, 'verify', additionalWorktree, 'main', 'test', now)
+
+    await conversations.refreshDemandContexts(test.workspaceId, test.demandId)
+
+    expect(runtime.updatedContexts).toEqual([expect.objectContaining({
+      conversationId: conversation.id,
+      writableRoots: expect.arrayContaining([realpathSync(additionalWorktree)]),
+    })])
+    expect(conversations.get(test.workspaceId, conversation.id).policyHash).not.toBe('')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('never replaces the process owner when Runtime settings are saved', async () => {
     class TrackingRuntime extends TestRuntimeAdapter {
       closeCalls = 0

@@ -114,6 +114,18 @@ export interface Repository {
   dirty: boolean
 }
 
+export interface RepositorySyncResult {
+  repositoryId: string
+  ref: string
+  state: 'up_to_date' | 'fast_forwarded' | 'blocked' | 'failed'
+  message: string
+  localHead: string | null
+  remoteHead: string | null
+  commitsBehind: number | null
+  commitsAhead: number | null
+  repository: Repository
+}
+
 export interface Demand {
   id: string
   name: string
@@ -168,6 +180,14 @@ export interface ComposerOptions {
   collaborationModes: Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>
 }
 
+export interface ConversationImageUpload {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  url: string
+}
+
 export interface RuntimeSettings {
   command: string
   updatedAt: string
@@ -211,6 +231,8 @@ export const api = {
   listRepositories: (id: string) => request<Repository[]>('GET', `/api/workspaces/${id}/repositories`),
   addRepository: (id: string, input: { source: 'git' | 'folder'; url?: string; path?: string; name?: string }) =>
     request<Repository>('POST', `/api/workspaces/${id}/repositories`, input),
+  syncRepository: (workspaceId: string, repositoryId: string) =>
+    request<RepositorySyncResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/sync`),
   listDemands: (id: string) => request<Demand[]>('GET', `/api/workspaces/${id}/demands`),
   importExistingWorktrees: (id: string) => request<ExistingWorktreeImportResult>('POST', `/api/workspaces/${id}/worktrees/import`),
   createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[] }) =>
@@ -230,8 +252,10 @@ export const api = {
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>
     request<{ events: ConversationEvent[]; watermark: number }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
-  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }) =>
-    request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}) }),
+  uploadConversationImage: (workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }) =>
+    request<ConversationImageUpload>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/images`, input),
+  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }, imageIds: string[] = []) =>
+    request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}), ...(imageIds.length ? { images: imageIds } : {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
   setConversationPermission: (workspaceId: string, conversationId: string, mode: ConversationPermissionMode) =>

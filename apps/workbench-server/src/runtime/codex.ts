@@ -266,6 +266,12 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     this.requireManager().setContext(session.handle.id, executionContext(session.context, mode, this.runtimeOwnerCwd()))
   }
 
+  async updateContext(conversation: ConversationHandle, context: RuntimeContext): Promise<void> {
+    const session = this.require(conversation)
+    session.context = context
+    this.requireManager().setContext(session.handle.id, executionContext(context, session.mode, this.runtimeOwnerCwd()))
+  }
+
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
     return this.submitTurn(request).completed
   }
@@ -275,7 +281,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
     if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
     const turn: TurnInput = {
-      input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills }),
+      input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills, localImages: request.localImages }),
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       runtimeWorkspaceRoots: session.context.effectivePolicy.writableRoots,

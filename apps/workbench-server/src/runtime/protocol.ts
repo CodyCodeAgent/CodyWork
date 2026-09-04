@@ -101,6 +101,8 @@ export interface ListNativeThreadsRequest {
 export interface SendTurnRequest {
   conversation: ConversationHandle
   prompt: string
+  /** Server-resolved local image paths. The browser never supplies these. */
+  localImages?: Array<{ path: string }>
   /** Stable product command id. This is an outbox identity, never a native Turn id. */
   clientCommandId?: string
   mode?: 'queue' | 'steer'
@@ -191,6 +193,8 @@ export interface CodyWorkRuntime {
   /** One product stream per attached conversation. Submission callbacks are
    * not a second broadcast channel. */
   subscribeConversation?(conversation: ConversationHandle, listener: (event: RuntimeEvent) => void): () => void
+  /** Refreshes an attached conversation's Demand-scoped execution context. */
+  updateContext(conversation: ConversationHandle, context: RuntimeContext): Promise<void>
   setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>
   respondApproval(conversation: ConversationHandle, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(conversation: ConversationHandle, requestId: string, answer: unknown): Promise<void>

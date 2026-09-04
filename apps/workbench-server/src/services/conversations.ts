@@ -104,7 +104,13 @@ export class ConversationService {
   private readonly runtimeSubscriptions = new Map<string, () => void>()
   private runtime: CodyWorkRuntime
 
-  constructor(private readonly db: WorkbenchDb, runtime: CodyWorkRuntime, private readonly onTurnFinished?: (workspaceId: string) => void) { this.runtime = runtime }
+  constructor(
+    private readonly db: WorkbenchDb,
+    runtime: CodyWorkRuntime,
+    private readonly onTurnFinished?: (workspaceId: string) => void,
+    private readonly imageUrlForPath?: (workspaceId: string, conversationId: string, path: string) => string | null,
+    private readonly onConversationRemoving?: (workspaceId: string, conversationId: string) => void,
+  ) { this.runtime = runtime }
 
   getRuntime(): CodyWorkRuntime { return this.runtime }
 
@@ -135,7 +141,8 @@ export class ConversationService {
     await this.ensureHandle(row)
     const demand = this.requireDemand(workspaceId, row.demand_id)
     const context = this.contextFor(demand, row.permission_mode)
-    return this.runtime.readConversationSnapshot({ conversationId, nativeId: row.native_id, context })
+    const snapshot = await this.runtime.readConversationSnapshot({ conversationId, nativeId: row.native_id, context })
+    return { ...snapshot, events: snapshot.events.map(event => this.withPublicImageUrls(event)) }
   }
 
   subscribe(conversationId: string, listener: Listener): () => void {
@@ -218,12 +225,41 @@ export class ConversationService {
     return this.runtime.getComposerOptions(this.contextFor(demand, 'workspace-write'))
   }
 
-  async send(workspaceId: string, conversationId: string, prompt: string, mode: 'queue' | 'steer' = 'queue', settings?: ConversationSendSettings, requestedCommandId?: string): Promise<{ accepted: true; commandId: string }> {
+  /**
+   * A Demand can gain another Repo after its conversations were attached.
+   * Keep the persisted policy fingerprint and every live Runtime session in
+   * sync so the next Turn can use the new Worktree immediately.
+   */
+  async refreshDemandContexts(workspaceId: string, demandId: string): Promise<void> {
+    const demand = this.requireDemand(workspaceId, demandId)
+    const rows = this.db.db.prepare('SELECT * FROM conversations WHERE workspace_id = ? AND demand_id = ?').all(workspaceId, demandId) as unknown as ConversationRow[]
+    const updatedAt = nowIso()
+    const updateMetadata = this.db.db.prepare('UPDATE conversations SET policy_hash = ?, instruction_hash = ?, updated_at = ? WHERE id = ?')
+
+    for (const row of rows) {
+      const context = this.contextFor(demand, row.permission_mode)
+      updateMetadata.run(context.effectivePolicy.hash, context.instructionBundle.sha256, updatedAt, row.id)
+      const handle = this.handles.get(row.id)
+      if (!handle) continue
+      this.contexts.set(row.id, context)
+      await this.runtime.updateContext(handle, context)
+    }
+  }
+
+  async send(
+    workspaceId: string,
+    conversationId: string,
+    prompt: string,
+    mode: 'queue' | 'steer' = 'queue',
+    settings?: ConversationSendSettings,
+    requestedCommandId?: string,
+    localImages: Array<{ path: string }> = [],
+  ): Promise<{ accepted: true; commandId: string }> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
     const text = prompt.trim()
     const requestedSkills = (settings?.skills ?? []).filter(skill => typeof skill === 'string' && skill.trim()).map(skill => skill.trim()).slice(0, 20)
-    if (!composerHasContent({ text, skills: requestedSkills })) throw new Error('消息不能为空')
+    if (!composerHasContent({ text, skills: requestedSkills, images: localImages })) throw new Error('消息不能为空')
     const commandId = requestedCommandId?.trim().slice(0, 200) || makeId('command')
     const context = this.contexts.get(conversationId)
     if (!context) throw new Error('会话 Runtime 上下文不可用')
@@ -238,6 +274,7 @@ export class ConversationService {
     const submission = this.runtime.submitTurn({
       conversation: this.handleFor(row),
       prompt: text,
+      ...(localImages.length ? { localImages } : {}),
       mode,
       clientCommandId: commandId,
       ...(Object.keys(runtimeSettings).length ? { settings: runtimeSettings } : {}),
@@ -316,6 +353,7 @@ export class ConversationService {
     const count = this.db.db.prepare('SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND demand_id = ?').get(workspaceId, row.demand_id) as { count: number }
     if (count.count <= 1) throw new Error('每个 Demand 至少保留一个会话')
 
+    this.onConversationRemoving?.(workspaceId, conversationId)
     // Local audit records are deleted through their foreign-key cascade; native Thread is retained.
     this.db.db.prepare('DELETE FROM conversations WHERE id = ? AND workspace_id = ?').run(conversationId, workspaceId)
     this.handles.delete(conversationId)
@@ -327,8 +365,23 @@ export class ConversationService {
   }
 
   private appendRuntimeEvent(event: RuntimeEvent): void {
-    const data = event.data
-    this.publish({ ...event, data })
+    this.publish(this.withPublicImageUrls(event))
+  }
+
+  private withPublicImageUrls(event: RuntimeEvent): RuntimeEvent {
+    if (!this.imageUrlForPath || !Array.isArray(event.data.images)) return event
+    const resolveImageUrl = this.imageUrlForPath
+    const workspaceId = this.requireConversationById(event.conversationId).workspace_id
+    const images = event.data.images.map(image => typeof image === 'string'
+      ? resolveImageUrl(workspaceId, event.conversationId, image) ?? image
+      : image)
+    return { ...event, data: { ...event.data, images } }
+  }
+
+  private requireConversationById(conversationId: string): ConversationRow {
+    const row = this.db.db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversationId) as ConversationRow | undefined
+    if (!row) throw new Error('会话不存在')
+    return row
   }
 
   private publish(event: ConversationEvent): void {

@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { WorkbenchDb, WorkspaceRow } from '../db/index.js'
 import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
-import { addRepository, listCachedRepositories } from '../services/repositories.js'
+import { addRepository, listCachedRepositories, syncRepositoryBaseline } from '../services/repositories.js'
 import { delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
 import { CodyWorkCodexRuntime } from '../runtime/codex.js'
 import { runtimeSettings, runtimeSettingsRow, updateRuntimeSettings } from '../runtime/settings.js'
@@ -19,6 +19,7 @@ import { WorkspaceRegistry } from '../services/workspaceRegistry.js'
 import { WorkspaceSetupCoordinator } from '../services/workspaceSetup.js'
 import { SkillInstallCoordinator } from '../services/skillInstall.js'
 import { AuthSessions } from '../services/authSessions.js'
+import { ConversationImageUploads } from '../services/imageUploads.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -54,6 +55,7 @@ export interface AppContext {
   workspaces?: WorkspaceRegistry
   workspaceSetup?: WorkspaceSetupCoordinator
   skillInstalls?: SkillInstallCoordinator
+  images?: ConversationImageUploads
 }
 
 export function normalizeRepositoryInput(body: Record<string, unknown>): {
@@ -153,11 +155,16 @@ function parseLoginPassword(req: IncomingMessage): Promise<string> {
   })
 }
 
-function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+function readBody(req: IncomingMessage, maxBytes = 1 * 1024 * 1024): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let data = ''
-    req.on('data', (chunk) => { data += chunk })
+    let bytes = 0
+    req.on('data', (chunk: Buffer) => {
+      bytes += chunk.length
+      if (bytes <= maxBytes) data += chunk.toString('utf8')
+    })
     req.on('end', () => {
+      if (bytes > maxBytes) return reject(new Error('请求内容过大'))
       if (!data) return resolve({})
       try {
         const parsed: unknown = JSON.parse(data)
@@ -195,8 +202,13 @@ function conversationService(ctx: AppContext): ConversationService {
       const workspace = ctx.db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
       if (workspace) void dashboardCache(ctx).refresh(workspace)
     }, 30_000)
-  })
+  }, (workspaceId, conversationId, path) => imageUploads(ctx).urlForPath(workspaceId, conversationId, path), (workspaceId, conversationId) => imageUploads(ctx).removeConversation(workspaceId, conversationId))
   return ctx.conversations
+}
+
+function imageUploads(ctx: AppContext): ConversationImageUploads {
+  if (!ctx.images) ctx.images = new ConversationImageUploads(ctx.db)
+  return ctx.images
 }
 
 function dashboardCache(ctx: AppContext): DashboardCache {
@@ -364,6 +376,31 @@ function buildRoutes(ctx: AppContext) {
     return { id: repository.id, name: repository.name, path: repository.baseline_path, originUrl: repository.origin_url, defaultRef: repository.default_ref, syncStatus: repository.sync_status, dirty: Boolean(repository.dirty) }
   })
 
+  add('POST', '/api/workspaces/:id/repositories/:repositoryId/sync', (c) => {
+    const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    const result = syncRepositoryBaseline(ctx.db, row, requiredParam(c, 'repositoryId'))
+    void dashboardCache(ctx).refresh(row)
+    return {
+      repositoryId: result.repository.id,
+      ref: result.ref,
+      state: result.state,
+      message: result.message,
+      localHead: result.localHead,
+      remoteHead: result.remoteHead,
+      commitsBehind: result.commitsBehind,
+      commitsAhead: result.commitsAhead,
+      repository: {
+        id: result.repository.id,
+        name: result.repository.name,
+        path: result.repository.baseline_path,
+        originUrl: result.repository.origin_url,
+        defaultRef: result.repository.default_ref,
+        syncStatus: result.repository.sync_status,
+        dirty: Boolean(result.repository.dirty),
+      },
+    }
+  })
+
   add('GET', '/api/workspaces/:id/demands', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return listDemands(ctx.db, row)
@@ -392,11 +429,13 @@ function buildRoutes(ctx: AppContext) {
     return getDemand(ctx.db, row, requiredParam(c, 'demandId'))
   })
 
-  add('POST', '/api/workspaces/:id/demands/:demandId/repositories', (c) => {
+  add('POST', '/api/workspaces/:id/demands/:demandId/repositories', async (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    const demandId = requiredParam(c, 'demandId')
     const repositoryId = typeof c.body.repositoryId === 'string' ? c.body.repositoryId : ''
     if (!repositoryId) throw new Error('Repo 参数缺失')
-    const result = addRepositoryToDemand(ctx.db, row, requiredParam(c, 'demandId'), repositoryId)
+    const result = addRepositoryToDemand(ctx.db, row, demandId, repositoryId)
+    await conversationService(ctx).refreshDemandContexts(row.id, demandId)
     void dashboardCache(ctx).refresh(row)
     return result
   })
@@ -439,6 +478,31 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId'))
   })
 
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/images', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const conversationId = requiredParam(c, 'conversationId')
+    conversationService(ctx).get(workspace.id, conversationId)
+    const name = typeof c.body.name === 'string' ? c.body.name : ''
+    const dataUrl = typeof c.body.dataUrl === 'string' ? c.body.dataUrl : ''
+    return imageUploads(ctx).upload(workspace.id, conversationId, { name, dataUrl })
+  })
+
+  add('GET', '/api/workspaces/:id/conversations/:conversationId/images/:imageId', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const conversationId = requiredParam(c, 'conversationId')
+    conversationService(ctx).get(workspace.id, conversationId)
+    const image = imageUploads(ctx).read(workspace.id, conversationId, requiredParam(c, 'imageId'))
+    c.res.writeHead(200, {
+      'Content-Type': image.mimeType,
+      'Content-Length': image.bytes.length,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(image.name)}"`,
+      'Cache-Control': 'private, no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+      ...corsHeaders(c.req),
+    })
+    c.res.end(image.bytes)
+  })
+
   add('POST', '/api/workspaces/:id/conversations/:conversationId/messages', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const content = typeof c.body.content === 'string' ? c.body.content : ''
@@ -452,7 +516,12 @@ function buildRoutes(ctx: AppContext) {
       ...(Array.isArray(c.body.skills) ? { skills: c.body.skills.filter((item: unknown) => typeof item === 'string').slice(0, 20) as string[] } : {}),
     }
     const clientCommandId = typeof c.body.clientCommandId === 'string' ? c.body.clientCommandId : undefined
-    return conversationService(ctx).send(workspace.id, requiredParam(c, 'conversationId'), content, mode, settings, clientCommandId)
+    const conversationId = requiredParam(c, 'conversationId')
+    const imageIds = Array.isArray(c.body.images)
+      ? c.body.images.filter((item: unknown) => typeof item === 'string').slice(0, 8) as string[]
+      : []
+    const localImages = imageUploads(ctx).resolveForTurn(workspace.id, conversationId, imageIds)
+    return conversationService(ctx).send(workspace.id, conversationId, content, mode, settings, clientCommandId, localImages)
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/interrupt', async (c) => {
@@ -588,7 +657,15 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
       if (!url.pathname.startsWith('/api/') && serveStaticAsset && await serveStaticAsset(req, res, url.pathname)) return
       return json(req, res, 404, { ok: false, error: `not found: ${req.method} ${url.pathname}` })
     }
-    const c: Ctx = { req, res, params: match(route.pattern, url.pathname) ?? {}, body: await readBody(req).catch(() => ({})), query: url.searchParams }
+    let body: Record<string, unknown>
+    try {
+      const isImageUpload = route.pattern === '/api/workspaces/:id/conversations/:conversationId/images' && req.method === 'POST'
+      body = await readBody(req, isImageUpload ? 29 * 1024 * 1024 : 1 * 1024 * 1024)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return json(req, res, message === '请求内容过大' ? 413 : 400, { ok: false, error: message })
+    }
+    const c: Ctx = { req, res, params: match(route.pattern, url.pathname) ?? {}, body, query: url.searchParams }
     try {
       const result = await route.handler(c)
       if (route.pattern === '/api/workspaces/:id/conversations/:conversationId' && req.method === 'DELETE') {

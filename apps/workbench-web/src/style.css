@@ -253,6 +253,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .repo-option span { min-width: 0; }
 .repo-option strong, .repo-option small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-option small { margin-top: 2px; color: #8c97a7; font: 10px var(--mono); }
+.demand-repository-fieldset { min-inline-size: 0; margin: 15px 0 0; padding: 0; border: 0; }.demand-repository-fieldset legend { margin-bottom: 7px; padding: 0; color: #465267; font-size: 12px; font-weight: 700; }.demand-repository-search { position: relative; }.demand-repository-search .input { padding-right: 58px; }.repo-search-clear { position: absolute; top: 50%; right: 8px; padding: 4px 6px; color: #526887; background: #eef2f8; border: 0; border-radius: 5px; font-size: 11px; font-weight: 700; transform: translateY(-50%); }.repo-search-clear:hover { color: #2e5dba; background: #e2eaff; }.demand-repository-summary { min-height: 17px; margin: 7px 1px 8px; color: var(--muted); font-size: 11px; }.demand-repository-ref { margin-left: auto; color: #60759d; font: 10px var(--mono); white-space: nowrap; }.repo-picker-empty { margin: 4px 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 
 .workspace-setup-modal { width: min(680px, 100%); }

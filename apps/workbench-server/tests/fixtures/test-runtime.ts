@@ -59,6 +59,10 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
   }
 
   async setPermission(_conversation: ConversationHandle, _mode: RuntimePermissionMode): Promise<void> {}
+  async updateContext(conversation: ConversationHandle, context: RuntimeContext): Promise<void> {
+    if (!this.conversations.has(conversation.id)) throw new Error('conversation does not belong to this adapter')
+    this.contexts.set(conversation.id, context)
+  }
   async renameConversation(conversation: ConversationHandle, _title: string): Promise<void> {
     if (!this.conversations.has(conversation.id)) throw new Error('conversation does not belong to this adapter')
   }
@@ -89,7 +93,7 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     emit('command.queued', { clientCommandId, text: request.prompt }, { native: false, turnId: '' })
     emit('command.bound', { clientCommandId, nativeTurnId: turnId }, { native: false })
     const completed = Promise.resolve().then(() => {
-      emit('user.completed', { text: request.prompt })
+      emit('user.completed', { text: request.prompt, ...(request.localImages?.length ? { images: request.localImages.map(image => image.path) } : {}) })
       emit('turn.started', { prompt: request.prompt })
       emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
       const context = this.contexts.get(request.conversation.id)

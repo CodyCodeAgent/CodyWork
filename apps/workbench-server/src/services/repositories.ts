@@ -148,6 +148,90 @@ export interface AddRepositoryInput {
   name?: string
 }
 
+export type RepositorySyncState = 'up_to_date' | 'fast_forwarded' | 'blocked' | 'failed'
+
+export interface RepositorySyncResult {
+  repository: RepositoryRow
+  ref: string
+  state: RepositorySyncState
+  message: string
+  localHead: string | null
+  remoteHead: string | null
+  commitsBehind: number | null
+  commitsAhead: number | null
+}
+
+function repositoryForSync(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): RepositoryRow {
+  const repository = db.db.prepare('SELECT * FROM repositories WHERE id = ? AND workspace_id = ? AND present = 1').get(repositoryId, workspace.id) as unknown as RepositoryRow | undefined
+  if (!repository) throw new Error('Repo 不存在或已不在当前 Workspace 中')
+  return repository
+}
+
+function syncResult(repository: RepositoryRow, ref: string, state: RepositorySyncState, message: string, localHead: string | null = null, remoteHead: string | null = null, commitsBehind: number | null = null, commitsAhead: number | null = null): RepositorySyncResult {
+  return { repository, ref, state, message, localHead, remoteHead, commitsBehind, commitsAhead }
+}
+
+function saveRepositoryInspection(db: WorkbenchDb, repository: RepositoryRow, inspection: ReturnType<typeof inspectRepository>, syncStatus: RepositoryRow['sync_status'], syncError: string | null): RepositoryRow {
+  const inspectedAt = nowIso()
+  db.db.prepare('UPDATE repositories SET origin_url = ?, default_ref = ?, sync_status = ?, sync_error = ?, dirty = ?, inspected_at = ? WHERE id = ?')
+    .run(inspection.originUrl, inspection.defaultRef, syncStatus, syncError, inspection.dirty ? 1 : 0, inspectedAt, repository.id)
+  return db.db.prepare('SELECT * FROM repositories WHERE id = ?').get(repository.id) as unknown as RepositoryRow
+}
+
+/**
+ * Safely brings a baseline repository's current default branch forward from
+ * origin. Demand Worktrees are intentionally excluded: they keep their own
+ * branches and are never rebased, reset, or merged by this maintenance action.
+ */
+export function syncRepositoryBaseline(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): RepositorySyncResult {
+  const repository = repositoryForSync(db, workspace, repositoryId)
+  const ref = repository.default_ref?.trim() || repositoryRef(repository.baseline_path)
+  if (!ref || ref === 'HEAD') return syncResult(repository, ref || 'HEAD', 'blocked', '无法确定 Repo 的当前默认分支，未执行同步。')
+  if (!repository.origin_url) return syncResult(repository, ref, 'blocked', '该 Repo 未配置 origin，无法同步远端基线。')
+
+  try {
+    const inspection = inspectRepository(repository.baseline_path)
+    if (inspection.dirty) {
+      const current = saveRepositoryInspection(db, repository, inspection, 'ok', null)
+      return syncResult(current, ref, 'blocked', '基线存在未提交改动；为避免覆盖本地工作区，未执行同步。')
+    }
+    if (inspection.defaultRef !== ref) {
+      const current = saveRepositoryInspection(db, repository, inspection, 'ok', null)
+      return syncResult(current, ref, 'blocked', `基线当前位于 ${inspection.defaultRef}，不是登记的 ${ref}；未执行同步。`)
+    }
+
+    runGit(repository.baseline_path, ['fetch', '--prune', 'origin', ref])
+    const localHead = runGit(repository.baseline_path, ['rev-parse', 'HEAD'])
+    const remoteRef = `origin/${ref}`
+    const remoteHead = runGit(repository.baseline_path, ['rev-parse', remoteRef])
+    const commitsAhead = Number(runGit(repository.baseline_path, ['rev-list', '--count', `${remoteRef}..${localHead}`]))
+    const commitsBehind = Number(runGit(repository.baseline_path, ['rev-list', '--count', `${localHead}..${remoteRef}`]))
+
+    if (commitsAhead > 0) {
+      const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+      const message = commitsBehind > 0
+        ? `本地与远端已分叉（本地 ${commitsAhead}、远端 ${commitsBehind} 个提交）；仅支持安全快进，未同步。`
+        : `本地基线领先远端 ${commitsAhead} 个提交；不会自动推送或改写远端。`
+      return syncResult(current, ref, 'blocked', message, localHead, remoteHead, commitsBehind, commitsAhead)
+    }
+    if (commitsBehind === 0) {
+      const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+      return syncResult(current, ref, 'up_to_date', '远端基线已是最新。', localHead, remoteHead, 0, 0)
+    }
+
+    runGit(repository.baseline_path, ['merge', '--ff-only', remoteRef])
+    const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+    return syncResult(current, ref, 'fast_forwarded', `已安全快进 ${commitsBehind} 个提交。Demand Worktree 未被修改。`, localHead, remoteHead, commitsBehind, 0)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const inspection = (() => { try { return inspectRepository(repository.baseline_path) } catch { return null } })()
+    const current = inspection
+      ? saveRepositoryInspection(db, repository, inspection, 'pull_failed', message)
+      : repository
+    return syncResult(current, ref, 'failed', `同步远端基线失败：${message}`)
+  }
+}
+
 function repositoryDirectoryName(input: AddRepositoryInput): string {
   const provided = input.name?.trim()
   const source = (input.url ?? input.path ?? '').trim().replace(/[\\/]+$/, '')
