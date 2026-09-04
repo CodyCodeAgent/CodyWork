@@ -146,6 +146,49 @@ describe('CodyWork channel lifecycle', () => {
     expect(applied.map(value => value.type)).toEqual(['thread.attached'])
   })
 
+  it('attaches persisted binding observers before connecting the external provider', async () => {
+    const service = bareService()
+    const calls: string[] = []
+    const provider = {
+      identity: vi.fn(async () => { calls.push('identity'); return { id: 'bot-1', name: 'Bot' } }),
+      start: vi.fn(async () => { calls.push('provider'); return undefined }),
+      stop: vi.fn(), classifyError: vi.fn(),
+    }
+    service.store = {
+      getAccount: () => ({ ...binding('account-1'), id: 'account-1', enabled: true }),
+      listBindings: () => [binding('binding-1')],
+      updateRuntime: vi.fn(),
+    }
+    service.createProvider = () => provider
+    service.recoverBindings = vi.fn(async () => { calls.push('bindings') })
+    service.recoverInbox = vi.fn(async () => { calls.push('inbox') })
+    service.flushAndReconcile = vi.fn(async () => { calls.push('flush') })
+
+    await service.startAccount('account-1')
+
+    expect(calls).toEqual(['bindings', 'identity', 'provider', 'inbox', 'flush'])
+    clearInterval(service.runtimes.get('account-1').flushTimer)
+  })
+
+  it('installs every persisted observer before waiting for any history snapshot', async () => {
+    const service = bareService()
+    const pending: Array<() => void> = []
+    const started: string[] = []
+    service.store = {
+      listBindings: () => [binding('binding-1', 'conversation-1'), binding('binding-2', 'conversation-2')],
+      audit: vi.fn(),
+    }
+    service.observe = vi.fn((value: CodyWorkChannelBinding) => {
+      started.push(value.conversationId)
+      return new Promise<void>(resolve => pending.push(resolve))
+    })
+
+    const recovery = service.recoverBindings('account-1')
+    expect(started).toEqual(['conversation-1', 'conversation-2'])
+    pending.forEach(resolve => resolve())
+    await recovery
+  })
+
   it('isolates poison Inbox rows and never replays a failed control command as a Codex prompt', async () => {
     const service = bareService()
     const rows = [inbox('control', '/retry'), inbox('poison', 'bad payload', 'missing-binding'), inbox('good', 'continue', 'binding-1')]
@@ -167,7 +210,7 @@ describe('CodyWork channel lifecycle', () => {
     service.observe = vi.fn(async () => undefined)
     service.submitInbox = vi.fn(async (id: string) => { submitted.push(id) })
 
-    await service.recover('account-1')
+    await service.recoverInbox('account-1')
 
     expect(submitted).toEqual(['good'])
     expect(updates).toEqual(expect.arrayContaining([

@@ -254,6 +254,12 @@ export class CodyWorkChannelService {
     flushTimer.unref?.()
     this.runtimes.set(accountId, { account, provider, outbox, flushTimer })
     try {
+      // Browser Turns can start as soon as the HTTP server accepts traffic.
+      // Attach every persisted binding before the first network await so a
+      // transient approval/question cannot fall into the account-start gap.
+      // initializeObservation subscribes before reading history and buffers
+      // owner events until its snapshot has established the reducer baseline.
+      await this.recoverBindings(accountId)
       const identity = await provider.identity()
       this.store.updateRuntime(accountId, { connectionState: 'connecting', botOpenId: identity.id, botName: identity.name })
       await provider.start({
@@ -264,7 +270,7 @@ export class CodyWorkChannelService {
           if (state === 'failed') this.scheduleAccountReconnect(accountId)
         },
       })
-      await this.recover(accountId)
+      await this.recoverInbox(accountId)
       await this.flushAndReconcile(accountId)
     } catch (error) {
       clearInterval(flushTimer)
@@ -858,15 +864,21 @@ export class CodyWorkChannelService {
     this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id })
   }
 
-  private async recover(accountId: string): Promise<void> {
-    for (const binding of this.store.listBindings(accountId)) {
+  private async recoverBindings(accountId: string): Promise<void> {
+    // Construct every observation promise before awaiting any of them. Each
+    // observe() synchronously installs its listener, so all bound Threads are
+    // protected even while one history snapshot is still loading.
+    await Promise.all(this.store.listBindings(accountId).map(async binding => {
       try {
         await this.observe(binding)
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         this.store.audit(accountId, 'channel.binding.recovery_failed', 'channel_binding', binding.id, false, {}, message)
       }
-    }
+    }))
+  }
+
+  private async recoverInbox(accountId: string): Promise<void> {
     for (const inbox of this.store.pendingInbox(accountId)) {
       try {
         if (inbox.status === 'waiting_binding') continue
