@@ -208,6 +208,10 @@ function conversationService(ctx: AppContext): ConversationService {
   return ctx.conversations
 }
 
+function workspaceSkillCatalog(ctx: AppContext, workspace: WorkspaceRow, forceReload = false) {
+  return listSkills(conversationService(ctx).getRuntime(), workspace, forceReload)
+}
+
 function imageUploads(ctx: AppContext): ConversationImageUploads {
   if (!ctx.images) ctx.images = new ConversationImageUploads(ctx.db)
   return ctx.images
@@ -321,19 +325,19 @@ function buildRoutes(ctx: AppContext) {
     return dashboardCache(ctx).refreshIfStale(row)
   })
 
-  add('GET', '/api/workspaces/:id/quick-actions', (c) => {
+  add('GET', '/api/workspaces/:id/quick-actions', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return listQuickActions(ctx.db, workspace)
+    return listQuickActions(ctx.db, workspace, await workspaceSkillCatalog(ctx, workspace))
   })
 
-  add('POST', '/api/workspaces/:id/quick-actions', (c) => {
+  add('POST', '/api/workspaces/:id/quick-actions', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return createQuickAction(ctx.db, workspace, c.body as unknown as QuickActionInput)
+    return createQuickAction(ctx.db, workspace, await workspaceSkillCatalog(ctx, workspace), c.body as unknown as QuickActionInput)
   })
 
-  add('PATCH', '/api/workspaces/:id/quick-actions/:actionId', (c) => {
+  add('PATCH', '/api/workspaces/:id/quick-actions/:actionId', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return updateQuickAction(ctx.db, workspace, requiredParam(c, 'actionId'), c.body as unknown as QuickActionInput)
+    return updateQuickAction(ctx.db, workspace, await workspaceSkillCatalog(ctx, workspace), requiredParam(c, 'actionId'), c.body as unknown as QuickActionInput)
   })
 
   add('DELETE', '/api/workspaces/:id/quick-actions/:actionId', (c) => {
@@ -356,14 +360,14 @@ function buildRoutes(ctx: AppContext) {
     return getKnowledgeDocument(row, requiredParam(c, 'documentId'))
   })
 
-  add('GET', '/api/workspaces/:id/skills', (c) => {
+  add('GET', '/api/workspaces/:id/skills', async (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return listSkills(row)
+    return workspaceSkillCatalog(ctx, row, c.query.get('force') === '1')
   })
 
-  add('GET', '/api/workspaces/:id/skills/:skillId', (c) => {
+  add('GET', '/api/workspaces/:id/skills/:skillId', async (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return getSkill(row, requiredParam(c, 'skillId'))
+    return getSkill(conversationService(ctx).getRuntime(), row, requiredParam(c, 'skillId'))
   })
 
   add('POST', '/api/workspaces/:id/skills', (c) => {

@@ -119,15 +119,30 @@ export interface SendTurnRequest {
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
+export type RuntimeSkillScope = 'user' | 'repo' | 'system' | 'admin'
+
+/** Provider-authoritative Skill metadata. The path is the stable identity used
+ * by every CodyWork surface and by native structured Turn inputs. */
+export interface RuntimeSkillCatalogEntry {
+  id: string
+  name: string
+  label: string
+  description: string
+  path: string
+  scope: RuntimeSkillScope
+  enabled: boolean
+}
+
+export interface RuntimeSkillCatalogRequest {
+  workspacePath: string
+  demandPath?: string
+  forceReload?: boolean
+}
+
 export interface RuntimeComposerOptions {
   models: string[]
   /** Provider-authoritative skills. `id` is the opaque value returned by the Composer. */
-  skills: Array<{
-    id: string
-    name: string
-    label: string
-    description: string
-  }>
+  skills: RuntimeSkillCatalogEntry[]
   collaborationModes: Array<{
     name: string
     mode: 'default' | 'plan'
@@ -182,6 +197,9 @@ export interface CodyWorkRuntime {
   listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
   /** Discover runtime-supported Composer options without making the UI guess a protocol version. */
   getComposerOptions(context: RuntimeContext): Promise<RuntimeComposerOptions>
+  /** The single provider-authoritative Skill catalog used by management,
+   * quick actions and the Composer. */
+  listSkillCatalog(request: RuntimeSkillCatalogRequest): Promise<RuntimeSkillCatalogEntry[]>
   /** Resolve opaque Composer skill ids to native structured inputs. */
   resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>>
   /** Reads a Core-owned durable snapshot. CodyWork deliberately does not

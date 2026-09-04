@@ -15,7 +15,25 @@
         </div>
       </section>
       <section v-else-if="activePage === 'knowledge'" class="knowledge-page"><header class="topbar"><div><div class="eyebrow">WORKSPACE / KNOWLEDGE</div><h1>知识库</h1></div><button class="btn" @click="loadKnowledge">刷新</button></header><div class="knowledge-body"><div class="knowledge-layout"><article class="knowledge-list-card"><div class="knowledge-list-head"><strong>文档</strong><span>{{ filteredKnowledge.length }}</span></div><div class="knowledge-search"><input v-model="knowledgeQuery" class="input" placeholder="搜索文档…" /></div><button v-for="doc in filteredKnowledge" :key="doc.id" :class="['knowledge-row', { active: selectedKnowledge?.id === doc.id }]" @click="openKnowledge(doc)"><span class="knowledge-file-icon">{{ doc.extension.replace('.', '').slice(0, 4) || 'doc' }}</span><span class="knowledge-row-copy"><strong>{{ doc.name }}</strong><small>{{ doc.relativePath }}</small></span></button><p v-if="!filteredKnowledge.length" class="knowledge-empty">Workspace 中还没有可展示的知识文档。</p></article><article class="knowledge-detail-card"><template v-if="selectedKnowledge"><div class="knowledge-detail-head"><div><div class="card-kicker">{{ selectedKnowledge.extension || 'DOCUMENT' }}</div><h2>{{ selectedKnowledge.name }}</h2><p>{{ selectedKnowledge.path }}</p></div><span class="knowledge-extension">{{ selectedKnowledge.size }} bytes</span></div><pre class="knowledge-content">{{ selectedKnowledge.content ?? '正在读取文档…' }}</pre></template><p v-else class="knowledge-detail-empty">从左侧选择一个文档查看其内容。</p></article></div></div></section>
-      <section v-else-if="activePage === 'skills'" class="skills-page"><header class="topbar"><div><div class="eyebrow">WORKSPACE / SKILLS</div><h1>Skills</h1></div><button class="btn" @click="loadSkills">刷新</button></header><div class="skills-body"><div class="skill-install-card"><div><div class="card-kicker">ADD CAPABILITY</div><h2>为当前 Workspace 安装 Skill</h2><p>Skill 会被安装到 Workspace 的 <code>.agents/skills</code>，并且仍受当前 Workspace 写入策略约束。</p></div><div class="skill-install-form"><input v-model="skillSource" class="input" placeholder="Git URL 或 Skill 来源" /><button class="btn primary" :disabled="installingSkill || !skillSource.trim()" @click="installSkill">{{ installingSkill ? '安装中…' : '安装' }}</button></div></div><div v-if="skillJob" class="skill-run-result" :class="skillJob.status">{{ skillJob.message ?? skillJob.status }}<template v-if="skillJob.events.length"> · {{ skillJob.events.length }} 个运行事件</template></div><div class="skills-layout"><article class="skills-list-card"><div class="skills-list-head"><strong>可用 Skills</strong><span>{{ skills.length }}</span></div><button v-for="skill in skills" :key="skill.id" :class="['skill-row', { active: selectedSkill?.id === skill.id }]" @click="openSkill(skill)"><span class="skill-row-copy"><strong>{{ skill.name }}</strong><small>{{ skill.description || skill.path }}</small></span><span :class="['skill-status-pill', skill.status]">{{ skill.status }}</span></button><p v-if="!skills.length" class="skills-empty">还没有发现可用 Skill。</p></article><article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ selectedSkill.source }}</div><h2>{{ selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><pre class="skill-content">{{ selectedSkill.content }}</pre></template><p v-else class="skill-detail-empty">从左侧选择一个 Skill 查看详情。</p></article></div></div></section>
+      <section v-else-if="activePage === 'skills'" class="skills-page">
+        <header class="topbar"><div><div class="eyebrow">WORKSPACE / SKILLS</div><h1>Skills</h1></div><button class="btn" @click="loadSkills(true)">刷新</button></header>
+        <div class="skills-body">
+          <div class="skill-install-card"><div><div class="card-kicker">ADD CAPABILITY</div><h2>为当前 Workspace 安装 Skill</h2><p>Skill 会被安装到 Workspace 的 <code>.agents/skills</code>，并且仍受当前 Workspace 写入策略约束。</p></div><div class="skill-install-form"><input v-model="skillSource" class="input" placeholder="Git URL 或 Skill 来源" /><button class="btn primary" :disabled="installingSkill || !skillSource.trim()" @click="installSkill">{{ installingSkill ? '安装中…' : '安装' }}</button></div></div>
+          <div v-if="skillJob" class="skill-run-result" :class="skillJob.status">{{ skillJob.message ?? skillJob.status }}<template v-if="skillJob.events.length"> · {{ skillJob.events.length }} 个运行事件</template></div>
+          <div class="skills-layout">
+            <article class="skills-list-card">
+              <div class="skills-list-head"><strong>全部 Skills</strong><span>{{ skillSearchSummary(skills.length, filteredSkills.length, skillQuery) }}</span></div>
+              <label class="skills-search"><span class="sr-only">搜索 Skills</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m16 16 4 4" /></svg><input v-model.trim="skillQuery" type="search" placeholder="搜索名称、描述、路径或来源…" aria-label="搜索 Skills" /></label>
+              <div class="skills-results">
+                <button v-for="skill in filteredSkills" :key="skill.id" :class="['skill-row', { active: selectedSkill?.id === skill.id }]" @click="openSkill(skill)"><span class="skill-row-copy"><strong>{{ skill.displayName || skill.name }}</strong><small>{{ skill.description || skill.path }}</small></span><span class="skill-row-badges"><span v-if="sameNameSkills(skills, skill).length" class="skill-identity-pill">同名 {{ sameNameSkills(skills, skill).length + 1 }}</span><span class="skill-source-pill">{{ skillSourceLabel(skill.source) }}</span><span :class="['skill-status-pill', skill.status]">{{ skill.status }}</span></span></button>
+                <p v-if="skills.length && !filteredSkills.length" class="skills-empty"><strong>没有匹配的 Skill</strong><span>换个名称、描述、路径或来源试试。</span></p>
+                <p v-else-if="!skills.length" class="skills-empty">Runtime 还没有发现可用 Skill。</p>
+              </div>
+            </article>
+            <article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ skillSourceLabel(selectedSkill.source) }} · {{ selectedSkill.scope }}</div><h2>{{ selectedSkill.displayName || selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><div v-if="sameNameSkills(skills, selectedSkill).length" class="skill-identity-note"><strong>同名 Skill 已按路径消歧</strong><p>当前引用固定绑定上方完整路径，不会被其他来源静默替换。</p><ul><li v-for="peer in sameNameSkills(skills, selectedSkill)" :key="peer.id"><span>{{ skillSourceLabel(peer.source) }}</span><code>{{ peer.path }}</code></li></ul></div><pre v-if="selectedSkill.content" class="skill-content">{{ selectedSkill.content }}</pre><p v-else class="skill-content-empty">该 Runtime Skill 没有可读取的本地文档，仍可按 Runtime 元数据调用。</p></template><p v-else class="skill-detail-empty">从左侧选择一个 Skill 查看详情。</p></article>
+          </div>
+        </div>
+      </section>
       <section v-else-if="activePage === 'settings'" class="workspace-page">
         <header class="topbar"><div><button v-if="settingsSection !== 'overview'" class="back-link" type="button" @click="openSettingsSection('overview')">‹ 返回设置</button><div class="eyebrow">WORKSPACE / SETTINGS</div><h1>{{ settingsTitle }}</h1></div><button v-if="settingsSection === 'runtime'" class="btn" :disabled="testingRuntime" @click="testRuntime">{{ testingRuntime ? '检查中…' : '测试连接' }}</button></header>
         <SettingsOverview v-if="settingsSection === 'overview'" :action-count="quickActions.length" @open="openSettingsSection" />
@@ -146,10 +164,15 @@ import {
   dashboardNeedsRefresh,
   deleteConversationTitle as deleteConversationTitleRule,
   filterNativeThreads,
+  filterSkills,
   groupThreadProjects,
   matchDemandRoute,
   parseWorkbenchRoute,
   threadTitle,
+  skillSearchSummary,
+  sameNameSkills,
+  skillIdentityDescription,
+  skillSourceLabel,
   workbenchUrl,
   type HistoryMode,
   type ThreadProject,
@@ -164,7 +187,7 @@ const draft = ref(''); const sending = ref(false); const permission = ref<Conver
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
 const composerImagesByConversationId = new Map<string, ComposerImage[]>()
-const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillQuery = ref(''); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 const settingsSection = ref<WorkbenchSettingsSection>('overview')
 const quickActions = ref<QuickAction[]>([])
 const selectedQuickActionId = ref('')
@@ -227,6 +250,7 @@ const sharedConversationEntries = computed(() => allSharedConversationEntries.va
   visibleMessageStartIndex(allSharedConversationEntries.value.length, visibleConversationEntryCount.value),
 ))
 const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.trim().toLowerCase(); return query ? knowledge.value.filter(doc => `${doc.name} ${doc.relativePath}`.toLowerCase().includes(query)) : knowledge.value })
+const filteredSkills = computed(() => filterSkills(skills.value, skillQuery.value))
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
 const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
 const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : '设置')
@@ -253,7 +277,11 @@ const selectedCollaborationModeKind = computed<'default' | 'plan'>(() => coreCol
 const composerSubmitModes = computed<CodyComposerOption[]>(() => [{ value: 'queue', label: '排队', description: '当前 Turn 结束后顺序执行。' }, { value: 'steer', label: '引导', description: '正在执行时发送给当前 Turn。' }])
 const composerReasoningOptions = computed<CodyComposerOption[]>(() => [{ value: 'none', label: '无推理' }, { value: 'minimal', label: '极低' }, { value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }, { value: 'xhigh', label: '极高' }])
 const composerPermissionOptions = computed<CodyComposerOption[]>(() => [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
-const composerSkills = computed<CodyComposerOption[]>(() => runtimeSkills.value.map(skill => ({ value: skill.id, label: skill.label, description: skill.description })))
+const composerSkills = computed<CodyComposerOption[]>(() => runtimeSkills.value.map(skill => ({
+  value: skill.id,
+  label: skill.label,
+  description: [skillSourceLabel(skill.scope), skill.description, skillIdentityDescription(runtimeSkills.value, skill), sameNameSkills(runtimeSkills.value, skill).length ? skill.path : ''].filter(Boolean).join(' · '),
+})))
 
 function displayConversationStatus(conversation: Conversation): Conversation['status'] {
   const state = selectedConversation.value?.id === conversation.id && conversationState.value.threadId === conversation.nativeId
@@ -421,6 +449,8 @@ async function selectWorkspace(next: Workspace, options: { demandId?: string | n
   workspaces.value = workspaces.value.map((item) => ({ ...item, active: item.id === next.id }))
   repositorySyncResults.value = {}
   syncingRepositoryId.value = ''
+  skillQuery.value = ''
+  selectedSkill.value = null
   showWorkspacePicker.value = false
   activePage.value = 'dashboard'
   selectedDemand.value = null
@@ -523,7 +553,12 @@ async function requestDashboardRefresh(): Promise<void> {
 }
 async function loadKnowledge(): Promise<void> { if (workspace.value) knowledge.value = await api.listKnowledge(workspace.value.id) }
 async function openKnowledge(document: KnowledgeDocument): Promise<void> { if (workspace.value) selectedKnowledge.value = await api.getKnowledge(workspace.value.id, document.id) }
-async function loadSkills(): Promise<void> { if (workspace.value) skills.value = await api.listSkills(workspace.value.id) }
+async function loadSkills(forceReload = false): Promise<void> {
+  if (!workspace.value) return
+  const nextSkills = await api.listSkills(workspace.value.id, forceReload)
+  skills.value = nextSkills
+  if (selectedSkill.value) selectedSkill.value = nextSkills.find(skill => skill.id === selectedSkill.value?.id) ?? null
+}
 async function loadQuickActions(): Promise<void> {
   if (!workspace.value) return
   try {
@@ -570,7 +605,7 @@ async function deleteQuickAction(id: string): Promise<void> {
     savingQuickAction.value = false
   }
 }
-async function openSkill(skill: WorkspaceSkill): Promise<void> { if (workspace.value) selectedSkill.value = await api.getSkill(workspace.value.id, skill.id) }
+function openSkill(skill: WorkspaceSkill): void { selectedSkill.value = skill }
 async function installSkill(): Promise<void> {
   if (!workspace.value || !skillSource.value.trim() || installingSkill.value) return
   installingSkill.value = true
@@ -584,7 +619,7 @@ async function installSkill(): Promise<void> {
       job = await api.skillInstallStatus(workspace.value.id, created.jobId)
       skillJob.value = job
     }
-    await loadSkills()
+    await loadSkills(true)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { installingSkill.value = false }
 }
 async function loadRuntime(): Promise<void> {

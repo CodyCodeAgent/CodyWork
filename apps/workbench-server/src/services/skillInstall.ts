@@ -5,7 +5,7 @@ import { CodyWorkCodexRuntime } from '../runtime/codex.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/policy.js'
 import type { RuntimeEvent } from '../runtime/protocol.js'
 import { runtimeSettingsRow } from '../runtime/settings.js'
-import { listSkills, type WorkspaceSkill } from './skills.js'
+import { listInstalledWorkspaceSkills, type SkillCatalogEntry } from './skills.js'
 
 export interface SkillInstallJob {
   id: string
@@ -22,7 +22,7 @@ export interface SkillInstallJob {
 interface SkillInstallResult {
   message: string
   events: SkillInstallJob['events']
-  installed: WorkspaceSkill[]
+  installed: SkillCatalogEntry[]
 }
 
 export interface SkillInstallDependencies {
@@ -90,7 +90,7 @@ async function runSkillInstall(
     return {
       message: result.finalText || 'Agent 已完成 Skill 添加任务。',
       events: result.events.map(event => ({ type: event.type, timestamp: event.timestamp, data: event.data })),
-      installed: listSkills(workspace).filter(skill => skill.source === 'workspace'),
+      installed: listInstalledWorkspaceSkills(workspace),
     }
   } finally {
     if (timeout) clearTimeout(timeout)

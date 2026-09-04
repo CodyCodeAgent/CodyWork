@@ -34,6 +34,8 @@ import type {
   RuntimeContext,
   RuntimeEvent,
   RuntimePermissionMode,
+  RuntimeSkillCatalogEntry,
+  RuntimeSkillCatalogRequest,
   SendTurnRequest,
   SendTurnResult,
   WorkspaceCheckRequest,
@@ -153,7 +155,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async createConversation(request: CreateConversationRequest): Promise<ConversationHandle> {
-    const manager = await this.ensureRuntime(request.context)
+    const manager = await this.ensureRuntime()
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
     const binding = await manager.create(id, executionContext(request.context, mode, this.runtimeOwnerCwd()))
@@ -161,7 +163,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle> {
-    const manager = await this.ensureRuntime(request.context)
+    const manager = await this.ensureRuntime()
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
     const binding = { id, threadId: request.nativeId }
@@ -178,7 +180,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async readConversationSnapshot(request: ReadConversationRequest): Promise<RuntimeConversationSnapshot> {
-    const manager = await this.ensureRuntime(request.context)
+    const manager = await this.ensureRuntime()
     let session = this.sessions.get(request.conversationId)
     if (!session) {
       const mode = this.modeFromContext(request.context)
@@ -206,7 +208,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]> {
-    await this.ensureRuntime(request.context)
+    await this.ensureRuntime()
     return (await this.requireCatalog().listThreads()).map(thread => ({
       nativeId: thread.threadId,
       preview: thread.preview,
@@ -218,22 +220,15 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async getComposerOptions(context: RuntimeContext): Promise<RuntimeComposerOptions> {
-    await this.ensureRuntime(context)
-    const cwd = context.demandPath ?? context.workspacePath
-    const skillCwds = [...new Set([cwd, context.workspacePath].filter(Boolean))]
+    await this.ensureRuntime()
     const [models, modes, skills] = await Promise.allSettled([
       this.requireCatalog().listModels(),
       this.requireCatalog().listCollaborationModes(),
-      this.requireCatalog().listSkills(skillCwds),
+      this.listSkillCatalog({ workspacePath: context.workspacePath, ...(context.demandPath ? { demandPath: context.demandPath } : {}) }),
     ])
     return {
       models: models.status === 'fulfilled' ? [...new Set(models.value.map(model => model.id || model.model).filter(Boolean))] : [],
-      skills: skills.status === 'fulfilled' ? skills.value.filter(skill => skill.enabled).map(skill => ({
-        id: skill.path,
-        name: skill.name,
-        label: skill.displayName || skill.name,
-        description: skill.description,
-      })) : [],
+      skills: skills.status === 'fulfilled' ? skills.value.filter(skill => skill.enabled) : [],
       collaborationModes: modes.status === 'fulfilled' ? modes.value.flatMap(mode => {
         if (!mode.name) return []
         return [{
@@ -247,12 +242,25 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     }
   }
 
+  async listSkillCatalog(request: RuntimeSkillCatalogRequest): Promise<RuntimeSkillCatalogEntry[]> {
+    await this.ensureRuntime()
+    const cwd = request.demandPath ?? request.workspacePath
+    const cwds = [...new Set([cwd, request.workspacePath].map(value => value.trim()).filter(Boolean))]
+    return (await this.requireCatalog().listSkills(cwds, request.forceReload === true)).map(skill => ({
+      id: skill.path,
+      name: skill.name,
+      label: skill.displayName || skill.name,
+      description: skill.description,
+      path: skill.path,
+      scope: skill.scope,
+      enabled: skill.enabled,
+    }))
+  }
+
   async resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
     if (skillIds.length === 0) return []
-    await this.ensureRuntime(context)
-    const cwd = context.demandPath ?? context.workspacePath
-    const available = await this.requireCatalog().listSkills([...new Set([cwd, context.workspacePath].filter(Boolean))])
-    const enabledByPath = new Map(available.filter(skill => skill.enabled).map(skill => [skill.path, skill]))
+    const available = await this.listSkillCatalog({ workspacePath: context.workspacePath, ...(context.demandPath ? { demandPath: context.demandPath } : {}) })
+    const enabledByPath = new Map(available.filter(skill => skill.enabled).map(skill => [skill.id, skill]))
     return skillIds.map(id => {
       const skill = enabledByPath.get(id)
       if (!skill) throw new Error(`Skill 不存在、已禁用或不适用于当前上下文：${id}`)
@@ -349,7 +357,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     this.manager = null; this.catalog = null; this.host = null; this.sessions.clear(); this.sessionIdByThreadId.clear(); this.listeners.clear()
   }
 
-  private async ensureRuntime(context: RuntimeContext): Promise<CodexSessionManager> {
+  private async ensureRuntime(): Promise<CodexSessionManager> {
     if (!this.manager) {
       // The App Server process is product-owned and shared across demands.
       // Starting it in the first Workspace makes Codex auto-discover every

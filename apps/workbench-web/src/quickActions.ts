@@ -11,11 +11,10 @@ export function resolveQuickActionSkills(
   runtimeSkills: ComposerOptions['skills'],
 ): { ids: string[]; missing: string[] } {
   const byId = new Map(runtimeSkills.map(skill => [skill.id, skill]))
-  const byName = new Map(runtimeSkills.map(skill => [skill.name, skill]))
   const ids: string[] = []
   const missing: string[] = []
   for (const configured of action.skills) {
-    const runtime = byId.get(configured.id) ?? byName.get(configured.name)
+    const runtime = byId.get(configured.id)
     if (!runtime || configured.status !== 'available') missing.push(configured.name)
     else ids.push(runtime.id)
   }

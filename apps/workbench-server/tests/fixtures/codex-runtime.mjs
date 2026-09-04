@@ -24,6 +24,19 @@ let lastThreadCwd = ''
 const threadHistories = new Map(restoredState?.threadHistories ?? [['native-fixture-thread', catalogHistory]])
 const pendingTurns = new Map()
 let initialized = false
+const fixtureSkills = [{
+  name: 'fixture-skill', description: 'Fixture skill', path: '/skills/fixture-skill/SKILL.md',
+  scope: 'repo', enabled: true,
+}, {
+  name: 'global-review', description: 'Global fixture review skill', path: '/skills/global-review/SKILL.md',
+  scope: 'user', enabled: true,
+}, {
+  name: 'fixture-skill', description: 'Global variant of the fixture skill', path: '/skills/global-fixture-skill/SKILL.md',
+  scope: 'user', enabled: true,
+}, {
+  name: 'runtime-research', description: 'System fixture research skill', path: '/skills/runtime-research/SKILL.md',
+  scope: 'system', enabled: true,
+}].filter(skill => process.env.CODY_FIXTURE_DISABLED_SKILL !== skill.name)
 
 function write(value) { process.stdout.write(`${JSON.stringify(value)}\n`) }
 function notify(method, params) { write({ method, params }) }
@@ -177,10 +190,7 @@ rl.on('line', line => {
   }] } })
   else if (message.method === 'skills/list') write({ id: message.id, result: { data: [{
     cwd: process.cwd(),
-    skills: [{
-      name: 'fixture-skill', description: 'Fixture skill', path: '/skills/fixture-skill/SKILL.md',
-      scope: 'repo', enabled: true,
-    }],
+    skills: fixtureSkills,
     errors: [],
   }] } })
   else if (message.method === 'turn/start') {

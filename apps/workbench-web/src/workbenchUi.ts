@@ -1,4 +1,4 @@
-import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand } from './api'
+import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand, WorkspaceSkill } from './api'
 import type { ConversationState } from '@codycodeagent/cody-web-core/conversation'
 
 export type HistoryMode = 'push' | 'replace' | 'none'
@@ -6,6 +6,42 @@ export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skill
 export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions'
 export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
+
+export function skillSourceLabel(source: WorkspaceSkill['source'] | ComposerSkillSource): string {
+  if (source === 'workspace' || source === 'repo') return 'Workspace'
+  if (source === 'user') return 'Codex 全局'
+  if (source === 'system') return 'Codex 内置'
+  return '管理员'
+}
+
+type ComposerSkillSource = 'repo' | 'user' | 'system' | 'admin'
+type NamedSkill = { id: string; name: string }
+
+export function sameNameSkills<T extends NamedSkill>(skills: T[], selected: NamedSkill): T[] {
+  const name = selected.name.trim().toLocaleLowerCase()
+  if (!name) return []
+  return skills.filter(skill => skill.id !== selected.id && skill.name.trim().toLocaleLowerCase() === name)
+}
+
+export function skillIdentityDescription<T extends NamedSkill>(skills: T[], selected: NamedSkill): string {
+  return sameNameSkills(skills, selected).length ? '同名 Skill 按完整路径精确区分' : ''
+}
+
+export function filterSkills(skills: WorkspaceSkill[], query: string): WorkspaceSkill[] {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return skills
+  return skills.filter(skill => [
+    skill.name,
+    skill.displayName,
+    skill.description,
+    skill.path,
+    skillSourceLabel(skill.source),
+  ].join(' ').toLowerCase().includes(needle))
+}
+
+export function skillSearchSummary(total: number, filtered: number, query: string): string {
+  return query.trim() ? `匹配 ${filtered} / ${total}` : `${total}`
+}
 
 export function conversationStatusLabel(status: Conversation['status']): string {
   if (status === 'idle') return '就绪'

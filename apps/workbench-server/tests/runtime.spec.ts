@@ -115,6 +115,33 @@ describe('generic runtime protocol', () => {
         name: 'fixture-skill',
         label: 'fixture-skill',
         description: 'Fixture skill',
+        path: '/skills/fixture-skill/SKILL.md',
+        scope: 'repo',
+        enabled: true,
+      }, {
+        id: '/skills/global-fixture-skill/SKILL.md',
+        name: 'fixture-skill',
+        label: 'fixture-skill',
+        description: 'Global variant of the fixture skill',
+        path: '/skills/global-fixture-skill/SKILL.md',
+        scope: 'user',
+        enabled: true,
+      }, {
+        id: '/skills/global-review/SKILL.md',
+        name: 'global-review',
+        label: 'global-review',
+        description: 'Global fixture review skill',
+        path: '/skills/global-review/SKILL.md',
+        scope: 'user',
+        enabled: true,
+      }, {
+        id: '/skills/runtime-research/SKILL.md',
+        name: 'runtime-research',
+        label: 'runtime-research',
+        description: 'System fixture research skill',
+        path: '/skills/runtime-research/SKILL.md',
+        scope: 'system',
+        enabled: true,
       }],
       collaborationModes: [{
         name: 'plan',
@@ -124,6 +151,44 @@ describe('generic runtime protocol', () => {
         reasoningEffort: 'high',
       }],
     })
+    await expect(runtime.listSkillCatalog({ workspacePath: root, forceReload: true })).resolves.toEqual([
+      {
+        id: '/skills/fixture-skill/SKILL.md',
+        name: 'fixture-skill',
+        label: 'fixture-skill',
+        description: 'Fixture skill',
+        path: '/skills/fixture-skill/SKILL.md',
+        scope: 'repo',
+        enabled: true,
+      },
+      {
+        id: '/skills/global-fixture-skill/SKILL.md',
+        name: 'fixture-skill',
+        label: 'fixture-skill',
+        description: 'Global variant of the fixture skill',
+        path: '/skills/global-fixture-skill/SKILL.md',
+        scope: 'user',
+        enabled: true,
+      },
+      {
+        id: '/skills/global-review/SKILL.md',
+        name: 'global-review',
+        label: 'global-review',
+        description: 'Global fixture review skill',
+        path: '/skills/global-review/SKILL.md',
+        scope: 'user',
+        enabled: true,
+      },
+      {
+        id: '/skills/runtime-research/SKILL.md',
+        name: 'runtime-research',
+        label: 'runtime-research',
+        description: 'System fixture research skill',
+        path: '/skills/runtime-research/SKILL.md',
+        scope: 'system',
+        enabled: true,
+      },
+    ])
     await expect(runtime.resolveSkills(context, ['/skills/fixture-skill/SKILL.md'])).resolves.toEqual([
       { name: 'fixture-skill', path: '/skills/fixture-skill/SKILL.md' },
     ])

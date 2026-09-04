@@ -11,6 +11,7 @@ import type {
   RuntimeContext,
   RuntimeEvent,
   RuntimePermissionMode,
+  RuntimeSkillCatalogRequest,
   SendTurnRequest,
   SendTurnResult,
   SubmitTurnResult,
@@ -56,6 +57,19 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
       { nativeId: 'thread-existing-123', preview: 'Continue existing context', cwd: '/test/project', updatedAt: '2026-08-24T00:00:00.000Z', source: 'cli' },
       { nativeId: 'thread-unbound-456', preview: 'Implement demand picker', cwd: '/test/project', updatedAt: '2026-08-23T00:00:00.000Z', source: 'appServer' },
     ]
+  }
+
+  async listSkillCatalog(request: RuntimeSkillCatalogRequest) {
+    const context = [...this.contexts.values()].find(item => item.workspacePath === request.workspacePath)
+    return (context?.instructionBundle.skills ?? []).map(skill => ({
+      id: skill.path,
+      name: skill.name,
+      label: skill.name,
+      description: '',
+      path: skill.path,
+      scope: 'repo' as const,
+      enabled: true,
+    }))
   }
 
   async setPermission(_conversation: ConversationHandle, _mode: RuntimePermissionMode): Promise<void> {}

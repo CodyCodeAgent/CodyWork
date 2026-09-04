@@ -67,9 +67,11 @@ export type SkillStatus = 'available' | 'disabled' | 'load_failed'
 export interface WorkspaceSkill {
   id: string
   name: string
+  displayName: string
   description: string
   path: string
-  source: 'workspace' | 'user'
+  source: 'workspace' | 'user' | 'system' | 'admin'
+  scope: 'repo' | 'user' | 'system' | 'admin'
   status: SkillStatus
   modelInvocable: boolean
   content: string
@@ -210,7 +212,7 @@ export interface AvailableNativeThread {
 
 export interface ComposerOptions {
   models: string[]
-  skills: Array<{ id: string; name: string; label: string; description: string }>
+  skills: Array<{ id: string; name: string; label: string; description: string; path: string; scope: 'repo' | 'user' | 'system' | 'admin'; enabled: boolean }>
   collaborationModes: Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>
 }
 
@@ -256,7 +258,7 @@ export const api = {
   deleteWorkspace: (id: string) => request<{ deleted: true }>('DELETE', `/api/workspaces/${id}`),
   dashboard: (id: string) => request<DashboardSnapshot>('GET', `/api/workspaces/${id}/dashboard`),
   refreshDashboard: (id: string) => request<DashboardSnapshot>('POST', `/api/workspaces/${id}/dashboard/refresh`),
-  listSkills: (id: string) => request<WorkspaceSkill[]>('GET', `/api/workspaces/${id}/skills`),
+  listSkills: (id: string, forceReload = false) => request<WorkspaceSkill[]>('GET', `/api/workspaces/${id}/skills${forceReload ? '?force=1' : ''}`),
   getSkill: (id: string, skillId: string) => request<WorkspaceSkill>('GET', `/api/workspaces/${id}/skills/${encodeURIComponent(skillId)}`),
   installSkill: (id: string, source: string) => request<{ jobId: string; source: string }>('POST', `/api/workspaces/${id}/skills`, { source }),
   skillInstallStatus: (id: string, jobId: string) => request<SkillInstallStatus>('GET', `/api/workspaces/${id}/skills/install/${encodeURIComponent(jobId)}`),

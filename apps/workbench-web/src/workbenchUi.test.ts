@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createConversationState, reduceConversationEvent, type CodexEvent } from '@codycodeagent/cody-web-core/conversation'
-import type { AvailableNativeThread, Conversation, Demand } from './api'
+import type { AvailableNativeThread, Conversation, Demand, WorkspaceSkill } from './api'
 import {
   canDeleteConversation,
   conversationStatusFromState,
@@ -8,11 +8,16 @@ import {
   dashboardNeedsRefresh,
   deleteConversationTitle,
   filterNativeThreads,
+  filterSkills,
   formatThreadTime,
   groupThreadProjects,
   matchDemandRoute,
   parseWorkbenchRoute,
+  sameNameSkills,
+  skillIdentityDescription,
   threadTitle,
+  skillSearchSummary,
+  skillSourceLabel,
   workbenchUrl,
 } from './workbenchUi'
 
@@ -42,6 +47,33 @@ describe('workbench UI rules', () => {
       { cwd: '/repo/other', count: 1, relatedToDemand: false },
     ])
     expect(filterNativeThreads(threads, '/workspace/worktree', 'fix').map(item => item.nativeId)).toEqual(['c'])
+  })
+
+  it('searches the unified Skill catalog across metadata, path and source', () => {
+    const skill = (patch: Partial<WorkspaceSkill>): WorkspaceSkill => ({
+      id: '/skills/review/SKILL.md', name: 'review', displayName: 'Review', description: 'Review code',
+      path: '/skills/review/SKILL.md', source: 'user', scope: 'user', status: 'available',
+      modelInvocable: true, content: '', updatedAt: '', ...patch,
+    })
+    const skills = [
+      skill({ name: 'review', source: 'user', scope: 'user' }),
+      skill({ id: '/workspace/.agents/skills/release/SKILL.md', name: 'release', displayName: '发布检查', path: '/workspace/.agents/skills/release/SKILL.md', source: 'workspace', scope: 'repo' }),
+      skill({ id: '/system/research/SKILL.md', name: 'research', path: '/system/research/SKILL.md', source: 'system', scope: 'system' }),
+    ]
+    expect(filterSkills(skills, '发布').map(item => item.name)).toEqual(['release'])
+    expect(filterSkills(skills, 'codex 全局').map(item => item.name)).toEqual(['review'])
+    expect(filterSkills(skills, '/system/').map(item => item.name)).toEqual(['research'])
+    expect(skillSearchSummary(412, 1, 'release')).toBe('匹配 1 / 412')
+    expect(skillSourceLabel('system')).toBe('Codex 内置')
+  })
+
+  it('keeps same-name Skills distinct by their Runtime path', () => {
+    const workspace = { id: '/workspace/review/SKILL.md', name: 'review' }
+    const global = { id: '/user/review/SKILL.md', name: 'review' }
+    const catalog = [workspace, global, { id: '/system/research/SKILL.md', name: 'research' }]
+    expect(sameNameSkills(catalog, workspace)).toEqual([global])
+    expect(skillIdentityDescription(catalog, workspace)).toBe('同名 Skill 按完整路径精确区分')
+    expect(skillIdentityDescription(catalog, catalog[2]!)).toBe('')
   })
 
   it('normalizes thread labels and relative time deterministically', () => {

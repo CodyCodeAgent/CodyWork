@@ -16,12 +16,12 @@ describe('quick action rules', () => {
     expect(quickActionsForScene(actions, 'demand-development').map(item => item.id)).toEqual(['a', 'b'])
   })
 
-  it('maps configured workspace Skills to runtime paths and reports stale references', () => {
+  it('resolves canonical Runtime Skill IDs and reports stale references', () => {
     const configured = action({ skills: [
-      { id: 'workspace:review', name: 'review', status: 'available' },
-      { id: 'workspace:gone', name: 'gone', status: 'missing' },
+      { id: '/repo/.agents/skills/review/SKILL.md', name: 'review', status: 'available' },
+      { id: '/repo/.agents/skills/gone/SKILL.md', name: 'gone', status: 'missing' },
     ] })
-    expect(resolveQuickActionSkills(configured, [{ id: '/repo/.agents/skills/review/SKILL.md', name: 'review', label: 'Review', description: '' }])).toEqual({
+    expect(resolveQuickActionSkills(configured, [{ id: '/repo/.agents/skills/review/SKILL.md', name: 'review', label: 'Review', description: '', path: '/repo/.agents/skills/review/SKILL.md', scope: 'repo', enabled: true }])).toEqual({
       ids: ['/repo/.agents/skills/review/SKILL.md'], missing: ['gone'],
     })
   })

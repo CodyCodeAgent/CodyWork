@@ -1,8 +1,9 @@
 import type { QuickActionRow, WorkbenchDb, WorkspaceRow } from '../db/index.js'
 import { makeId, nowIso } from '../db/index.js'
-import { listSkills } from './skills.js'
+import { basename, dirname } from 'node:path'
+import type { SkillCatalogEntry } from './skills.js'
 
-type CurrentSkill = ReturnType<typeof listSkills>[number]
+type CurrentSkill = SkillCatalogEntry
 
 export const QUICK_ACTION_SCENES = ['demand-development'] as const
 export type QuickActionScene = typeof QUICK_ACTION_SCENES[number]
@@ -52,8 +53,12 @@ function normalize(input: QuickActionInput): Required<Pick<QuickActionInput, 'na
   return { name, prompt, skillIds, scenes, enabled: input.enabled !== false }
 }
 
-function currentSkillMap(workspace: WorkspaceRow): Map<string, CurrentSkill> {
-  return new Map(listSkills(workspace).map(skill => [skill.id, skill]))
+function currentSkillMap(skills: CurrentSkill[]): Map<string, CurrentSkill> {
+  return new Map(skills.map(skill => [skill.id, skill]))
+}
+
+function skillNameFromId(id: string): string {
+  return basename(id) === 'SKILL.md' ? basename(dirname(id)) : basename(id, '.md') || id
 }
 
 function validateSelectedSkills(available: Map<string, CurrentSkill>, skillIds: string[]): void {
@@ -71,7 +76,7 @@ function toView(db: WorkbenchDb, currentSkills: Map<string, CurrentSkill>, row: 
     const skill = currentSkills.get(id)
     return {
       id,
-      name: skill?.name ?? id.split(':').at(-1) ?? id,
+      name: skill?.name ?? skillNameFromId(id),
       status: !skill ? 'missing' as const : skill.status === 'available' && skill.modelInvocable ? 'available' as const : 'unavailable' as const,
     }
   })
@@ -91,15 +96,15 @@ function toView(db: WorkbenchDb, currentSkills: Map<string, CurrentSkill>, row: 
   }
 }
 
-export function listQuickActions(db: WorkbenchDb, workspace: WorkspaceRow): QuickActionView[] {
+export function listQuickActions(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[]): QuickActionView[] {
   const rows = db.db.prepare('SELECT * FROM quick_actions WHERE workspace_id = ? ORDER BY sort_order, created_at, id').all(workspace.id) as unknown as QuickActionRow[]
-  const currentSkills = currentSkillMap(workspace)
+  const currentSkills = currentSkillMap(skills)
   return rows.map(row => toView(db, currentSkills, row))
 }
 
-export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, input: QuickActionInput): QuickActionView {
+export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[], input: QuickActionInput): QuickActionView {
   const normalized = normalize(input)
-  const currentSkills = currentSkillMap(workspace)
+  const currentSkills = currentSkillMap(skills)
   validateSelectedSkills(currentSkills, normalized.skillIds)
   const duplicate = db.db.prepare('SELECT id FROM quick_actions WHERE workspace_id = ? AND name = ?').get(workspace.id, normalized.name)
   if (duplicate) throw new Error('同名快捷指令已存在')
@@ -122,10 +127,10 @@ export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, inpu
   return toView(db, currentSkills, requireAction(db, workspace, id))
 }
 
-export function updateQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, id: string, input: QuickActionInput): QuickActionView {
+export function updateQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[], id: string, input: QuickActionInput): QuickActionView {
   const current = requireAction(db, workspace, id)
   const normalized = normalize(input)
-  const currentSkills = currentSkillMap(workspace)
+  const currentSkills = currentSkillMap(skills)
   validateSelectedSkills(currentSkills, normalized.skillIds)
   const duplicate = db.db.prepare('SELECT id FROM quick_actions WHERE workspace_id = ? AND name = ? AND id <> ?').get(workspace.id, normalized.name, id)
   if (duplicate) throw new Error('同名快捷指令已存在')

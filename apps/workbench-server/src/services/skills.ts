@@ -1,39 +1,77 @@
-import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import type { WorkspaceRow } from '../db/index.js'
+import type { CodyWorkRuntime, RuntimeSkillCatalogEntry, RuntimeSkillScope } from '../runtime/protocol.js'
 
 export type SkillStatus = 'available' | 'disabled' | 'load_failed'
+export type SkillSource = 'workspace' | 'user' | 'system' | 'admin'
 
-export interface WorkspaceSkill {
+/** CodyWork's presentation view over the provider-owned Runtime catalog. */
+export interface SkillCatalogEntry {
   id: string
   name: string
+  displayName: string
   description: string
   path: string
-  source: 'workspace' | 'user'
+  source: SkillSource
+  scope: RuntimeSkillScope
   status: SkillStatus
   modelInvocable: boolean
   content: string
   updatedAt: string
 }
 
-interface ParsedSkill {
+function sourceFromScope(scope: RuntimeSkillScope): SkillSource {
+  return scope === 'repo' ? 'workspace' : scope
+}
+
+function fileDetails(path: string): { content: string; updatedAt: string } {
+  try {
+    if (!existsSync(path) || !statSync(path).isFile()) return { content: '', updatedAt: '' }
+    return { content: readFileSync(path, 'utf8'), updatedAt: statSync(path).mtime.toISOString() }
+  } catch {
+    // Runtime metadata remains authoritative even when a system/plugin Skill
+    // does not expose a locally readable backing file.
+    return { content: '', updatedAt: '' }
+  }
+}
+
+function toCatalogEntry(skill: RuntimeSkillCatalogEntry): SkillCatalogEntry {
+  const file = fileDetails(skill.path)
+  return {
+    id: skill.id,
+    name: skill.name,
+    displayName: skill.label || skill.name,
+    description: skill.description,
+    path: skill.path,
+    source: sourceFromScope(skill.scope),
+    scope: skill.scope,
+    status: skill.enabled ? 'available' : 'disabled',
+    modelInvocable: skill.enabled,
+    content: file.content,
+    updatedAt: file.updatedAt,
+  }
+}
+
+export async function listSkills(runtime: CodyWorkRuntime, workspace: WorkspaceRow, forceReload = false): Promise<SkillCatalogEntry[]> {
+  const skills = await runtime.listSkillCatalog({ workspacePath: workspace.path, forceReload })
+  return skills.map(toCatalogEntry)
+}
+
+export async function getSkill(runtime: CodyWorkRuntime, workspace: WorkspaceRow, id: string): Promise<SkillCatalogEntry> {
+  const skill = (await listSkills(runtime, workspace)).find(item => item.id === id)
+  if (!skill) throw new Error(`Skill 不存在：${id}`)
+  return skill
+}
+
+interface ParsedInstalledSkill {
   name: string
   description: string
   status: SkillStatus
   modelInvocable: boolean
 }
 
-function skillRoots(workspace: WorkspaceRow): Array<{ path: string; source: WorkspaceSkill['source'] }> {
-  return [
-    { path: join(workspace.path, '.agents', 'skills'), source: 'workspace' },
-    { path: join(workspace.path, '.codex', 'skills'), source: 'workspace' },
-    { path: join(process.env.CODEX_HOME?.trim() || join(homedir(), '.codex'), 'skills'), source: 'user' },
-    { path: join(homedir(), '.agents', 'skills'), source: 'user' },
-  ]
-}
-
-function parseSkill(content: string, fallbackName: string): ParsedSkill {
+function parseInstalledSkill(content: string, fallbackName: string): ParsedInstalledSkill {
   if (!content.startsWith('---')) return { name: fallbackName, description: '', status: 'load_failed', modelInvocable: false }
   const end = content.indexOf('\n---', 3)
   if (end < 0) return { name: fallbackName, description: '', status: 'load_failed', modelInvocable: false }
@@ -54,50 +92,32 @@ function parseSkill(content: string, fallbackName: string): ParsedSkill {
   return { name, description, status: disabled ? 'disabled' : 'available', modelInvocable: !disabled }
 }
 
-function skillPathEntries(root: string): Array<{ name: string; path: string }> {
-  if (!existsSync(root) || !statSync(root).isDirectory()) return []
-  return readdirSync(root, { withFileTypes: true })
-    .filter(entry => !entry.name.startsWith('.'))
-    .map(entry => ({
-      name: entry.isDirectory() ? entry.name : basename(entry.name, '.md'),
-      path: entry.isDirectory() ? join(root, entry.name, 'SKILL.md') : entry.name.endsWith('.md') ? join(root, entry.name) : '',
-    }))
-    .filter(entry => Boolean(entry.path))
-}
-
-export function listSkills(workspace: WorkspaceRow): WorkspaceSkill[] {
-  const seen = new Set<string>()
-  const result: WorkspaceSkill[] = []
-  for (const root of skillRoots(workspace)) {
-    for (const entry of skillPathEntries(root.path)) {
-      if (seen.has(entry.name)) continue
-      try {
-        if (!existsSync(entry.path) || !statSync(entry.path).isFile()) continue
-        const content = readFileSync(entry.path, 'utf8')
-        const parsed = parseSkill(content, entry.name)
-        seen.add(parsed.name)
-        result.push({
-          id: `${root.source}:${parsed.name}`,
-          name: parsed.name,
-          description: parsed.description,
-          path: entry.path,
-          source: root.source,
-          status: parsed.status,
-          modelInvocable: parsed.modelInvocable,
-          content,
-          updatedAt: statSync(entry.path).mtime.toISOString(),
-        })
-      } catch {
-        seen.add(entry.name)
-        result.push({ id: `${root.source}:${entry.name}`, name: entry.name, description: '', path: entry.path, source: root.source, status: 'load_failed', modelInvocable: false, content: '', updatedAt: new Date(0).toISOString() })
-      }
+/** Installation jobs run in a short-lived Runtime and only need to report
+ * files written into this Workspace. Product discovery never uses this scan. */
+export function listInstalledWorkspaceSkills(workspace: WorkspaceRow): SkillCatalogEntry[] {
+  const result: SkillCatalogEntry[] = []
+  for (const root of [join(workspace.path, '.agents', 'skills'), join(workspace.path, '.codex', 'skills')]) {
+    if (!existsSync(root) || !statSync(root).isDirectory()) continue
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
+      const path = entry.isDirectory() ? join(root, entry.name, 'SKILL.md') : entry.name.endsWith('.md') ? join(root, entry.name) : ''
+      if (!path || !existsSync(path) || !statSync(path).isFile()) continue
+      const content = readFileSync(path, 'utf8')
+      const parsed = parseInstalledSkill(content, entry.isDirectory() ? entry.name : basename(entry.name, '.md'))
+      result.push({
+        id: path,
+        name: parsed.name,
+        displayName: parsed.name,
+        description: parsed.description,
+        path,
+        source: 'workspace',
+        scope: 'repo',
+        status: parsed.status,
+        modelInvocable: parsed.modelInvocable,
+        content,
+        updatedAt: statSync(path).mtime.toISOString(),
+      })
     }
   }
-  return result.sort((left, right) => left.name.localeCompare(right.name))
-}
-
-export function getSkill(workspace: WorkspaceRow, id: string): WorkspaceSkill {
-  const skill = listSkills(workspace).find(item => item.id === id || item.name === id)
-  if (!skill) throw new Error(`Skill 不存在：${id}`)
-  return skill
+  return result.sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path))
 }
