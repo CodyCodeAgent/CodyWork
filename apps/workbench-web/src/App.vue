@@ -77,7 +77,7 @@
           <section class="chat-main">
             <div v-if="conversationChannelBinding" :class="['channel-session-strip', { warning: channelBindingHasFailure }]">
               <span class="channel-session-mark">飞</span>
-              <div><strong>飞书已绑定 · {{ channelScopeLabel(conversationChannelBinding.channelScope) }}</strong><small>{{ conversationChannelBinding.botName || conversationChannelBinding.accountName || 'CodyWork Bot' }} · {{ conversationChannelBinding.connectionState === 'connected' ? '长连接正常' : '长连接' + conversationChannelBinding.connectionState }}</small><p v-if="channelBindingHasFailure">{{ conversationChannelBinding.deadLetters }} 条死信，{{ conversationChannelBinding.pendingDeliveries }} 条待投递。可在设置 → 飞书机器人中诊断和重试。</p></div>
+              <div><strong>飞书已绑定 · {{ channelScopeLabel(conversationChannelBinding.channelScope) }}</strong><small>{{ conversationChannelBinding.botName || conversationChannelBinding.accountName || 'CodyWork Bot' }} · 绑定用户 {{ maskedChannelIdentity(conversationChannelBinding.ownerIdentity) }} · {{ conversationChannelBinding.connectionState === 'connected' ? '长连接正常' : '长连接' + conversationChannelBinding.connectionState }}</small><p v-if="channelBindingHasFailure">{{ conversationChannelBinding.deadLetters }} 条死信，{{ conversationChannelBinding.pendingDeliveries }} 条待投递。可在设置 → 飞书机器人中诊断和重试。</p></div>
               <button type="button" @click="copyCurrentConversationLink">复制会话链接</button>
               <button class="danger" type="button" :disabled="unbindingChannel" @click="unbindCurrentChannel">{{ unbindingChannel ? '解绑中…' : '解除绑定' }}</button>
             </div>
@@ -177,6 +177,7 @@ import {
   filterSkills,
   groupThreadProjects,
   matchDemandRoute,
+  maskedChannelIdentity,
   parseWorkbenchRoute,
   threadTitle,
   skillSearchSummary,
@@ -402,10 +403,10 @@ async function showEarlierConversationEntries(): Promise<void> {
 }
 function routeParams() { return parseWorkbenchRoute(window.location.search) }
 function demandFromRoute(id: string): Demand | undefined { return matchDemandRoute(demands.value, id) }
-function updateRoute(demand: Demand | null, mode: HistoryMode): void {
+function updateRoute(demand: Demand | null, mode: HistoryMode, conversationId: string | null = null): void {
   if (mode === 'none') return
   const page = activePage.value === 'chat' ? 'dashboard' : activePage.value
-  const url = workbenchUrl(window.location.href, workspace.value?.id ?? null, demand?.id ?? null, { page, settingsSection: settingsSection.value })
+  const url = workbenchUrl(window.location.href, workspace.value?.id ?? null, demand?.id ?? null, { page, settingsSection: settingsSection.value, conversationId })
   const next = `${url.pathname}${url.search}${url.hash}`
   if (mode === 'replace') window.history.replaceState({}, '', next)
   else window.history.pushState({}, '', next)
@@ -431,7 +432,7 @@ async function loadWorkspaces(): Promise<void> {
     const active = nextWorkspaces.find((item) => item.id === route.workspaceId)
       ?? nextWorkspaces.find((item) => item.active)
       ?? nextWorkspaces[0]
-    if (active) await selectWorkspace(active, { demandId: route.demandId, page: route.page, settingsSection: route.settingsSection, history: 'replace' })
+    if (active) await selectWorkspace(active, { demandId: route.demandId, conversationId: route.conversationId, page: route.page, settingsSection: route.settingsSection, history: 'replace' })
   } catch (cause) {
     if (sequence === workspaceLoadSequence) error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -456,7 +457,7 @@ async function openSettingsSection(section: WorkbenchSettingsSection): Promise<v
   if (section === 'runtime') await loadRuntime()
   if (section === 'quick-actions') await Promise.all([loadQuickActions(), loadSkills()])
 }
-async function selectWorkspace(next: Workspace, options: { demandId?: string | null; page?: Exclude<Page, 'chat'>; settingsSection?: WorkbenchSettingsSection; history?: HistoryMode } = {}): Promise<void> {
+async function selectWorkspace(next: Workspace, options: { demandId?: string | null; conversationId?: string | null; page?: Exclude<Page, 'chat'>; settingsSection?: WorkbenchSettingsSection; history?: HistoryMode } = {}): Promise<void> {
   // The list response is already authoritative enough to restore the shell.  Do
   // this before the optional "open" acknowledgement so a transient POST error
   // can never make an existing Workspace look as if it disappeared.
@@ -482,7 +483,7 @@ async function selectWorkspace(next: Workspace, options: { demandId?: string | n
     repositories.value = nextRepositories
     await refreshDashboard()
     const requestedDemand = options.demandId ? demandFromRoute(options.demandId) : undefined
-    if (requestedDemand) await openDemand(requestedDemand, options.history ?? 'push')
+    if (requestedDemand) await openDemand(requestedDemand, options.history ?? 'push', options.conversationId)
     else {
       activePage.value = options.page ?? 'dashboard'
       settingsSection.value = options.settingsSection ?? 'overview'
@@ -738,16 +739,21 @@ async function confirmBaselineCleanup(): Promise<void> {
     clearingRepositoryId.value = ''
   }
 }
-async function openDemand(demand: Demand, history: HistoryMode = 'push'): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; updateRoute(demand, history); await Promise.all([loadComposerOptions(demand.id), loadSkills(), loadQuickActions()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; await openConversation(conversations.value[0]!) }
+async function openDemand(demand: Demand, history: HistoryMode = 'push', preferredConversationId: string | null = null): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; updateRoute(demand, history); await Promise.all([loadComposerOptions(demand.id), loadSkills(), loadQuickActions()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; const target = conversations.value.find(item => item.id === preferredConversationId) ?? conversations.value[0]!; await openConversation(target, history === 'none' ? 'none' : 'replace') }
 function returnToDemandList(): void { selectedDemand.value = null; clearConversationState(); activePage.value = 'demands'; updateRoute(null, 'push') }
 async function restoreRoute(): Promise<void> {
   const route = routeParams()
   const nextWorkspace = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspace.value
   if (!nextWorkspace) return
-  if (workspace.value?.id !== nextWorkspace.id) { await selectWorkspace(nextWorkspace, { demandId: route.demandId, page: route.page, settingsSection: route.settingsSection, history: 'none' }); return }
+  if (workspace.value?.id !== nextWorkspace.id) { await selectWorkspace(nextWorkspace, { demandId: route.demandId, conversationId: route.conversationId, page: route.page, settingsSection: route.settingsSection, history: 'none' }); return }
   if (route.demandId) {
     const demand = demandFromRoute(route.demandId)
-    if (demand && selectedDemand.value?.id !== demand.id) await openDemand(demand, 'none')
+    if (demand && selectedDemand.value?.id !== demand.id) await openDemand(demand, 'none', route.conversationId)
+    else if (demand && route.conversationId && selectedConversation.value?.id !== route.conversationId) {
+      const conversation = conversations.value.find(item => item.id === route.conversationId)
+      if (conversation) await openConversation(conversation, 'none')
+      else error.value = '链接中的会话不存在。'
+    }
     else if (!demand) error.value = '链接中的 Demand 不存在。'
     return
   }
@@ -808,7 +814,7 @@ async function connect(conversation: Conversation): Promise<void> {
     },
   })
 }
-async function openConversation(conversation: Conversation): Promise<void> { selectedConversation.value = conversation; permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; conversationChannelBindings.value = []; channelBindingMessage.value = ''; error.value = ''; await Promise.all([connect(conversation), loadConversationChannelBindings(conversation)]); await scrollToBottom(true) }
+async function openConversation(conversation: Conversation, history: HistoryMode = 'push'): Promise<void> { selectedConversation.value = conversation; updateRoute(selectedDemand.value, history, conversation.id); permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; conversationChannelBindings.value = []; channelBindingMessage.value = ''; error.value = ''; await Promise.all([connect(conversation), loadConversationChannelBindings(conversation)]); await scrollToBottom(true) }
 async function loadConversationChannelBindings(conversation: Conversation): Promise<void> {
   const activeWorkspace = workspace.value
   if (!activeWorkspace) return

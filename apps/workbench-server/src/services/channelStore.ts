@@ -2,6 +2,7 @@ import type { ChannelBinding, ChannelInboundMessage, ChannelInboxItem, ChannelIn
 import { channelConversationKey } from '@codycodeagent/cody-web-core/channel'
 import { makeId, nowIso, type WorkbenchDb } from '../db/index.js'
 import { openChannelCredential, sealChannelCredential } from './channelCredentials.js'
+import type { FeishuConnectionDiagnostic } from '@codycodeagent/cody-web-core/feishu'
 
 export type ChannelAccountInput = {
   name: string
@@ -33,6 +34,11 @@ export type ChannelAccount = {
   botName: string
   connectionState: string
   lastError: string
+  lastCloseCode: number | null
+  lastCloseReason: string
+  lastDisconnectedAt: string | null
+  reconnectAttempts: number
+  nextReconnectAt: string | null
   connectedAt: string | null
   lastEventAt: string | null
   lastDeliveryAt: string | null
@@ -47,6 +53,8 @@ type AccountRow = {
   allow_all_users: number; allowed_user_ids_json: string; allowed_conversation_ids_json: string
   group_mention_mode: string; private_conversation_mode: string; bot_open_id: string | null; bot_name: string | null
   connection_state: string; last_error: string | null; connected_at: string | null; last_event_at: string | null
+  last_close_code: number | null; last_close_reason: string | null; last_disconnected_at: string | null
+  reconnect_attempts: number; next_reconnect_at: string | null
   last_delivery_at: string | null; created_at: string; updated_at: string
 }
 
@@ -137,7 +145,9 @@ function toAccount(row: AccountRow): ChannelAccount {
     allowedUserIds: parseStringList(row.allowed_user_ids_json), allowedConversationIds: parseStringList(row.allowed_conversation_ids_json),
     groupMentionMode: row.group_mention_mode === 'bound' ? 'bound' : 'always', privateConversationMode: row.private_conversation_mode === 'topic' ? 'topic' : 'chat',
     botOpenId: row.bot_open_id ?? '', botName: row.bot_name ?? '', connectionState: row.connection_state,
-    lastError: row.last_error ?? '', connectedAt: row.connected_at, lastEventAt: row.last_event_at, lastDeliveryAt: row.last_delivery_at,
+    lastError: row.last_error ?? '', lastCloseCode: row.last_close_code, lastCloseReason: row.last_close_reason ?? '',
+    lastDisconnectedAt: row.last_disconnected_at, reconnectAttempts: row.reconnect_attempts, nextReconnectAt: row.next_reconnect_at,
+    connectedAt: row.connected_at, lastEventAt: row.last_event_at, lastDeliveryAt: row.last_delivery_at,
     createdAt: row.created_at, updatedAt: row.updated_at,
   }
 }
@@ -222,10 +232,16 @@ export class ChannelStore implements ChannelOutboxStore {
     this.database.db.prepare(`UPDATE channel_accounts SET name = ?, app_id = ?, secret_cipher = ?, domain = ?, enabled = ?, allow_all_users = ?,
       allowed_user_ids_json = ?, allowed_conversation_ids_json = ?, group_mention_mode = ?, private_conversation_mode = ?,
       bot_open_id = CASE WHEN app_id = ? THEN bot_open_id ELSE NULL END, bot_name = CASE WHEN app_id = ? THEN bot_name ELSE NULL END,
-      connection_state = CASE WHEN app_id = ? THEN connection_state ELSE 'idle' END, last_error = NULL, updated_at = ? WHERE id = ?`)
+      connection_state = CASE WHEN app_id = ? THEN connection_state ELSE 'idle' END, last_error = NULL,
+      last_close_code = CASE WHEN app_id = ? THEN last_close_code ELSE NULL END,
+      last_close_reason = CASE WHEN app_id = ? THEN last_close_reason ELSE NULL END,
+      last_disconnected_at = CASE WHEN app_id = ? THEN last_disconnected_at ELSE NULL END,
+      reconnect_attempts = CASE WHEN app_id = ? THEN reconnect_attempts ELSE 0 END,
+      next_reconnect_at = CASE WHEN app_id = ? THEN next_reconnect_at ELSE NULL END,
+      updated_at = ? WHERE id = ?`)
       .run(name, appId, secretCipher, input.domain === 'lark' ? 'lark' : 'feishu', input.enabled ? 1 : 0, input.allowAllUsers ? 1 : 0,
         JSON.stringify(users), JSON.stringify(conversations), input.groupMentionMode === 'bound' ? 'bound' : 'always', input.privateConversationMode === 'topic' ? 'topic' : 'chat',
-        current.appId, current.appId, current.appId, now, id)
+        current.appId, current.appId, current.appId, current.appId, current.appId, current.appId, current.appId, current.appId, now, id)
     return toAccount(this.database.db.prepare('SELECT * FROM channel_accounts WHERE id = ?').get(id) as AccountRow)
   }
 
@@ -234,12 +250,14 @@ export class ChannelStore implements ChannelOutboxStore {
       name = ?, app_id = ?, secret_cipher = ?, domain = ?, enabled = ?, allow_all_users = ?,
       allowed_user_ids_json = ?, allowed_conversation_ids_json = ?, group_mention_mode = ?, private_conversation_mode = ?,
       bot_open_id = ?, bot_name = ?, connection_state = ?, last_error = ?, connected_at = ?, last_event_at = ?,
-      last_delivery_at = ?, updated_at = ? WHERE id = ?`)
+      last_delivery_at = ?, last_close_code = ?, last_close_reason = ?, last_disconnected_at = ?, reconnect_attempts = ?,
+      next_reconnect_at = ?, updated_at = ? WHERE id = ?`)
       .run(account.name, account.appId, sealChannelCredential(account.appSecret, account.id, this.database.path), account.domain,
         account.enabled ? 1 : 0, account.allowAllUsers ? 1 : 0, JSON.stringify(account.allowedUserIds),
         JSON.stringify(account.allowedConversationIds), account.groupMentionMode, account.privateConversationMode,
         account.botOpenId || null, account.botName || null, account.connectionState, account.lastError || null,
-        account.connectedAt, account.lastEventAt, account.lastDeliveryAt, account.updatedAt, account.id)
+        account.connectedAt, account.lastEventAt, account.lastDeliveryAt, account.lastCloseCode, account.lastCloseReason || null,
+        account.lastDisconnectedAt, account.reconnectAttempts, account.nextReconnectAt, account.updatedAt, account.id)
     if (result.changes === 0) throw new Error('飞书机器人不存在')
   }
 
@@ -248,7 +266,7 @@ export class ChannelStore implements ChannelOutboxStore {
     if (result.changes === 0) throw new Error('飞书机器人不存在')
   }
 
-  updateRuntime(id: string, input: { connectionState?: string; error?: string; botOpenId?: string; botName?: string; connected?: boolean; event?: boolean; delivery?: boolean }): void {
+  updateRuntime(id: string, input: { connectionState?: string; error?: string; botOpenId?: string; botName?: string; connected?: boolean; event?: boolean; delivery?: boolean; connectionDiagnostic?: FeishuConnectionDiagnostic }): void {
     const now = nowIso()
     this.database.db.prepare(`UPDATE channel_accounts SET connection_state = COALESCE(?, connection_state),
       last_error = CASE WHEN ? THEN ? ELSE last_error END,
@@ -257,6 +275,17 @@ export class ChannelStore implements ChannelOutboxStore {
       last_delivery_at = CASE WHEN ? THEN ? ELSE last_delivery_at END, updated_at = ? WHERE id = ?`)
       .run(input.connectionState ?? null, input.error !== undefined ? 1 : 0, input.error?.slice(0, 1_000) || null, input.botOpenId || null, input.botName || null,
         input.connected ? 1 : 0, now, input.event ? 1 : 0, now, input.delivery ? 1 : 0, now, now, id)
+    const diagnostic = input.connectionDiagnostic
+    if (diagnostic) {
+      const disconnected = diagnostic.state === 'reconnecting' || diagnostic.state === 'failed'
+      this.database.db.prepare(`UPDATE channel_accounts SET reconnect_attempts = ?, next_reconnect_at = ?,
+        last_close_code = CASE WHEN ? THEN ? ELSE last_close_code END,
+        last_close_reason = CASE WHEN ? THEN ? ELSE last_close_reason END,
+        last_disconnected_at = CASE WHEN ? THEN ? ELSE last_disconnected_at END WHERE id = ?`)
+        .run(diagnostic.reconnectAttempts, diagnostic.nextConnectAtIso, disconnected ? 1 : 0, diagnostic.closeCode,
+          disconnected ? 1 : 0, diagnostic.closeReason.slice(0, 1_000) || null,
+          disconnected ? 1 : 0, diagnostic.atIso, id)
+    }
   }
 
   findBinding(accountId: string, conversationKey: string) {

@@ -11,7 +11,7 @@ import {
   type ChannelOutboxItem,
 } from '@codycodeagent/cody-web-core/channel'
 import { createConversationState, reduceConversationEvent, reduceConversationEvents, type ConversationState } from '@codycodeagent/cody-web-core/conversation'
-import { FeishuProvider, feishuSelectionCard, feishuTextCard, type FeishuCard, type FeishuCardAction } from '@codycodeagent/cody-web-core/feishu'
+import { FeishuProvider, feishuSelectionCard, feishuTextCard, type FeishuCard, type FeishuCardAction, type FeishuCardButton } from '@codycodeagent/cody-web-core/feishu'
 import type { ConversationEvent } from './conversations.js'
 import type { WorkbenchDb } from '../db/index.js'
 import { ConversationService } from './conversations.js'
@@ -87,12 +87,30 @@ export function feishuProjectionBody(projection: ReturnType<typeof projectChanne
   return stripMarkdownImages(projection.assistantText, image => image.alt ? `🖼️ ${image.alt}` : '🖼️ 图片')
 }
 
-function projectionCard(projection: ReturnType<typeof projectChannelTurn>, prompt: string): FeishuCard {
+function projectionCard(projection: ReturnType<typeof projectChannelTurn>, prompt: string, openUrl = ''): FeishuCard {
   const body = feishuProjectionBody(projection) || (projection.error ? `**${projection.error}**` : 'CodyWork 已接收消息，正在等待 Codex 输出…')
   return feishuTextCard(`CodyWork · ${statusLabel(projection.status)}`, body, {
     color: statusColor(projection.status),
+    ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
     note: `问题：${prompt.slice(0, 180)}${prompt.length > 180 ? '…' : ''}`,
   })
+}
+
+export function codyWorkConversationUrl(publicOrigin: string | undefined, binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string {
+  if (!publicOrigin?.trim()) return ''
+  try {
+    const url = new URL(publicOrigin)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+    url.pathname = '/'
+    url.search = ''
+    url.hash = ''
+    url.searchParams.set('workspace', binding.workspaceId)
+    url.searchParams.set('demand', binding.demandId)
+    url.searchParams.set('conversation', binding.conversationId)
+    return url.toString()
+  } catch {
+    return ''
+  }
 }
 
 function selectionCard(title: string, text: string, actions: Array<{ text: string; value: Record<string, unknown> }>): FeishuCard {
@@ -143,6 +161,7 @@ export class CodyWorkChannelService {
     private readonly database: WorkbenchDb,
     private readonly conversations: ConversationService,
     private readonly workspaces: WorkspaceRegistry,
+    private readonly options: { publicOrigin?: string } = {},
   ) {
     this.store = new ChannelStore(database)
     // One process-lifetime subscription follows ConversationService's owner
@@ -176,6 +195,25 @@ export class CodyWorkChannelService {
   listAccounts(): ChannelAccount[] { return this.store.listAccounts() }
 
   listBindings(accountId: string) { return this.store.listBindings(accountId) }
+
+  private openUrl(binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string {
+    return codyWorkConversationUrl(this.options?.publicOrigin, binding)
+  }
+
+  private auditDelivery(action: string, item: ChannelOutboxItem, success: boolean, error = ''): void {
+    // Delivery has already crossed the external side-effect boundary. An audit
+    // write must never turn a successful Feishu call into a retryable Outbox
+    // failure (and therefore risk a duplicate remote message).
+    try {
+      this.store.audit(item.accountId, action, 'channel_outbox', item.id, success, {
+        provider: item.provider,
+        accountId: item.accountId,
+        outboxId: item.id,
+      }, error)
+    } catch (auditError) {
+      console.error(`[codywork] failed to persist ${action} audit for ${item.id}: ${auditError instanceof Error ? auditError.message : String(auditError)}`)
+    }
+  }
 
   listConversationBindings(conversationId: string) {
     const accounts = new Map(this.store.listAccounts().map(account => [account.id, account]))
@@ -320,8 +358,13 @@ export class CodyWorkChannelService {
       await provider.start({
         onMessage: message => this.onMessage(message),
         onAction: action => this.onAction(accountId, action),
-        onState: (state, error) => {
-          this.store.updateRuntime(accountId, { connectionState: state, ...(error ? { error: error.message } : {}), connected: state === 'connected' })
+        onState: (state, error, diagnostic) => {
+          this.store.updateRuntime(accountId, {
+            connectionState: state,
+            ...(error ? { error: error.message } : state === 'connected' ? { error: '' } : {}),
+            connected: state === 'connected',
+            connectionDiagnostic: diagnostic,
+          })
           if (state === 'failed') this.scheduleAccountReconnect(accountId)
         },
       })
@@ -367,29 +410,35 @@ export class CodyWorkChannelService {
   }
 
   private async deliver(provider: FeishuProvider, accountId: string, item: ChannelOutboxItem): Promise<{ remoteMessageId?: string }> {
-    const payload = record(item.payload) as DeliveryPayload
-    const uuid = stableUuid(item.dedupeKey)
-    let remoteMessageId = ''
-    if (item.kind === 'send_text') remoteMessageId = await provider.sendText(item.targetId, payload.text ?? '', uuid)
-    else if (item.kind === 'reply_text') remoteMessageId = await provider.replyText(item.targetId, payload.text ?? '', Boolean(payload.replyInThread), uuid)
-    else if (item.kind === 'send_card') remoteMessageId = await provider.sendCard(item.targetId, payload.card ?? {}, uuid)
-    else if (item.kind === 'reply_card') remoteMessageId = await provider.replyCard(item.targetId, payload.card ?? {}, Boolean(payload.replyInThread), uuid)
-    else if (item.kind === 'send_user_card') remoteMessageId = await provider.sendUserCard(item.targetId, payload.card ?? {}, uuid)
-    else if (item.kind === 'update_card') await provider.updateCard(item.targetId, payload.card ?? {})
-    else if (item.kind === 'send_image') remoteMessageId = await provider.sendImage(item.targetId, payload.imageKey ?? '', uuid)
-    else if (item.kind === 'send_local_image') {
-      const path = payload.path ?? ''
-      const root = payload.root ?? ''
-      if (!await this.isAllowedChannelImage(path, root)) throw new Error('Channel image is outside the bound Demand or uses an unsupported format')
-      const imageKey = await provider.uploadImage(await readFile(path))
-      remoteMessageId = payload.replyMessageId
-        ? await provider.replyImage(payload.replyMessageId, imageKey, payload.replyInThread === true, uuid)
-        : await provider.sendImage(item.targetId, imageKey, uuid)
+    try {
+      const payload = record(item.payload) as DeliveryPayload
+      const uuid = stableUuid(item.dedupeKey)
+      let remoteMessageId = ''
+      if (item.kind === 'send_text') remoteMessageId = await provider.sendText(item.targetId, payload.text ?? '', uuid)
+      else if (item.kind === 'reply_text') remoteMessageId = await provider.replyText(item.targetId, payload.text ?? '', Boolean(payload.replyInThread), uuid)
+      else if (item.kind === 'send_card') remoteMessageId = await provider.sendCard(item.targetId, payload.card ?? {}, uuid)
+      else if (item.kind === 'reply_card') remoteMessageId = await provider.replyCard(item.targetId, payload.card ?? {}, Boolean(payload.replyInThread), uuid)
+      else if (item.kind === 'send_user_card') remoteMessageId = await provider.sendUserCard(item.targetId, payload.card ?? {}, uuid)
+      else if (item.kind === 'update_card') await provider.updateCard(item.targetId, payload.card ?? {})
+      else if (item.kind === 'send_image') remoteMessageId = await provider.sendImage(item.targetId, payload.imageKey ?? '', uuid)
+      else if (item.kind === 'send_local_image') {
+        const path = payload.path ?? ''
+        const root = payload.root ?? ''
+        if (!await this.isAllowedChannelImage(path, root)) throw new Error('Channel image is outside the bound Demand or uses an unsupported format')
+        const imageKey = await provider.uploadImage(await readFile(path))
+        remoteMessageId = payload.replyMessageId
+          ? await provider.replyImage(payload.replyMessageId, imageKey, payload.replyInThread === true, uuid)
+          : await provider.sendImage(item.targetId, imageKey, uuid)
+      }
+      else if (item.kind === 'reply_image') remoteMessageId = await provider.replyImage(item.targetId, payload.imageKey ?? '', Boolean(payload.replyInThread), uuid)
+      else throw new Error(`Unsupported Feishu delivery kind: ${item.kind}`)
+      this.store.updateRuntime(accountId, { delivery: true })
+      this.auditDelivery('channel.outbox.delivered', item, true)
+      return remoteMessageId ? { remoteMessageId } : {}
+    } catch (error) {
+      this.auditDelivery('channel.outbox.delivery_failed', item, false, error instanceof Error ? error.message : String(error))
+      throw error
     }
-    else if (item.kind === 'reply_image') remoteMessageId = await provider.replyImage(item.targetId, payload.imageKey ?? '', Boolean(payload.replyInThread), uuid)
-    else throw new Error(`Unsupported Feishu delivery kind: ${item.kind}`)
-    this.store.updateRuntime(accountId, { delivery: true })
-    return remoteMessageId ? { remoteMessageId } : {}
   }
 
   private async enqueue(accountId: string, input: Parameters<ReliableChannelOutbox['enqueue']>[0]): Promise<ChannelOutboxItem> {
@@ -424,7 +473,10 @@ export class CodyWorkChannelService {
       const decision = this.allowed(account, message, binding)
       if (!decision.allowed) {
         this.store.updateInbox(claimed.item.id, 'ignored', { lastError: decision.reason })
-        this.store.audit(account.id, 'channel.inbound.ignored', 'channel_inbox', claimed.item.id, true, { reason: decision.reason })
+        this.store.audit(account.id, 'channel.inbound.ignored', 'channel_inbox', claimed.item.id, true, {
+          provider: message.provider, accountId: message.accountId, eventId: message.eventId, messageId: message.messageId,
+          conversationKey: key, inboxId: claimed.item.id, ...(binding ? { bindingId: binding.id, threadId: binding.threadId } : {}), reason: decision.reason,
+        })
         return
       }
       if (binding && command.startsWith('/')) return void await this.handleCommand(binding, claimed.item.id, command)
@@ -434,7 +486,10 @@ export class CodyWorkChannelService {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       this.store.updateInbox(claimed.item.id, 'failed', { lastError: detail })
-      this.store.audit(message.accountId, 'channel.inbound.failed', 'channel_inbox', claimed.item.id, false, { command: command.startsWith('/') }, detail)
+      this.store.audit(message.accountId, 'channel.inbound.failed', 'channel_inbox', claimed.item.id, false, {
+        provider: message.provider, accountId: message.accountId, eventId: message.eventId, messageId: message.messageId,
+        conversationKey: claimed.item.conversationKey, inboxId: claimed.item.id, command: command.startsWith('/'),
+      }, detail)
       if (command.startsWith('/')) {
         await this.enqueue(message.accountId, {
           kind: 'reply_text', targetId: message.messageId,
@@ -534,8 +589,15 @@ export class CodyWorkChannelService {
     // a brand-new empty thread and would otherwise leave a durable binding in
     // place while the Feishu card reports a failed action.
     await this.observe(binding, { emptyHistory: isNewSession })
-    const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。接下来在本对话发送的消息会进入同一个 Codex Thread。`, { color: 'green' })
+    const openUrl = this.openUrl(binding)
+    const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。接下来在本对话发送的消息会进入同一个 Codex Thread。`, {
+      color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
+    })
     await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
+    this.store.audit(accountId, 'channel.binding.created', 'channel_binding', binding.id, true, {
+      provider: inbox.message.provider, accountId, eventId: inbox.message.eventId, messageId: inbox.message.messageId,
+      conversationKey: inbox.conversationKey, bindingId: binding.id, threadId: binding.threadId, inboxId: inbox.id,
+    })
     await this.submitInbox(inbox.id, binding)
     return card
   }
@@ -567,7 +629,7 @@ export class CodyWorkChannelService {
     const presentation = this.store.createPresentation({ accountId: inbox.message.accountId, bindingId: binding.id, turnLinkId, purpose: 'turn', state: { prompt } })
     this.store.updateInbox(inboxId, 'submitting', { bindingId: binding.id, clientCommandId: commandId })
     await this.observe(binding)
-    const initial = projectionCard({ threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0 }, prompt)
+    const initial = projectionCard({ threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0 }, prompt, this.openUrl(binding))
     const sent = await this.enqueue(inbox.message.accountId, {
       kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: inbox.message.conversation.scope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
     })
@@ -576,6 +638,10 @@ export class CodyWorkChannelService {
       await this.conversations.send(binding.workspaceId, binding.conversationId, prompt, 'queue', undefined, commandId, localImages)
       this.store.updateInbox(inboxId, 'submitted', { clientCommandId: commandId })
       this.store.updateTurnLink(commandId, { status: 'submitted' })
+      this.store.audit(binding.accountId, 'channel.inbound.submitted', 'channel_inbox', inbox.id, true, {
+        provider: inbox.message.provider, accountId: binding.accountId, eventId: inbox.message.eventId, messageId: inbox.message.messageId,
+        conversationKey: inbox.conversationKey, bindingId: binding.id, threadId: binding.threadId, inboxId: inbox.id,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.store.updateInbox(inboxId, 'failed', { lastError: message })
@@ -673,6 +739,13 @@ export class CodyWorkChannelService {
       if (link) {
         this.store.updateTurnLink(link.clientCommandId, { turnId: event.turnId, status: 'running' })
         this.store.updateInbox(link.inboxId, 'submitted', { turnId: event.turnId })
+        const binding = this.store.getBinding(link.bindingId)
+        const inbox = this.store.getInbox(link.inboxId)
+        this.store.audit(binding.accountId, 'channel.turn.bound', 'channel_turn_link', link.id, true, {
+          provider: inbox.message.provider, accountId: binding.accountId, eventId: inbox.message.eventId, messageId: inbox.message.messageId,
+          conversationKey: inbox.conversationKey, bindingId: binding.id, threadId: binding.threadId, turnId: event.turnId,
+          inboxId: inbox.id,
+        })
       }
     }
     if (event.type === 'command.failed' && event.itemId) {
@@ -780,7 +853,7 @@ export class CodyWorkChannelService {
     if (!presentation) return
     const projection = projectChannelTurn(observation.state, turnId, presentation.revision + 1)
     const prompt = string(presentation.state.prompt)
-    const card = projectionCard(projection, prompt)
+    const card = projectionCard(projection, prompt, this.openUrl(binding))
     let remoteMessageId = presentation.remoteMessageId
     if (!remoteMessageId) {
       const outboxId = string(presentation.state.outboxId)
@@ -806,7 +879,11 @@ export class CodyWorkChannelService {
   private async renderCommandFailure(turnLinkId: string, error: string): Promise<void> {
     const presentation = this.findTurnPresentation(turnLinkId)
     if (!presentation) return
-    const card = feishuTextCard('CodyWork · 提交失败', `**${error}**\n\n消息未被静默重发。请发送 \`/retry\` 明确重试。`, { color: 'red' })
+    let openUrl = ''
+    try { openUrl = this.openUrl(this.store.getBinding(presentation.bindingId)) } catch { /* a removed binding has no valid deep link */ }
+    const card = feishuTextCard('CodyWork · 提交失败', `**${error}**\n\n消息未被静默重发。请发送 \`/retry\` 明确重试。`, {
+      color: 'red', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
+    })
     let remoteMessageId = presentation.remoteMessageId
     if (!remoteMessageId) {
       const outboxId = string(presentation.state.outboxId)
@@ -890,12 +967,14 @@ export class CodyWorkChannelService {
     })
     if (request.status !== 'pending' || request.remoteMessageId) return
     const method = string(event.data.method) || (kind === 'approval' ? '工具调用' : '需要输入')
-    const actions = kind === 'approval'
+    const actions: FeishuCardButton[] = kind === 'approval'
       ? [
           { text: '允许一次', value: { action: 'channel.approval', interactiveRequestId: request.id, requestId, outcome: 'allowed-once' }, type: 'primary' as const },
           { text: '拒绝', value: { action: 'channel.approval', interactiveRequestId: request.id, requestId, outcome: 'rejected' }, type: 'danger' as const },
         ]
       : this.questionActions(request.id, requestId, event.data)
+    const openUrl = this.openUrl(binding)
+    if (openUrl) actions.push({ text: '在 CodyWork 中打开', url: openUrl })
     const card = feishuTextCard(
       kind === 'approval' ? 'CodyWork 请求审批' : 'CodyWork 等待回答',
       interactiveRequestSummary(kind, method, event.data),
@@ -985,7 +1064,8 @@ export class CodyWorkChannelService {
     const [name, ...args] = command.split(/\s+/u)
     if (name === '/status') {
       const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
-      await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: `已绑定：${conversation.title}\nThread：${binding.threadId}\n连接：${this.runtimes.get(binding.accountId)?.provider.getState() ?? 'offline'}` }, dedupeKey: `${inbox.id}:status`, terminal: true })
+      const openUrl = this.openUrl(binding)
+      await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: `已绑定：${conversation.title}\nThread：${binding.threadId}\n连接：${this.runtimes.get(binding.accountId)?.provider.getState() ?? 'offline'}${openUrl ? `\n在 CodyWork 中打开：${openUrl}` : ''}` }, dedupeKey: `${inbox.id}:status`, terminal: true })
       this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id }); return
     }
     if (name === '/unbind') {

@@ -108,6 +108,39 @@ describe('CodyWork channel persistence', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('persists honest reconnect diagnostics and retains the last disconnect after recovery', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_connection_diagnostics', appSecret: 'secret' })
+    store.updateRuntime(account.id, {
+      connectionState: 'reconnecting',
+      connectionDiagnostic: {
+        state: 'reconnecting', atIso: '2026-09-05T01:00:00.000Z', reconnectAttempts: 2,
+        lastConnectAtIso: '2026-09-05T00:59:00.000Z', nextConnectAtIso: '2026-09-05T01:00:10.000Z',
+        closeCode: null, closeReason: 'Feishu WebSocket 已关闭，SDK 正在自动重连',
+      },
+    })
+    expect(store.getAccount(account.id)).toMatchObject({
+      connectionState: 'reconnecting', reconnectAttempts: 2, nextReconnectAt: '2026-09-05T01:00:10.000Z',
+      lastCloseCode: null, lastCloseReason: 'Feishu WebSocket 已关闭，SDK 正在自动重连',
+      lastDisconnectedAt: '2026-09-05T01:00:00.000Z',
+    })
+    store.updateRuntime(account.id, {
+      connectionState: 'connected',
+      connectionDiagnostic: {
+        state: 'connected', atIso: '2026-09-05T01:00:08.000Z', reconnectAttempts: 0,
+        lastConnectAtIso: '2026-09-05T01:00:08.000Z', nextConnectAtIso: null, closeCode: null, closeReason: '',
+      },
+    })
+    expect(store.getAccount(account.id)).toMatchObject({
+      connectionState: 'connected', reconnectAttempts: 0, nextReconnectAt: null,
+      lastCloseReason: 'Feishu WebSocket 已关闭，SDK 正在自动重连',
+    })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('reports queued work and retryable deliveries, and can remove a binding by id', async () => {
     const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
     const db = new WorkbenchDb(join(root, 'workspace.db'))

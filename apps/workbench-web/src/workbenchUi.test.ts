@@ -13,6 +13,7 @@ import {
   groupThreadProjects,
   matchDemandRoute,
   parseWorkbenchRoute,
+  maskedChannelIdentity,
   sameNameSkills,
   skillIdentityDescription,
   threadTitle,
@@ -84,9 +85,16 @@ describe('workbench UI rules', () => {
   it('round-trips stable Workspace and Demand deep links', () => {
     const url = workbenchUrl('http://localhost:3001/?workspace=old&debug=1', 'ws-1', 'demand-1')
     expect(url.toString()).toBe('http://localhost:3001/?workspace=ws-1&debug=1&demand=demand-1')
-    expect(parseWorkbenchRoute(url.search)).toEqual({ workspaceId: 'ws-1', demandId: 'demand-1', page: 'dashboard', settingsSection: 'overview' })
+    expect(parseWorkbenchRoute(url.search)).toEqual({ workspaceId: 'ws-1', demandId: 'demand-1', conversationId: null, page: 'dashboard', settingsSection: 'overview' })
     const demands = [demand('demand-1', 'feat/one')]
     expect(matchDemandRoute(demands, 'feat/one')?.id).toBe('demand-1')
+  })
+
+  it('round-trips an exact conversation without leaking it to static pages', () => {
+    const url = workbenchUrl('http://localhost:3001/', 'ws-1', 'demand-1', { conversationId: 'conversation-1' })
+    expect(parseWorkbenchRoute(url.search).conversationId).toBe('conversation-1')
+    expect(workbenchUrl(url.toString(), 'ws-1', null, { page: 'settings' }).searchParams.has('conversation')).toBe(false)
+    expect(maskedChannelIdentity('ou_e685821b0906e078a5f8a37a100a8088')).toBe('ou_••••8088')
   })
 
   it('round-trips settings subpages without leaking them into Demand links', () => {

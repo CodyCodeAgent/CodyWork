@@ -223,6 +223,11 @@ export class WorkbenchDb {
         bot_name TEXT,
         connection_state TEXT NOT NULL DEFAULT 'idle',
         last_error TEXT,
+        last_close_code INTEGER,
+        last_close_reason TEXT,
+        last_disconnected_at TEXT,
+        reconnect_attempts INTEGER NOT NULL DEFAULT 0,
+        next_reconnect_at TEXT,
         connected_at TEXT,
         last_event_at TEXT,
         last_delivery_at TEXT,
@@ -345,6 +350,17 @@ export class WorkbenchDb {
       );
       CREATE INDEX IF NOT EXISTS channel_audit_recent ON channel_audit_events(account_id, created_at DESC);
     `)
+    const channelAccountColumns = new Set((this.db.prepare('PRAGMA table_info(channel_accounts)').all() as { name?: string }[]).map(column => column.name))
+    const channelAccountMigrations = [
+      ['last_close_code', 'INTEGER'],
+      ['last_close_reason', 'TEXT'],
+      ['last_disconnected_at', 'TEXT'],
+      ['reconnect_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+      ['next_reconnect_at', 'TEXT'],
+    ] as const
+    for (const [column, definition] of channelAccountMigrations) {
+      if (!channelAccountColumns.has(column)) this.db.exec(`ALTER TABLE channel_accounts ADD COLUMN ${column} ${definition}`)
+    }
     const interactiveRequestColumns = this.db.prepare('PRAGMA table_info(channel_interactive_requests)').all() as { name?: string }[]
     if (!interactiveRequestColumns.some(column => column.name === 'request_key')) {
       // App Server request ids are process-local counters and restart from 0.

@@ -19,10 +19,12 @@ CodyWork 内嵌一个 Channel Host。它把飞书消息接入现有的 Workspace
 4. 绑定后用稳定 `clientCommandId` 调用 CodyWork 的 `ConversationService.send`，复用浏览器正在使用的同一个 Runtime owner 和原生 Thread。
 5. Core reducer 将同一事件流投影成飞书卡片；卡片 revision、远端 message ID 和终态只作为 presentation 数据保存。
 6. 所有出站消息先进入 `channel_outbox`，再通过带租约的 worker 投递；可重试错误指数退避，永久错误进入死信。
+7. 绑定完成、执行中、终态和交互卡片均可附带“在 CodyWork 中打开”，直接定位同一 Workspace、Demand 和 Conversation；公开入口由 `CODYWORK_PUBLIC_ORIGIN` 配置。
 
 ## 恢复语义
 
 - 飞书 SDK 长连接自行重连；终态断开后 Channel Host 延迟重建 provider，不重启 Codex App Server。
+- 连接诊断保存重连次数、下次重连时间和最近一次断开原因。当前飞书 SDK 没有暴露底层 WebSocket close code，因此界面明确显示“SDK 未提供”，不会伪造关闭码。
 - 已取得原生 Turn ID 的消息在服务重启后从 Thread 历史恢复投影。
 - 还未进入提交阶段的消息可安全继续。
 - 已标记 `submitting` 但没有 Turn ID 的消息属于结果不确定，必须失败并提示 `/retry`，绝不静默重发。
@@ -36,6 +38,13 @@ CodyWork 内嵌一个 Channel Host。它把飞书消息接入现有的 Workspace
 - 用户默认拒绝；启用前必须配置允许用户，或显式选择允许所有用户。
 - 群聊默认全部拒绝，只有配置的 chat ID 可进入；默认每条消息必须 @机器人。
 - 附件只写到 Demand `docs/.channel-attachments/`，文件名经过清理并限制大小。
+- 浏览器只展示脱敏后的绑定用户标识；审计记录按可用性关联 provider、account、event、message、conversation key、binding、thread、turn、Inbox 和 Outbox，不记录凭证明文。
+
+## 部署配置
+
+- `CODYWORK_PUBLIC_ORIGIN`：浏览器可访问的 CodyWork 根地址，例如 `http://10.37.222.12:3001`。它只用于生成飞书卡片中的精确会话深链，同时加入允许的浏览器 Origin。
+- `CODYWORK_CHANNEL_KEY`：可选的凭证主密钥；未设置时使用部署目录中的 `.runtime/channel-credentials.key`。
+- 正式发布必须将 Server 和 Web 同时锁定到同一个 Core tag，避免通道卡片契约发生版本漂移。
 
 ## 飞书开放平台
 

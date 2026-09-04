@@ -4,7 +4,7 @@ import type { ConversationState } from '@codycodeagent/cody-web-core/conversatio
 export type HistoryMode = 'push' | 'replace' | 'none'
 export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings'
 export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions' | 'feishu'
-export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
+export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; conversationId: string | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
 
 export function skillSourceLabel(source: WorkspaceSkill['source'] | ComposerSkillSource): string {
@@ -132,29 +132,39 @@ export function parseWorkbenchRoute(search: string): WorkbenchRoute {
   const page: WorkbenchStaticPage = view === 'demands' || view === 'knowledge' || view === 'skills' || view === 'settings' ? view : 'dashboard'
   const section = params.get('settings')
   const settingsSection: WorkbenchSettingsSection = section === 'runtime' || section === 'quick-actions' || section === 'feishu' ? section : 'overview'
-  return { workspaceId: params.get('workspace'), demandId: params.get('demand'), page, settingsSection }
+  return { workspaceId: params.get('workspace'), demandId: params.get('demand'), conversationId: params.get('conversation'), page, settingsSection }
 }
 
 export function matchDemandRoute(demands: Demand[], id: string): Demand | undefined {
   return demands.find(demand => demand.id === id || demand.worktreeKey === id || demand.branchName === id)
 }
 
-export function workbenchUrl(current: string, workspaceId: string | null, demandId: string | null, route?: { page?: WorkbenchStaticPage; settingsSection?: WorkbenchSettingsSection }): URL {
+export function workbenchUrl(current: string, workspaceId: string | null, demandId: string | null, route?: { page?: WorkbenchStaticPage; settingsSection?: WorkbenchSettingsSection; conversationId?: string | null }): URL {
   const url = new URL(current)
   if (workspaceId) url.searchParams.set('workspace', workspaceId)
   else url.searchParams.delete('workspace')
   if (demandId) {
     url.searchParams.set('demand', demandId)
+    if (route?.conversationId) url.searchParams.set('conversation', route.conversationId)
+    else url.searchParams.delete('conversation')
     url.searchParams.delete('view')
     url.searchParams.delete('settings')
   } else {
     url.searchParams.delete('demand')
+    url.searchParams.delete('conversation')
     if (route?.page && route.page !== 'dashboard') url.searchParams.set('view', route.page)
     else url.searchParams.delete('view')
     if (route?.page === 'settings' && route.settingsSection && route.settingsSection !== 'overview') url.searchParams.set('settings', route.settingsSection)
     else url.searchParams.delete('settings')
   }
   return url
+}
+
+export function maskedChannelIdentity(value: string): string {
+  const identity = value.trim()
+  if (!identity) return '未知用户'
+  if (identity.length <= 8) return `${identity.slice(0, 2)}••${identity.slice(-2)}`
+  return `${identity.slice(0, 3)}••••${identity.slice(-4)}`
 }
 
 export function conversationStatusFromState(metadataStatus: Conversation['status'], state: ConversationState | null): Conversation['status'] {

@@ -246,6 +246,11 @@ export interface FeishuChannelAccount {
   botName: string
   connectionState: string
   lastError: string
+  lastCloseCode: number | null
+  lastCloseReason: string
+  lastDisconnectedAt: string | null
+  reconnectAttempts: number
+  nextReconnectAt: string | null
   connectedAt: string | null
   lastEventAt: string | null
   lastDeliveryAt: string | null

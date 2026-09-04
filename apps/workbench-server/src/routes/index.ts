@@ -233,7 +233,7 @@ function workspaceRegistry(ctx: AppContext): WorkspaceRegistry {
 }
 
 export function channelService(ctx: AppContext): CodyWorkChannelService {
-  if (!ctx.channels) ctx.channels = new CodyWorkChannelService(ctx.db, conversationService(ctx), workspaceRegistry(ctx))
+  if (!ctx.channels) ctx.channels = new CodyWorkChannelService(ctx.db, conversationService(ctx), workspaceRegistry(ctx), { publicOrigin })
   return ctx.channels
 }
 

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createConversationState } from '@codycodeagent/cody-web-core/conversation'
 import type { ChannelInboundMessage, ChannelInboxItem } from '@codycodeagent/cody-web-core/channel'
 import type { ConversationEvent } from '../src/services/conversations.js'
-import { CodyWorkChannelService, feishuProjectionBody } from '../src/services/channelBot.js'
+import { CodyWorkChannelService, codyWorkConversationUrl, feishuProjectionBody } from '../src/services/channelBot.js'
 import type { ChannelAccountSecret, CodyWorkChannelBinding } from '../src/services/channelStore.js'
 
 function binding(id: string, conversationId = 'conversation-1'): CodyWorkChannelBinding {
@@ -49,6 +49,13 @@ function bareService(): any {
 }
 
 describe('CodyWork channel lifecycle', () => {
+  it('builds an exact authenticated-browser deep link without inheriting unrelated query state', () => {
+    expect(codyWorkConversationUrl('http://10.37.222.12:3001/old?debug=1', binding('binding-1'))).toBe(
+      'http://10.37.222.12:3001/?workspace=workspace-1&demand=demand-1&conversation=conversation-1',
+    )
+    expect(codyWorkConversationUrl('javascript:alert(1)', binding('binding-1'))).toBe('')
+  })
+
   it('removes local Markdown image syntax from Feishu cards while retaining a readable placeholder', () => {
     expect(feishuProjectionBody({
       threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true, revision: 1,
@@ -62,7 +69,7 @@ describe('CodyWork channel lifecycle', () => {
     await writeFile(path, 'synthetic-image')
     try {
       const service = bareService()
-      service.store = { updateRuntime: vi.fn() }
+      service.store = { updateRuntime: vi.fn(), audit: vi.fn() }
       service.isAllowedChannelImage = vi.fn(async () => true)
       const provider = {
         uploadImage: vi.fn(async () => 'image-key'),
@@ -79,6 +86,9 @@ describe('CodyWork channel lifecycle', () => {
       expect(provider.uploadImage).toHaveBeenCalledWith(Buffer.from('synthetic-image'))
       expect(provider.replyImage).toHaveBeenCalledWith('source-message', 'image-key', true, expect.any(String))
       expect(provider.sendImage).not.toHaveBeenCalled()
+      expect(service.store.audit).toHaveBeenCalledWith('account-1', 'channel.outbox.delivered', 'channel_outbox', 'outbox-1', true, {
+        provider: 'feishu', accountId: 'account-1', outboxId: 'outbox-1',
+      }, '')
       expect(result).toEqual({ remoteMessageId: 'remote-image' })
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -108,7 +118,8 @@ describe('CodyWork channel lifecycle', () => {
       appSecretConfigured: true, domain: 'feishu', enabled: true, allowAllUsers: false,
       allowedUserIds: ['user-1'], allowedConversationIds: ['chat-1'], groupMentionMode: 'always',
       privateConversationMode: 'chat', botOpenId: 'bot-1', botName: 'Stable Bot', connectionState: 'connected',
-      lastError: '', connectedAt: '2026-09-05T00:00:00.000Z', lastEventAt: null, lastDeliveryAt: null,
+      lastError: '', lastCloseCode: null, lastCloseReason: '', lastDisconnectedAt: null, reconnectAttempts: 0, nextReconnectAt: null,
+      connectedAt: '2026-09-05T00:00:00.000Z', lastEventAt: null, lastDeliveryAt: null,
       createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z',
     }
     let current = previous

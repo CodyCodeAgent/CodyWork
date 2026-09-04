@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../api', () => ({ api }))
 
 function account(id: string, enabled = false) {
-  return { id, provider: 'feishu', name: `Bot ${id}`, appId: `cli_${id}`, appSecretConfigured: true, domain: 'feishu', enabled, allowAllUsers: false, allowedUserIds: ['ou_test'], allowedConversationIds: [], groupMentionMode: 'always', privateConversationMode: 'chat', botOpenId: '', botName: '', connectionState: enabled ? 'connected' : 'idle', lastError: '', connectedAt: null, lastEventAt: null, lastDeliveryAt: null, createdAt: '', updatedAt: '' }
+  return { id, provider: 'feishu', name: `Bot ${id}`, appId: `cli_${id}`, appSecretConfigured: true, domain: 'feishu', enabled, allowAllUsers: false, allowedUserIds: ['ou_test'], allowedConversationIds: [], groupMentionMode: 'always', privateConversationMode: 'chat', botOpenId: '', botName: '', connectionState: enabled ? 'connected' : 'idle', lastError: '', lastCloseCode: null, lastCloseReason: '', lastDisconnectedAt: null, reconnectAttempts: 0, nextReconnectAt: null, connectedAt: null, lastEventAt: null, lastDeliveryAt: null, createdAt: '', updatedAt: '' }
 }
 
 function diagnostics(id: string) {
@@ -114,5 +114,21 @@ describe('FeishuChannelSettings', () => {
     await flushPromises()
 
     expect(api.retryFeishuOutbox).toHaveBeenCalledWith('failed', 'outbox-1')
+  })
+
+  it('shows an unavailable SDK close code honestly instead of fabricating one', async () => {
+    const disconnected = {
+      ...account('reconnecting', true), connectionState: 'reconnecting', reconnectAttempts: 2,
+      lastDisconnectedAt: '2026-09-05T01:00:00.000Z', lastCloseReason: 'SDK 正在自动重连', nextReconnectAt: '2026-09-05T01:00:10.000Z',
+    }
+    api.listFeishuAccounts.mockResolvedValue([disconnected])
+    api.feishuDiagnostics.mockResolvedValue({ ...diagnostics('reconnecting'), account: disconnected })
+    api.listFeishuBindings.mockResolvedValue([])
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('关闭码 SDK 未提供')
+    expect(wrapper.text()).toContain('SDK 正在自动重连')
+    wrapper.unmount()
   })
 })
