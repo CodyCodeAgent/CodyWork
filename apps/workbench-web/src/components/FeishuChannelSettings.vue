@@ -120,7 +120,7 @@ async function refreshDetails(): Promise<void> {
   }
 }
 function payload() { return { name: form.name, appId: form.appId, ...(form.appSecret ? { appSecret: form.appSecret } : {}), domain: form.domain, enabled: form.enabled, allowAllUsers: form.allowAllUsers, allowedUserIds: lines(form.allowedUserIds), allowedConversationIds: lines(form.allowedConversationIds), groupMentionMode: form.groupMentionMode, privateConversationMode: form.privateConversationMode } }
-async function save(): Promise<void> { busy.value = true; message.value = ''; try { const saved = form.id ? await api.updateFeishuAccount(form.id, payload()) : await api.createFeishuAccount(payload()); await load(saved.id); messageType.value = 'ok'; message.value = saved.enabled ? '配置已保存，长连接正在建立。' : '配置已保存，机器人尚未启用。' } catch (error) { showError(error) } finally { busy.value = false } }
+async function save(): Promise<void> { busy.value = true; message.value = ''; try { const saved = form.id ? await api.updateFeishuAccount(form.id, payload()) : await api.createFeishuAccount(payload()); await load(saved.id); messageType.value = 'ok'; message.value = saved.enabled ? '配置已保存。长连接状态请以运行诊断为准。' : '配置已保存，机器人尚未启用。' } catch (error) { showError(error) } finally { busy.value = false } }
 async function reconnect(): Promise<void> {
   const accountId = form.id
   if (!accountId) return
@@ -163,8 +163,7 @@ function scheduleConnectionRefresh(accountId: string, reset = false): void {
         if (selectedId.value !== accountId) return
         accounts.value = nextAccounts
         const next = nextAccounts.find(item => item.id === accountId)
-        if (next?.connectionState === 'connected' && message.value.includes('正在建立')) message.value = '配置已保存，长连接已建立。'
-        else if (next?.connectionState === 'failed' && next.lastError) showError(new Error(next.lastError))
+        if (next?.connectionState === 'failed' && next.lastError) showError(new Error(next.lastError))
         await refreshDetails()
         scheduleConnectionRefresh(accountId)
       } catch (error) {

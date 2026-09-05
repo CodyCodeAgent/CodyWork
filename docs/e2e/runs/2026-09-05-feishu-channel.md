@@ -11,7 +11,7 @@
 ## Release under test
 
 - CodyWebCore: `v0.38.7` (`4c71aad`).
-- CodyWork: `v0.2.3`, with Server and Web both pinned to Core `v0.38.7`.
+- CodyWork: `v0.2.4`, with Server and Web both pinned to Core `v0.38.7`.
 - Browser: Safari/Chrome through computer-use automation.
 - Persistence: production SQLite channel tables; transcript remains native Codex Thread state.
 - Secrets: configured through the CodyWork credential flow and never copied into this report.
@@ -35,17 +35,25 @@
 | Secret redaction | Pass | App Secret was absent from API responses, UI diagnostics, logs and this evidence file. |
 | Long-connection recovery | Pass | Provider reconnect and CodyWork process restart recovered without browser WebSocket participation. |
 | Group default deny | Pass | A structured bot mention from a non-allowlisted group reached the backend but was rejected before binding/submission; an unmentioned message was ignored. |
-| Automated release gate | Pass | Typecheck passed; server 18 files / 112 tests and web 11 files / 41 tests passed; Core runtime `0.38.7` was verified; both production builds completed. |
+| Allowlisted topic binding | Pass | A structured `@Cody Work PING` root message in the temporary topic group opened the binding card; selecting `AI Hub` / `钱效相关问题查询` / `飞书会话` preserved the first message and produced exactly one `PONG`. |
+| Topic continuity | Pass | A second structured mention in the same topic reused the same topic conversation key, binding and native Thread, then produced exactly one `TOPICCONTINUITYOK`. |
+| Unmentioned group message | Pass | Marker `[E2E-GROUP-UNMENTIONED-AFTER-ALLOW]` produced no bot reply and zero Inbox rows after the group was allowlisted. |
+| Browser cross-view order | Pass | The production CodyWork Conversation showed the two user messages and two assistant replies in order, with no duplicated transcript or terminal overlay. |
+| Automated release gate | Pass | Typecheck passed; server 18 files / 112 tests and web 11 files / 42 tests passed; Core runtime `0.38.7` was verified; both production builds completed. |
 
-## Pending action-time confirmation
+## Production topic evidence
 
-The temporary topic group `CodyWork E2E Topic 20260905` exists and its chat ID has been identified. The following state-changing checks are intentionally pending fresh user confirmation at execution time:
+The temporary topic group `CodyWork E2E Topic 20260905` was added to the production allowlist for this authorized test.
 
-1. Add the temporary group to the account allowlist and save production settings.
-2. Send a new structured `@Cody Work` root message and verify exactly one `GROUP_MENTION_OK` response.
-3. Reply inside the topic and verify the same topic-scoped binding and native Thread continuity.
-4. Verify an unmentioned root message and a message mentioning only another recipient are ignored.
-5. Remove the temporary allowlist entry and delete the temporary group, with cleanup confirmed separately.
+- Root and follow-up Inbox records completed with distinct Turn IDs and the same topic-scoped binding, conversation key and native Thread.
+- Every new outbound delivery reached `sent` in one attempt; no new pending, retry or dead-letter row was created.
+- The account remained `connected`, with zero reconnect attempts and no last error after the test.
+- The production Conversation deep link showed `飞书已绑定 · 话题` and a healthy long connection.
+- Full owner identifiers, credentials and message IDs are intentionally omitted from this durable report.
+
+## Cleanup requiring separate confirmation
+
+The test group remains allowlisted and available so evidence is not destroyed during verification. Removing the allowlist entry, deleting the temporary Feishu group, or unbinding its topic binding changes production access/state and must only happen after explicit cleanup confirmation.
 
 ## Release-gate assertions
 

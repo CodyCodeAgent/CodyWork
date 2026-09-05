@@ -98,6 +98,24 @@ describe('FeishuChannelSettings', () => {
     wrapper.unmount()
   })
 
+  it('does not claim that every enabled configuration save restarts the connection', async () => {
+    const connected = account('live', true)
+    api.listFeishuAccounts.mockResolvedValue([connected])
+    api.feishuDiagnostics.mockResolvedValue(diagnostics('live'))
+    api.listFeishuBindings.mockResolvedValue([])
+    api.updateFeishuAccount.mockResolvedValue(connected)
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.updateFeishuAccount).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('配置已保存。长连接状态请以运行诊断为准。')
+    expect(wrapper.text()).not.toContain('长连接正在建立')
+    wrapper.unmount()
+  })
+
   it('shows durable delivery failures and retries them explicitly', async () => {
     api.listFeishuAccounts.mockResolvedValue([account('failed', true)])
     api.feishuDiagnostics.mockResolvedValue({

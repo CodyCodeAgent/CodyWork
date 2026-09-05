@@ -70,8 +70,8 @@ describe('CodyWork channel persistence', () => {
     const db = new WorkbenchDb(join(root, 'workspace.db'))
     const store = new ChannelStore(db)
     const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_recovery', appSecret: 'secret' })
-    const item = await store.enqueue({ id: 'outbox-recovery', provider: 'feishu', accountId: account.id, kind: 'send_text', targetId: 'chat-1', payload: { text: 'recover me' }, dedupeKey: 'recover-key', terminal: true })
     const now = new Date('2026-09-05T00:00:00.000Z')
+    const item = await store.enqueue({ id: 'outbox-recovery', provider: 'feishu', accountId: account.id, kind: 'send_text', targetId: 'chat-1', payload: { text: 'recover me' }, dedupeKey: 'recover-key', terminal: true, availableAtIso: now.toISOString() })
 
     expect(await store.claim({ provider: 'feishu', accountId: account.id, limit: 1, leaseMs: 1_000, nowIso: now.toISOString() })).toHaveLength(1)
     await store.markSending(item.id)

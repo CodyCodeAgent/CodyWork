@@ -1,6 +1,6 @@
 {
   "name": "@codycodeagent/codywork",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "CodyWork — a Vue workbench for policy-bound Codex development",
   "license": "MIT",
   "private": true,
