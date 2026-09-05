@@ -23,6 +23,7 @@ import {
   type ChannelAccountInput,
   type ChannelInteractiveRequest,
   type CodyWorkChannelBinding,
+  type ChannelGroupProfile,
   type ChannelPresentation,
 } from './channelStore.js'
 
@@ -117,6 +118,21 @@ function selectionCard(title: string, text: string, actions: Array<{ text: strin
   return feishuSelectionCard(title, text, actions)
 }
 
+function isFlatGroup(message: ChannelInboundMessage): boolean {
+  return message.conversation.scope === 'group'
+}
+
+/** A configured group-topic is a separate CodyWork Thread rooted at the
+ * message.  Feishu still owns delivery semantics; this only changes durable
+ * conversation identity before the Inbox claim is made. */
+function asConfiguredTopic(message: ChannelInboundMessage): ChannelInboundMessage {
+  if (!isFlatGroup(message)) return message
+  return {
+    ...message,
+    conversation: { ...message.conversation, scope: 'topic', rootId: message.conversation.rootId || message.messageId },
+  }
+}
+
 function markdownCode(value: string, limit = 1_600): string {
   const compact = value.trim().slice(0, limit).replaceAll('```', '``\u200b`')
   return compact ? `\n\n\`\`\`text\n${compact}${value.trim().length > limit ? '\n…' : ''}\n\`\`\`` : ''
@@ -154,6 +170,7 @@ export class CodyWorkChannelService {
   private readonly observationInitializations = new Map<string, Promise<void>>()
   private readonly pendingConversationEvents = new Map<string, ConversationEvent[]>()
   private readonly renderTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly reconciliationInFlight = new Set<string>()
   private readonly reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribeConversationEvents: () => void
 
@@ -186,6 +203,7 @@ export class CodyWorkChannelService {
     this.observed.clear()
     this.observationInitializations.clear()
     this.pendingConversationEvents.clear()
+    this.reconciliationInFlight.clear()
     for (const timer of this.renderTimers.values()) clearTimeout(timer)
     this.renderTimers.clear()
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer)
@@ -360,6 +378,7 @@ export class CodyWorkChannelService {
       this.store.updateRuntime(accountId, { connectionState: 'connecting', botOpenId: identity.id, botName: identity.name })
       await this.recoverInbox(accountId)
       await this.flushAndReconcile(accountId)
+      await this.reconcileActiveTurns(accountId)
       // New external events are consumed only after durable state converges.
       // This keeps startup recovery deterministic and prevents fresh traffic
       // from overtaking older Inbox/Outbox work.
@@ -374,6 +393,7 @@ export class CodyWorkChannelService {
             connectionDiagnostic: diagnostic,
           })
           if (state === 'failed') this.scheduleAccountReconnect(accountId)
+          if (state === 'connected') void this.reconcileActiveTurns(accountId)
         },
       })
     } catch (error) {
@@ -469,38 +489,42 @@ export class CodyWorkChannelService {
   }
 
   private async onMessage(message: ChannelInboundMessage): Promise<void> {
-    const claimed = this.store.claimInbound(message)
+    const profile = isFlatGroup(message) ? this.store.getGroupProfile(message.accountId, message.conversation.id) : null
+    const routedMessage = profile?.conversationMode === 'topic' ? asConfiguredTopic(message) : message
+    const claimed = this.store.claimInbound(routedMessage)
     if (!claimed.created) return
-    const command = message.text.trim()
+    const command = routedMessage.text.trim()
     try {
-      const account = this.store.listAccounts().find(item => item.id === message.accountId)
+      const account = this.store.listAccounts().find(item => item.id === routedMessage.accountId)
       if (!account?.enabled) return void this.store.updateInbox(claimed.item.id, 'ignored', { lastError: 'account_disabled' })
       this.store.updateRuntime(account.id, { connectionState: this.runtimes.get(account.id)?.provider.getState() ?? 'failed', event: true })
-      const key = channelConversationKey(message)
+      const key = channelConversationKey(routedMessage)
       const binding = this.store.findBinding(account.id, key)
-      const decision = this.allowed(account, message, binding)
+      const decision = this.allowed(account, routedMessage, binding)
       if (!decision.allowed) {
         this.store.updateInbox(claimed.item.id, 'ignored', { lastError: decision.reason })
         this.store.audit(account.id, 'channel.inbound.ignored', 'channel_inbox', claimed.item.id, true, {
-          provider: message.provider, accountId: message.accountId, eventId: message.eventId, messageId: message.messageId,
+          provider: routedMessage.provider, accountId: routedMessage.accountId, eventId: routedMessage.eventId, messageId: routedMessage.messageId,
           conversationKey: key, inboxId: claimed.item.id, ...(binding ? { bindingId: binding.id, threadId: binding.threadId } : {}), reason: decision.reason,
         })
         return
       }
       if (binding && command.startsWith('/')) return void await this.handleCommand(binding, claimed.item.id, command)
+      if (!binding && profile?.conversationMode === 'topic') return void await this.bindConfiguredGroupTopic(claimed.item.id, profile)
+      if (!binding && profile?.conversationMode === 'reply') return void await this.bindConfiguredGroupReply(claimed.item.id, profile)
       if (!binding) return void await this.requestWorkspace(claimed.item.id)
       this.store.updateInbox(claimed.item.id, 'ready', { bindingId: binding.id })
       await this.submitInbox(claimed.item.id, binding)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       this.store.updateInbox(claimed.item.id, 'failed', { lastError: detail })
-      this.store.audit(message.accountId, 'channel.inbound.failed', 'channel_inbox', claimed.item.id, false, {
-        provider: message.provider, accountId: message.accountId, eventId: message.eventId, messageId: message.messageId,
+      this.store.audit(routedMessage.accountId, 'channel.inbound.failed', 'channel_inbox', claimed.item.id, false, {
+        provider: routedMessage.provider, accountId: routedMessage.accountId, eventId: routedMessage.eventId, messageId: routedMessage.messageId,
         conversationKey: claimed.item.conversationKey, inboxId: claimed.item.id, command: command.startsWith('/'),
       }, detail)
       if (command.startsWith('/')) {
-        await this.enqueue(message.accountId, {
-          kind: 'reply_text', targetId: message.messageId,
+        await this.enqueue(routedMessage.accountId, {
+          kind: 'reply_text', targetId: routedMessage.messageId,
           payload: { text: `命令执行失败：${detail}` }, dedupeKey: `${claimed.item.id}:command-error`, terminal: true,
         }).catch(replyError => this.failAccount(message.accountId, 'channel.command.error_reply', replyError))
       }
@@ -509,6 +533,16 @@ export class CodyWorkChannelService {
 
   private async requestWorkspace(inboxId: string): Promise<void> {
     const inbox = this.store.updateInbox(inboxId, 'waiting_binding')
+    if (isFlatGroup(inbox.message)) {
+      const card = selectionCard('配置此群的 CodyWork 会话', '先选择群内消息的组织方式。此设置只影响本群；完成 Workspace、范围与权限配置后，当前消息才会执行。', [
+        { text: '回复原消息 · 共享会话', value: { action: 'channel.pick_group_mode', inboxId, groupMode: 'reply' } },
+        { text: '话题任务 · 每条根消息独立会话', value: { action: 'channel.pick_group_mode', inboxId, groupMode: 'topic' } },
+      ])
+      await this.enqueue(inbox.message.accountId, {
+        kind: 'reply_card', targetId: inbox.message.messageId, payload: { card, replyInThread: false }, dedupeKey: `${inbox.id}:pick-group-mode`, terminal: true,
+      })
+      return
+    }
     const choices = this.workspaces.list()
     const card = selectionCard('绑定 CodyWork Workspace', '首次使用需要选择消息要进入的 Workspace。原消息已保留，完成绑定后会自动提交。', choices.map(workspace => ({
       text: workspace.name, value: { action: 'channel.pick_workspace', inboxId, workspaceId: workspace.id },
@@ -532,6 +566,7 @@ export class CodyWorkChannelService {
     try {
       let card: FeishuCard | null = null
       if (kind.startsWith('channel.pick_')) card = await this.handleBindingAction(accountId, action)
+      else if (kind === 'channel.group_setting_mode') card = await this.handleGroupSettingAction(accountId, action)
       else if (kind === 'channel.approval') await this.handleApprovalAction(accountId, action)
       else if (kind === 'channel.question') await this.handleQuestionAction(accountId, action)
       else if (kind === 'channel.retry_outbox') this.retryOutbox(accountId, string(action.value.outboxId))
@@ -560,14 +595,24 @@ export class CodyWorkChannelService {
     const inbox = this.assertActionOwner(inboxId, action.actorId)
     if (inbox.message.accountId !== accountId || inbox.status !== 'waiting_binding') throw new Error('绑定请求已失效')
     const kind = string(action.value.action)
+    const groupMode = action.value.groupMode === 'topic' ? 'topic' : action.value.groupMode === 'reply' ? 'reply' : ''
+    const carryGroupMode = <T extends Record<string, unknown>>(value: T): T & { groupMode?: string } => groupMode ? { ...value, groupMode } : value
+    if (kind === 'channel.pick_group_mode') {
+      const choices = this.workspaces.list()
+      const card = selectionCard('绑定 CodyWork Workspace', '此群将按所选模式运行。选择 Workspace 后继续选择运行范围、会话与权限；原消息会在配置完成后自动执行。', choices.map(workspace => ({
+        text: workspace.name, value: carryGroupMode({ action: 'channel.pick_workspace', inboxId, workspaceId: workspace.id }),
+      })))
+      await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-workspace:${groupMode}`, revision: 1 })
+      return card
+    }
     if (kind === 'channel.pick_workspace') {
       const workspaceId = string(action.value.workspaceId)
       const workspace = this.workspaces.get(workspaceId)
       const demands = listDemands(this.database, workspace)
       const actions = demands.map(demand => ({
-        text: demand.name, value: { action: 'channel.pick_demand', inboxId, workspaceId, demandId: demand.id },
+        text: demand.name, value: carryGroupMode({ action: 'channel.pick_demand', inboxId, workspaceId, demandId: demand.id }),
       }))
-      actions.unshift({ text: 'Workspace 只读搜索', value: { action: 'channel.pick_workspace_scope', inboxId, workspaceId, demandId: '' } })
+      actions.unshift({ text: 'Workspace 只读搜索', value: carryGroupMode({ action: 'channel.pick_workspace_scope', inboxId, workspaceId, demandId: '' }) })
       const card = selectionCard('选择 CodyWork 运行范围', `Workspace：**${workspace.name}**\n\nWorkspace 搜索会话可读代码、知识库并运行查询命令，但不能修改任何文件；开发任务请选择下方 Demand。`, actions)
       await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-scope:${workspaceId}`, revision: 1 })
       return card
@@ -577,8 +622,8 @@ export class CodyWorkChannelService {
     if (kind === 'channel.pick_workspace_scope') {
       const workspace = this.workspaces.get(workspaceId)
       const sessions = this.conversations.listWorkspace(workspaceId)
-      const actions = sessions.map(session => ({ text: session.title, value: { action: 'channel.pick_workspace_session', inboxId, workspaceId, demandId: '', conversationId: session.id } }))
-      actions.unshift({ text: '+ 新建只读搜索会话', value: { action: 'channel.pick_new_workspace_session', inboxId, workspaceId, demandId: '', conversationId: '' } })
+      const actions = sessions.map(session => ({ text: session.title, value: carryGroupMode({ action: 'channel.pick_workspace_session', inboxId, workspaceId, demandId: '', conversationId: session.id }) }))
+      actions.unshift({ text: '+ 新建只读搜索会话', value: carryGroupMode({ action: 'channel.pick_new_workspace_session', inboxId, workspaceId, demandId: '', conversationId: '' }) })
       const card = selectionCard('选择 Workspace 搜索会话', `Workspace：**${workspace.name}**\n\n飞书与浏览器将共享同一个只读 Codex Thread。可运行查询命令和联网，但文件写入会被沙箱阻止。`, actions)
       await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-workspace-session:${workspaceId}`, revision: 2 })
       return card
@@ -588,17 +633,28 @@ export class CodyWorkChannelService {
       const demand = listDemands(this.database, workspace).find(item => item.id === demandId)
       if (!demand) throw new Error('需求不存在')
       const sessions = this.conversations.list(workspaceId, demandId)
-      const actions = sessions.map(session => ({ text: session.title, value: { action: 'channel.pick_session', inboxId, workspaceId, demandId, conversationId: session.id } }))
-      actions.unshift({ text: '+ 新建会话', value: { action: 'channel.pick_new_session', inboxId, workspaceId, demandId, conversationId: '' } })
+      const actions = sessions.map(session => ({ text: session.title, value: carryGroupMode({ action: 'channel.pick_session', inboxId, workspaceId, demandId, conversationId: session.id }) }))
+      actions.unshift({ text: '+ 新建会话', value: carryGroupMode({ action: 'channel.pick_new_session', inboxId, workspaceId, demandId, conversationId: '' }) })
       const card = selectionCard('选择 CodyWork 会话', `需求：**${demand.name}**\n\n飞书与浏览器将共享同一个原生 Codex Thread。`, actions)
       await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-session:${demandId}`, revision: 2 })
       return card
     }
+    const effectiveKind = kind === 'channel.pick_permission' ? string(action.value.sessionAction) : kind
     const workspaceKinds = new Set(['channel.pick_workspace_session', 'channel.pick_new_workspace_session'])
     const demandKinds = new Set(['channel.pick_session', 'channel.pick_new_session'])
-    if (!workspaceKinds.has(kind) && !demandKinds.has(kind)) throw new Error('未知绑定步骤')
-    const workspaceScope = workspaceKinds.has(kind)
-    const isNewSession = kind === 'channel.pick_new_session' || kind === 'channel.pick_new_workspace_session'
+    if (!workspaceKinds.has(effectiveKind) && !demandKinds.has(effectiveKind)) throw new Error('未知绑定步骤')
+    const workspaceScope = workspaceKinds.has(effectiveKind)
+    const isNewSession = effectiveKind === 'channel.pick_new_session' || effectiveKind === 'channel.pick_new_workspace_session'
+    const permissionMode = workspaceScope ? 'read-only' : action.value.permissionMode === 'workspace-write' ? 'workspace-write' : action.value.permissionMode === 'yolo' ? 'yolo' : ''
+    if (!workspaceScope && !permissionMode) {
+      const sessionAction = effectiveKind
+      const card = selectionCard('选择执行权限', 'YOLO 是默认推荐项：会在当前 Demand Worktree 的固定沙箱内直接执行；Normal 会对写入或外部操作请求审批。此选择可在 CodyWork 页面后续调整。', [
+        { text: 'YOLO（默认）', value: carryGroupMode({ action: 'channel.pick_permission', inboxId, workspaceId, demandId, conversationId: string(action.value.conversationId), sessionAction, permissionMode: 'yolo' }) },
+        { text: 'Normal（每次审批）', value: carryGroupMode({ action: 'channel.pick_permission', inboxId, workspaceId, demandId, conversationId: string(action.value.conversationId), sessionAction, permissionMode: 'workspace-write' }) },
+      ])
+      await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-permission:${effectiveKind}`, revision: 3 })
+      return card
+    }
     const conversation = isNewSession
       ? workspaceScope
         ? await this.conversations.createWorkspace(workspaceId, '飞书只读搜索', 'feishu')
@@ -606,8 +662,10 @@ export class CodyWorkChannelService {
       : this.conversations.get(workspaceId, string(action.value.conversationId))
     if (workspaceScope && conversation.scope !== 'workspace') throw new Error('所选会话不是 Workspace 搜索会话')
     if (!workspaceScope && (conversation.scope !== 'demand' || conversation.demandId !== demandId)) throw new Error('所选会话不属于当前 Demand')
+    if (!workspaceScope) await this.conversations.setPermission(workspaceId, conversation.id, permissionMode as 'workspace-write' | 'yolo')
+    const bindingMessage = groupMode === 'topic' ? asConfiguredTopic(inbox.message) : inbox.message
     const binding = this.store.createBinding({
-      message: inbox.message,
+      message: bindingMessage,
       targetType: workspaceScope ? 'codywork-workspace' : 'codywork-demand',
       workspaceId,
       demandId: workspaceScope ? null : demandId,
@@ -615,6 +673,14 @@ export class CodyWorkChannelService {
       threadId: conversation.nativeId,
       ownerIdentity: inbox.message.sender.id,
     })
+    if (groupMode) {
+      this.store.saveGroupProfile({
+        accountId, channelConversationId: inbox.message.conversation.id, conversationMode: groupMode,
+        targetType: workspaceScope ? 'codywork-workspace' : 'codywork-demand', workspaceId,
+        demandId: workspaceScope ? null : demandId, conversationId: groupMode === 'reply' ? conversation.id : null,
+        permissionMode: permissionMode as ChannelGroupProfile['permissionMode'], ownerIdentity: inbox.message.sender.id,
+      })
+    }
     this.store.updateInbox(inbox.id, 'ready', { bindingId: binding.id })
     // A thread created by this callback is known to have no history.  Do not
     // immediately read it back: older Codex App Servers cannot list turns for
@@ -622,8 +688,9 @@ export class CodyWorkChannelService {
     // place while the Feishu card reports a failed action.
     await this.observe(binding, { emptyHistory: isNewSession })
     const openUrl = this.openUrl(binding)
-    const scopeNote = workspaceScope ? 'Workspace 只读搜索；可运行查询命令，但不能修改文件。' : 'Demand Worktree 开发会话。'
-    const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。${scopeNote}\n\n接下来在本对话发送的消息会进入同一个 Codex Thread。`, {
+    const scopeNote = workspaceScope ? 'Workspace 只读搜索；可运行查询命令，但不能修改文件。' : permissionMode === 'yolo' ? 'Demand Worktree 开发会话；YOLO 已启用。' : 'Demand Worktree 开发会话；Normal 审批模式。'
+    const groupNote = groupMode === 'topic' ? '\n\n此群后续每条根消息都会创建独立会话。发送 `/setting` 可调整。' : groupMode === 'reply' ? '\n\n此群后续消息将共享本会话并回复原消息。发送 `/setting` 可调整。' : ''
+    const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。${scopeNote}${groupNote}\n\n接下来在本对话发送的消息会进入同一个 Codex Thread。`, {
       color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
     })
     await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
@@ -632,6 +699,67 @@ export class CodyWorkChannelService {
       conversationKey: inbox.conversationKey, bindingId: binding.id, threadId: binding.threadId, inboxId: inbox.id,
     })
     await this.submitInbox(inbox.id, binding)
+    return card
+  }
+
+  /** Creates a fresh Thread for later root messages in a configured topic-mode
+   * group. The profile is a template, never an implicit permission escalation. */
+  private async bindConfiguredGroupTopic(inboxId: string, profile: ChannelGroupProfile): Promise<void> {
+    const inbox = this.store.getInbox(inboxId)
+    const workspaceScope = profile.targetType === 'codywork-workspace'
+    const conversation = workspaceScope
+      ? await this.conversations.createWorkspace(profile.workspaceId, '飞书话题搜索', 'feishu')
+      : await this.conversations.create(profile.workspaceId, profile.demandId!, '飞书话题', 'feishu')
+    if (!workspaceScope) await this.conversations.setPermission(profile.workspaceId, conversation.id, profile.permissionMode as 'workspace-write' | 'yolo')
+    const binding = this.store.createBinding({
+      message: inbox.message,
+      targetType: profile.targetType,
+      workspaceId: profile.workspaceId,
+      demandId: profile.demandId,
+      conversationId: conversation.id,
+      threadId: conversation.nativeId,
+      ownerIdentity: profile.ownerIdentity,
+    })
+    this.store.updateInbox(inbox.id, 'ready', { bindingId: binding.id })
+    await this.observe(binding, { emptyHistory: true })
+    await this.submitInbox(inbox.id, binding)
+  }
+
+  private async bindConfiguredGroupReply(inboxId: string, profile: ChannelGroupProfile): Promise<void> {
+    if (!profile.conversationId) throw new Error('此群共享会话已不存在；请 @机器人重新完成绑定')
+    const inbox = this.store.getInbox(inboxId)
+    const conversation = this.conversations.get(profile.workspaceId, profile.conversationId)
+    const binding = this.store.createBinding({
+      message: inbox.message,
+      targetType: profile.targetType,
+      workspaceId: profile.workspaceId,
+      demandId: profile.demandId,
+      conversationId: conversation.id,
+      threadId: conversation.nativeId,
+      ownerIdentity: profile.ownerIdentity,
+    })
+    this.store.updateInbox(inbox.id, 'ready', { bindingId: binding.id })
+    await this.observe(binding)
+    await this.submitInbox(inbox.id, binding)
+  }
+
+  private async handleGroupSettingAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
+    const binding = this.store.getBinding(string(action.value.bindingId))
+    if (binding.accountId !== accountId || binding.ownerIdentity !== action.actorId) throw new Error('只有此群绑定的创建者可以修改设置')
+    if (binding.channelScope === 'private') throw new Error('仅群聊支持此设置')
+    const conversationMode = action.value.groupMode === 'topic' ? 'topic' : 'reply'
+    const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
+    this.store.saveGroupProfile({
+      accountId, channelConversationId: binding.channelConversationId, conversationMode,
+      targetType: binding.targetType, workspaceId: binding.workspaceId, demandId: binding.demandId,
+      conversationId: conversationMode === 'reply' ? binding.conversationId : null,
+      permissionMode: conversation.permissionMode, ownerIdentity: binding.ownerIdentity,
+    })
+    const text = conversationMode === 'topic'
+      ? '后续新的根消息会分别创建独立 CodyWork 会话。当前正在运行或已存在的会话不会被中断。'
+      : '后续消息会继续使用本群已绑定的共享会话，并回复原消息。当前正在运行或已存在的会话不会被中断。'
+    const card = feishuTextCard('CodyWork 群设置已保存', text, { color: 'green' })
+    await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `group-setting:${binding.id}:${conversationMode}`, terminal: true })
     return card
   }
 
@@ -665,7 +793,7 @@ export class CodyWorkChannelService {
     await this.observe(binding)
     const initial = projectionCard({ threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0 }, prompt, this.openUrl(binding))
     const sent = await this.enqueue(inbox.message.accountId, {
-      kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: inbox.message.conversation.scope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
+      kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
     })
     this.store.updatePresentation(presentation.id, { remoteMessageId: sent.remoteMessageId, status: sent.status, state: { prompt, outboxId: sent.id } })
     try {
@@ -1098,6 +1226,20 @@ export class CodyWorkChannelService {
   private async handleCommand(binding: CodyWorkChannelBinding, inboxId: string, command: string): Promise<void> {
     const inbox = this.store.getInbox(inboxId)
     const [name, ...args] = command.split(/\s+/u)
+    if (name === '/setting') {
+      if (binding.channelScope === 'private') throw new Error('私聊没有群会话模式；可直接使用 /status 查看绑定。')
+      if (binding.ownerIdentity !== inbox.message.sender.id) throw new Error('只有此群绑定的创建者可以修改设置')
+      const profile = this.store.getGroupProfile(binding.accountId, binding.channelConversationId)
+      const current = profile?.conversationMode === 'topic' ? '话题任务' : '回复原消息'
+      const card = selectionCard('CodyWork 群设置', `当前模式：**${current}**。修改只影响后续的新消息；不会中断正在执行的任务，也不会迁移已有会话。`, [
+        { text: '回复原消息 · 共享会话', value: { action: 'channel.group_setting_mode', bindingId: binding.id, groupMode: 'reply' } },
+        { text: '话题任务 · 每条根消息独立会话', value: { action: 'channel.group_setting_mode', bindingId: binding.id, groupMode: 'topic' } },
+      ])
+      await this.enqueue(binding.accountId, {
+        kind: 'reply_card', targetId: inbox.message.messageId, payload: { card, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:setting`, terminal: true,
+      })
+      this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id }); return
+    }
     if (name === '/status') {
       const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
       const openUrl = this.openUrl(binding)
@@ -1145,7 +1287,7 @@ export class CodyWorkChannelService {
       this.store.updateInteractiveRequest(binding.accountId, request.id, { status: 'answered' })
       this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id }); return
     }
-    await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/status、/stop、/retry、/unbind、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })
+    await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/status、/stop、/retry、/unbind、/setting（群聊）、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })
     this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id })
   }
 
@@ -1220,6 +1362,40 @@ export class CodyWorkChannelService {
       }
       const linkRow = this.database.db.prepare('SELECT turn_id, binding_id FROM channel_turn_links WHERE id = ?').get(presentation.turnLinkId) as { turn_id?: string; binding_id?: string } | undefined
       if (linkRow?.turn_id && linkRow.binding_id) this.scheduleRender(this.store.getBinding(linkRow.binding_id), linkRow.turn_id, true)
+    }
+  }
+
+  /** Runs only after a host recovery or a Feishu reconnect. Realtime events
+   * remain the steady-state transport; this is a one-shot durable convergence
+   * pass, not a health-check loop or a per-turn polling mechanism. */
+  private async reconcileActiveTurns(accountId: string): Promise<void> {
+    await Promise.all(this.store.listBindings(accountId).flatMap(binding => this.store.listActiveTurnLinks(binding.id).map(link =>
+      this.reconcileActiveTurn(binding, link.clientCommandId, link.turnId),
+    )))
+  }
+
+  private async reconcileActiveTurn(binding: CodyWorkChannelBinding, clientCommandId: string, knownTurnId: string): Promise<void> {
+    const key = `${binding.id}:${clientCommandId}`
+    if (this.reconciliationInFlight.has(key)) return
+    this.reconciliationInFlight.add(key)
+    try {
+      const snapshot = await this.conversations.history(binding.workspaceId, binding.conversationId)
+      const observation = this.observed.get(binding.conversationId)
+      if (observation) observation.state = reduceConversationEvents(createConversationState(binding.threadId), snapshot.events)
+      const bound = snapshot.events.find(event => event.type === 'command.bound' && event.itemId === clientCommandId && event.turnId)
+      const turnId = knownTurnId || bound?.turnId || ''
+      if (!turnId) return
+      const link = this.store.getTurnLinkByCommand(clientCommandId)
+      if (link && !link.turnId) {
+        this.store.updateTurnLink(clientCommandId, { turnId, status: 'running' })
+        this.store.updateInbox(link.inboxId, 'submitted', { turnId })
+      }
+      this.scheduleRender(binding, turnId, true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.store.audit(binding.accountId, 'channel.turn.reconcile_failed', 'channel_binding', binding.id, false, { clientCommandId }, message)
+    } finally {
+      this.reconciliationInFlight.delete(key)
     }
   }
 

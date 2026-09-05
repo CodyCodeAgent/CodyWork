@@ -130,6 +130,20 @@ export type ChannelTurnLink = {
   status: string
 }
 
+export type ChannelGroupProfile = {
+  accountId: string
+  channelConversationId: string
+  conversationMode: 'reply' | 'topic'
+  targetType: 'codywork-demand' | 'codywork-workspace'
+  workspaceId: string
+  demandId: string | null
+  conversationId: string | null
+  permissionMode: 'read-only' | 'workspace-write' | 'yolo'
+  ownerIdentity: string
+  createdAtIso: string
+  updatedAtIso: string
+}
+
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === 'string').map(item => item.trim()).filter(Boolean))].slice(0, 500) : []
 }
@@ -314,6 +328,34 @@ export class ChannelStore implements ChannelOutboxStore {
 
   hasBindingForConversation(conversationId: string): boolean {
     return Boolean(this.database.db.prepare('SELECT 1 FROM channel_bindings WHERE conversation_id = ? LIMIT 1').get(conversationId))
+  }
+
+  getGroupProfile(accountId: string, channelConversationId: string): ChannelGroupProfile | null {
+    const row = this.database.db.prepare('SELECT * FROM channel_group_profiles WHERE account_id = ? AND channel_conversation_id = ?').get(accountId, channelConversationId) as Record<string, unknown> | undefined
+    if (!row) return null
+    return {
+      accountId: String(row.account_id), channelConversationId: String(row.channel_conversation_id),
+      conversationMode: row.conversation_mode === 'topic' ? 'topic' : 'reply',
+      targetType: row.target_type === 'codywork-workspace' ? 'codywork-workspace' : 'codywork-demand',
+      workspaceId: String(row.workspace_id), demandId: row.demand_id ? String(row.demand_id) : null, conversationId: row.conversation_id ? String(row.conversation_id) : null,
+      permissionMode: row.permission_mode === 'yolo' ? 'yolo' : row.permission_mode === 'read-only' ? 'read-only' : 'workspace-write',
+      ownerIdentity: String(row.owner_identity), createdAtIso: String(row.created_at), updatedAtIso: String(row.updated_at),
+    }
+  }
+
+  saveGroupProfile(input: Omit<ChannelGroupProfile, 'createdAtIso' | 'updatedAtIso'>): ChannelGroupProfile {
+    if (input.targetType === 'codywork-workspace' && (input.demandId || input.permissionMode !== 'read-only')) throw new Error('Workspace 群机器人只能使用只读权限')
+    if (input.targetType === 'codywork-demand' && (!input.demandId || input.permissionMode === 'read-only')) throw new Error('Demand 群机器人需要需求与可写权限')
+    const now = nowIso()
+    this.database.db.prepare(`INSERT INTO channel_group_profiles (
+      account_id, channel_conversation_id, conversation_mode, target_type, workspace_id, demand_id, conversation_id, permission_mode, owner_identity, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(account_id, channel_conversation_id) DO UPDATE SET conversation_mode = excluded.conversation_mode,
+      target_type = excluded.target_type, workspace_id = excluded.workspace_id, demand_id = excluded.demand_id,
+      conversation_id = excluded.conversation_id, permission_mode = excluded.permission_mode, owner_identity = excluded.owner_identity, updated_at = excluded.updated_at`)
+      .run(input.accountId, input.channelConversationId, input.conversationMode, input.targetType, input.workspaceId, input.demandId, input.conversationId,
+        input.permissionMode, input.ownerIdentity, now, now)
+    return this.getGroupProfile(input.accountId, input.channelConversationId)!
   }
 
   createBinding(input: { message: ChannelInboundMessage; targetType: 'codywork-demand' | 'codywork-workspace'; workspaceId: string; demandId: string | null; conversationId: string; threadId: string; ownerIdentity: string }): ReturnType<typeof toBinding> {

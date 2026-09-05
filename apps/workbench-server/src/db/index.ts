@@ -261,6 +261,27 @@ export class WorkbenchDb {
         UNIQUE(provider, account_id, conversation_key)
       );
       CREATE INDEX IF NOT EXISTS channel_bindings_target ON channel_bindings(workspace_id, demand_id, conversation_id);
+      -- Group routing is deliberately separate from a concrete binding.  A
+      -- normal group can either keep one shared Thread or create a Thread for
+      -- each root message; the latter has no single conversation_id to store
+      -- on channel_bindings.
+      CREATE TABLE IF NOT EXISTS channel_group_profiles (
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        channel_conversation_id TEXT NOT NULL,
+        conversation_mode TEXT NOT NULL CHECK (conversation_mode IN ('reply', 'topic')),
+        target_type TEXT NOT NULL CHECK (target_type IN ('codywork-demand', 'codywork-workspace')),
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+        conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        permission_mode TEXT NOT NULL CHECK (permission_mode IN ('read-only', 'workspace-write', 'yolo')),
+        owner_identity TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(account_id, channel_conversation_id),
+        CHECK ((target_type = 'codywork-demand' AND demand_id IS NOT NULL AND permission_mode IN ('workspace-write', 'yolo'))
+          OR (target_type = 'codywork-workspace' AND demand_id IS NULL AND permission_mode = 'read-only'))
+      );
+      CREATE INDEX IF NOT EXISTS channel_group_profiles_workspace ON channel_group_profiles(workspace_id, demand_id);
       CREATE TABLE IF NOT EXISTS channel_inbox (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
@@ -367,6 +388,8 @@ export class WorkbenchDb {
     for (const [column, definition] of channelAccountMigrations) {
       if (!channelAccountColumns.has(column)) this.db.exec(`ALTER TABLE channel_accounts ADD COLUMN ${column} ${definition}`)
     }
+    const groupProfileColumns = new Set((this.db.prepare('PRAGMA table_info(channel_group_profiles)').all() as { name?: string }[]).map(column => column.name))
+    if (!groupProfileColumns.has('conversation_id')) this.db.exec('ALTER TABLE channel_group_profiles ADD COLUMN conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL')
     const interactiveRequestColumns = this.db.prepare('PRAGMA table_info(channel_interactive_requests)').all() as { name?: string }[]
     if (!interactiveRequestColumns.some(column => column.name === 'request_key')) {
       // App Server request ids are process-local counters and restart from 0.

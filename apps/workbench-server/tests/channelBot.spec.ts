@@ -43,7 +43,7 @@ function event(type: ConversationEvent['type'], input: Partial<ConversationEvent
 function bareService(): any {
   const service = Object.create(CodyWorkChannelService.prototype)
   Object.assign(service, {
-    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), reconnectTimers: new Map(), runtimes: new Map(),
+    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), reconciliationInFlight: new Set(), reconnectTimers: new Map(), runtimes: new Map(),
   })
   return service
 }
@@ -190,6 +190,63 @@ describe('CodyWork channel lifecycle', () => {
     expect(applied).toEqual([])
   })
 
+  it('reconciles a Feishu turn from durable history when a realtime bound event was missed', async () => {
+    const service = bareService()
+    const value = binding('binding-1')
+    const bound = event('command.bound', { itemId: 'channel-command-1', turnId: 'turn-1' })
+    const completed = event('turn.completed', { turnId: 'turn-1' })
+    service.conversations = { history: vi.fn(async () => ({ events: [bound, completed], watermark: 2 })) }
+    service.store = {
+      getTurnLinkByCommand: () => ({ id: 'link-1', inboxId: 'inbox-1', bindingId: value.id, clientCommandId: 'channel-command-1', turnId: '', status: 'submitted' }),
+      updateTurnLink: vi.fn(), updateInbox: vi.fn(), audit: vi.fn(),
+    }
+    service.scheduleRender = vi.fn()
+    service.observed.set(value.conversationId, { state: createConversationState(value.threadId), bindingIds: new Set([value.id]) })
+
+    await service.reconcileActiveTurn(value, 'channel-command-1', '')
+
+    expect(service.store.updateTurnLink).toHaveBeenCalledWith('channel-command-1', { turnId: 'turn-1', status: 'running' })
+    expect(service.store.updateInbox).toHaveBeenCalledWith('inbox-1', 'submitted', { turnId: 'turn-1' })
+    expect(service.scheduleRender).toHaveBeenCalledWith(value, 'turn-1', true)
+  })
+
+  it('asks a flat group to choose its session model before it chooses a Workspace', async () => {
+    const service = bareService()
+    const group = inbox('group-first', 'please help')
+    group.message.conversation = { id: 'group-1', scope: 'group' }
+    let delivery: any
+    service.store = { updateInbox: () => group }
+    service.enqueue = vi.fn(async (_accountId: string, input: any) => { delivery = input; return { id: 'outbox-1' } })
+
+    await service.requestWorkspace(group.id)
+
+    expect(delivery).toMatchObject({ kind: 'reply_card', targetId: group.message.messageId, payload: { replyInThread: false } })
+    const body = JSON.stringify(delivery.payload.card)
+    expect(body).toContain('回复原消息')
+    expect(body).toContain('话题任务')
+    expect(body).toContain('channel.pick_group_mode')
+  })
+
+  it('routes later configured group roots into their own topic conversation before the Inbox is claimed', async () => {
+    const service = bareService()
+    const incoming = message('new task', 'group-topic')
+    incoming.conversation = { id: 'group-1', scope: 'group' }
+    const claimed = inbox('group-topic-inbox', incoming.text)
+    const storedMessages: ChannelInboundMessage[] = []
+    service.store = {
+      getGroupProfile: () => ({ accountId: 'account-1', channelConversationId: 'group-1', conversationMode: 'topic', targetType: 'codywork-demand', workspaceId: 'workspace-1', demandId: 'demand-1', permissionMode: 'yolo', ownerIdentity: 'owner-1' }),
+      claimInbound: (value: ChannelInboundMessage) => { storedMessages.push(value); claimed.message = value; return { item: claimed, created: true } },
+      listAccounts: () => [{ id: 'account-1', enabled: true }], updateRuntime: vi.fn(), findBinding: () => null,
+    }
+    service.allowed = () => ({ allowed: true, reason: '' })
+    service.bindConfiguredGroupTopic = vi.fn(async () => undefined)
+
+    await service.onMessage(incoming)
+
+    expect(storedMessages[0]?.conversation).toEqual({ id: 'group-1', scope: 'topic', rootId: incoming.messageId })
+    expect(service.bindConfiguredGroupTopic).toHaveBeenCalledWith(claimed.id, expect.objectContaining({ conversationMode: 'topic' }))
+  })
+
   it('re-publishes only unresolved interactive requests recovered from the owner snapshot', async () => {
     const service = bareService()
     const value = binding('binding-1')
@@ -238,10 +295,11 @@ describe('CodyWork channel lifecycle', () => {
     service.recoverBindings = vi.fn(async () => { calls.push('bindings') })
     service.recoverInbox = vi.fn(async () => { calls.push('inbox') })
     service.flushAndReconcile = vi.fn(async () => { calls.push('flush') })
+    service.reconcileActiveTurns = vi.fn(async () => { calls.push('turns') })
 
     await service.startAccount('account-1')
 
-    expect(calls).toEqual(['bindings', 'identity', 'inbox', 'flush', 'provider'])
+    expect(calls).toEqual(['bindings', 'identity', 'inbox', 'flush', 'turns', 'provider'])
     clearInterval(service.runtimes.get('account-1').flushTimer)
   })
 
