@@ -108,13 +108,20 @@ describe('CodyWork channel persistence', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('enforces the phase-one single-bot boundary', () => {
+  it('persists multiple bots independently and rejects duplicate App IDs', () => {
     const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
     const db = new WorkbenchDb(join(root, 'workspace.db'))
     const store = new ChannelStore(db)
     const account = store.saveAccount(null, { name: 'Primary Bot', appId: 'cli_primary', appSecret: 'secret' })
+    const second = store.saveAccount(null, { name: 'Second Bot', appId: 'cli_second', appSecret: 'second-secret' })
 
-    expect(() => store.saveAccount(null, { name: 'Second Bot', appId: 'cli_second', appSecret: 'secret' })).toThrow('一期只支持一个')
+    expect(store.listAccounts()).toMatchObject([
+      { id: account.id, name: 'Primary Bot', appId: 'cli_primary' },
+      { id: second.id, name: 'Second Bot', appId: 'cli_second' },
+    ])
+    expect(store.getAccount(second.id).appSecret).toBe('second-secret')
+    expect(() => store.saveAccount(null, { name: 'Duplicate Bot', appId: 'cli_primary', appSecret: 'secret' })).toThrow('该 App ID 已配置')
+    expect(() => store.saveAccount(second.id, { name: 'Conflicting Bot', appId: 'cli_primary', appSecret: '' })).toThrow('该 App ID 已配置')
     expect(store.saveAccount(account.id, { name: 'Renamed Bot', appId: 'cli_primary', appSecret: '' })).toMatchObject({ id: account.id, name: 'Renamed Bot' })
     db.close()
     rmSync(root, { recursive: true, force: true })

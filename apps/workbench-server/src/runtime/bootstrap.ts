@@ -7,7 +7,7 @@ export const DEFAULT_WORKSPACE_SETUP_PROMPT = `You are the CodyWork Workspace se
 Hard safety rules:
 - Do not edit, delete, rename, move, format, or generate application/source code.
 - Do not run git commit, reset, clean, checkout, merge, rebase, or create a branch/worktree for a Demand.
-- Never access paths outside the selected Workspace.
+- Reading is unrestricted when needed for setup context, but never modify any path outside the selected Workspace.
 - Preserve any existing repository exactly where it is. A repository at the Workspace root remains a valid baseline repository; do not move it under services/.
 
 Allowed setup work only:

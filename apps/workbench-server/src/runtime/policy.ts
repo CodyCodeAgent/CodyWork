@@ -144,8 +144,8 @@ function demandStartupSource(): RuntimeInstructionSource {
 
 function workspaceSearchStartupSource(): RuntimeInstructionSource {
   const content = [
-    '这是一个 Workspace 级只读搜索会话。你可以读取当前 Workspace、检索知识库与代码、运行不会修改文件系统的查询命令，并可联网获取任务所需信息。',
-    '严禁创建、修改、移动或删除 Workspace 内的任何文件；如果用户要求开发或落盘修改，请明确建议其进入对应 Demand Worktree 会话。不要将只读限制误解为“不能运行命令”。',
+    '这是一个 Workspace 级只读搜索会话。文件读取不受 Workspace、用户或目录边界限制；你可以检索知识库与代码、读取全局 Skill 及其依赖、运行不会修改文件系统的查询命令，并可联网获取任务所需信息。',
+    '严禁在任何位置创建、修改、移动或删除文件；如果用户要求开发或落盘修改，请明确建议其进入对应 Demand Worktree 会话。不要将只读限制误解为“不能运行命令”。',
     '',
     '优先根据 Workspace knowledge catalog 定位少量相关文档，再按需读取代码或运行查询。Skill 默认不注入；仅在用户使用 `$Skill` 显式引用时加载对应 Skill。',
   ].join('\n')
@@ -254,19 +254,17 @@ export interface PolicyInput {
 }
 
 /**
- * Compile CodyWork's Worktree policy. Writable roots must always be inside the
- * Workspace; the shared runtime may narrow them further but never widen them.
+ * Compile CodyWork's Worktree policy. An empty readableRoots list means reads
+ * are unrestricted. Writable roots must always be inside the Workspace; the
+ * shared runtime may narrow them further but never widen them.
  */
 export function resolveEffectivePolicy(input: PolicyInput): EffectivePolicy {
   const workspacePath = canonicalPath(input.workspacePath)
-  const readableRoots = [...new Set((input.readableRoots?.length ? input.readableRoots : [workspacePath]).map(canonicalPath))]
+  const readableRoots = [...new Set((input.readableRoots ?? []).map(canonicalPath))]
   const writableRoots = [...new Set((input.writableRoots ?? []).map(canonicalPath))]
   const deniedRoots = [...new Set((input.deniedRoots ?? []).map(canonicalPath))]
   if (writableRoots.some(root => !isWithinRoot(workspacePath, root))) {
     throw new Error('effective policy cannot write outside the Workspace')
-  }
-  if (readableRoots.some(root => !isWithinRoot(workspacePath, root))) {
-    throw new Error('effective policy cannot read outside the Workspace')
   }
   const policy = {
     readableRoots,

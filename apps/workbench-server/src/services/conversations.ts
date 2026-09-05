@@ -492,7 +492,7 @@ export class ConversationService {
       workspacePath,
       demandPath,
       instructionBundle: bundle,
-      effectivePolicy: resolveEffectivePolicy({ workspacePath, readableRoots: [workspacePath], writableRoots, shell: 'disabled', approval: 'workbench' }),
+      effectivePolicy: resolveEffectivePolicy({ workspacePath, readableRoots: [], writableRoots, shell: 'disabled', approval: 'workbench' }),
     }, mode)
   }
 
@@ -504,7 +504,7 @@ export class ConversationService {
       instructionBundle: bundle,
       effectivePolicy: resolveEffectivePolicy({
         workspacePath,
-        readableRoots: [workspacePath],
+        readableRoots: [],
         writableRoots: [],
         shell: 'full',
         approval: 'workbench',

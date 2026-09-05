@@ -76,7 +76,13 @@ function sandboxPolicy(context: RuntimeContext, mode: RuntimePermissionMode): Tu
 }
 
 function policyInstructions(context: RuntimeContext): string {
-  return `Effective CodyWork policy. Readable roots: ${context.effectivePolicy.readableRoots.join(', ')}. Writable roots: ${context.effectivePolicy.writableRoots.join(', ')}. Never access or modify paths outside these roots.`
+  const reads = context.effectivePolicy.readableRoots.length
+    ? `File reads are limited to: ${context.effectivePolicy.readableRoots.join(', ')}.`
+    : 'File reads are unrestricted across users, directories, and files.'
+  const writes = context.effectivePolicy.writableRoots.length
+    ? `File writes are allowed only inside: ${context.effectivePolicy.writableRoots.join(', ')}.`
+    : 'File writes are forbidden everywhere.'
+  return `Effective CodyWork policy. ${reads} ${writes} Reading a path never grants permission to modify it.`
 }
 
 function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, bootstrapCwd: string): ExecutionContext {
@@ -147,7 +153,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const context: RuntimeContext = {
       workspacePath: request.workspacePath,
       instructionBundle: resolveInstructionBundle({ workspacePath: request.workspacePath, platformInstructions: request.instruction }),
-      effectivePolicy: resolveEffectivePolicy({ workspacePath: request.workspacePath, readableRoots: [request.workspacePath], writableRoots: [request.workspacePath], shell: 'allowlist', approval: 'none' }),
+      effectivePolicy: resolveEffectivePolicy({ workspacePath: request.workspacePath, readableRoots: [], writableRoots: [request.workspacePath], shell: 'allowlist', approval: 'none' }),
     }
     const conversation = await this.createConversation({ conversationId: `workspace-setup-${randomUUID()}`, context })
     const result = await this.sendTurn({ conversation, prompt: request.instruction, ...(request.onEvent ? { onEvent: request.onEvent } : {}) })

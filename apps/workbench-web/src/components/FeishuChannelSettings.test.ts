@@ -165,4 +165,46 @@ describe('FeishuChannelSettings', () => {
     expect(wrapper.text()).toContain('成本归属排查')
     expect(wrapper.text()).toContain('Workspace 只读搜索')
   })
+
+  it('creates a second bot from a persistent new-bot action without changing the existing one', async () => {
+    const first = account('first')
+    const second = { ...account('second'), name: 'Second Bot' }
+    api.listFeishuAccounts.mockResolvedValueOnce([first]).mockResolvedValue([first, second])
+    api.feishuDiagnostics.mockImplementation((id: string) => Promise.resolve(diagnostics(id)))
+    api.listFeishuBindings.mockResolvedValue([])
+    api.createFeishuAccount.mockResolvedValue(second)
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('新建机器人'))!.trigger('click')
+    expect(wrapper.text()).toContain('新配置 · 尚未保存')
+    expect(wrapper.find('button[type="submit"]').text()).toBe('创建机器人')
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('Second Bot')
+    await inputs[1]!.setValue('cli_second')
+    await inputs[2]!.setValue('second-secret')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.createFeishuAccount).toHaveBeenCalledWith(expect.objectContaining({ name: 'Second Bot', appId: 'cli_second', appSecret: 'second-secret', enabled: false }))
+    expect(wrapper.findAll('.account-row')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Bot first')
+    expect(wrapper.text()).toContain('Second Bot')
+  })
+
+  it('cancels a new bot draft and restores the previous selection', async () => {
+    api.listFeishuAccounts.mockResolvedValue([account('first'), account('second')])
+    api.feishuDiagnostics.mockImplementation((id: string) => Promise.resolve(diagnostics(id)))
+    api.listFeishuBindings.mockResolvedValue([])
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('新建机器人'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '取消')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('新配置 · 尚未保存')
+    expect(wrapper.find('input[placeholder="例如：CodyWork Bot"]').element).toHaveProperty('value', 'Bot first')
+    expect(api.createFeishuAccount).not.toHaveBeenCalled()
+  })
 })

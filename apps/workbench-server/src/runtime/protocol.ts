@@ -30,6 +30,7 @@ export interface InstructionBundle {
 }
 
 export interface EffectivePolicy {
+  /** Empty means file reads are unrestricted; write access is always governed separately. */
   readableRoots: string[]
   writableRoots: string[]
   deniedRoots: string[]

@@ -50,11 +50,22 @@ describe('conversation websocket control plane', () => {
     expect(conversations.list(test.workspaceId, test.demandId)).toEqual([expect.objectContaining({ id: feishuConversation.id, createdVia: 'feishu' })])
     expect(runtime.createdContexts[0]).toMatchObject({
       workspacePath: test.root,
-      effectivePolicy: { writableRoots: [], shell: 'full', approval: 'workbench' },
+      effectivePolicy: { readableRoots: [], writableRoots: [], shell: 'full', approval: 'workbench' },
     })
     expect(runtime.createdContexts[0]?.demandPath).toBeUndefined()
     expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('Workspace 级只读搜索会话')
     expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('docs/search-guide.md')
+    const canonicalRoot = realpathSync.native(test.root)
+    expect(runtime.createdContexts[1]).toMatchObject({
+      demandPath: join(test.root, 'worktrees', 'verify'),
+      effectivePolicy: {
+        readableRoots: [],
+        writableRoots: [
+          join(canonicalRoot, 'worktrees', 'verify', 'services', 'demo'),
+          join(canonicalRoot, 'worktrees', 'verify', 'docs'),
+        ],
+      },
+    })
 
     await expect(conversations.send(test.workspaceId, conversation.id, 'run a read-only query')).resolves.toMatchObject({ accepted: true })
     await expect(conversations.setPermission(test.workspaceId, conversation.id, 'workspace-write')).rejects.toThrow('固定为只读')

@@ -242,10 +242,10 @@ export class ChannelStore implements ChannelOutboxStore {
       throw new Error('启用机器人前至少配置一个允许用户，或明确允许所有用户')
     }
     if (id) this.getAccount(id)
-    else {
-      if (this.listAccounts().length > 0) throw new Error('一期只支持一个 CodyWork 飞书机器人；请更新或删除现有配置')
-      if (!input.appSecret?.trim()) throw new Error('App Secret 不能为空')
-    }
+    else if (!input.appSecret?.trim()) throw new Error('App Secret 不能为空')
+    const duplicate = this.database.db.prepare("SELECT id FROM channel_accounts WHERE provider = 'feishu' AND app_id = ? AND id <> COALESCE(?, '')")
+      .get(appId, id) as { id: string } | undefined
+    if (duplicate) throw new Error('该 App ID 已配置为另一个飞书机器人')
   }
 
   listAccounts(): ChannelAccount[] {

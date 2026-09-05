@@ -57,7 +57,7 @@ async function runSkillInstall(
     instructionBundle: resolveInstructionBundle({ workspacePath: workspace.path }),
     effectivePolicy: resolveEffectivePolicy({
       workspacePath: workspace.path,
-      readableRoots: [workspace.path],
+      readableRoots: [],
       writableRoots: [skillsRoot],
       deniedRoots: [],
       shell: 'allowlist' as const,
