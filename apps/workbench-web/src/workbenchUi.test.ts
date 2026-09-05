@@ -3,6 +3,7 @@ import { createConversationState, reduceConversationEvent, type CodexEvent } fro
 import type { AvailableNativeThread, Conversation, Demand, WorkspaceSkill } from './api'
 import {
   canDeleteConversation,
+  conversationChannelBadge,
   conversationStatusFromState,
   dashboardCacheLabel,
   dashboardNeedsRefresh,
@@ -23,7 +24,8 @@ import {
 } from './workbenchUi'
 
 const conversation = (status: Conversation['status']): Conversation => ({
-  id: 'conversation', demandId: 'demand', nativeId: 'native', title: 'Session', status,
+  id: 'conversation', scope: 'demand', demandId: 'demand', nativeId: 'native', title: 'Session', status,
+  createdVia: 'browser',
   permissionMode: 'workspace-write', policyHash: '', instructionHash: '', createdAt: '', updatedAt: '',
 })
 
@@ -39,6 +41,19 @@ describe('workbench UI rules', () => {
     expect(deleteConversationTitle(conversation('awaiting_approval'), 3)).toContain('不能删除')
     expect(canDeleteConversation(conversation('completed'), 1)).toBe(false)
     expect(canDeleteConversation(conversation('completed'), 2)).toBe(true)
+    expect(canDeleteConversation({ ...conversation('completed'), scope: 'workspace', demandId: null }, 1)).toBe(true)
+  })
+
+  it('explains Feishu-created and Feishu-bound conversations without relying on color alone', () => {
+    expect(conversationChannelBadge(conversation('idle'), [])).toBeNull()
+    expect(conversationChannelBadge({ ...conversation('idle'), createdVia: 'feishu' }, [])).toEqual({
+      label: '由飞书机器人创建', detail: '由飞书机器人创建；当前未绑定飞书会话。',
+    })
+    expect(conversationChannelBadge(conversation('idle'), [{
+      id: 'binding', conversationKey: 'key', workspaceId: 'workspace', targetType: 'codywork-demand', demandId: 'demand',
+      conversationId: 'conversation', conversationTitle: 'Session', threadId: 'native', ownerIdentity: 'user', channelConversationId: 'oc_group',
+      channelScope: 'group', updatedAtIso: '', accountId: 'account', botName: 'Cody Bot',
+    }])).toEqual({ label: '已绑定飞书机器人', detail: '已绑定飞书机器人\nCody Bot · 群聊 · oc_group' })
   })
 
   it('groups related Codex projects first and filters their threads', () => {
@@ -95,6 +110,9 @@ describe('workbench UI rules', () => {
     expect(parseWorkbenchRoute(url.search).conversationId).toBe('conversation-1')
     expect(workbenchUrl(url.toString(), 'ws-1', null, { page: 'settings' }).searchParams.has('conversation')).toBe(false)
     expect(maskedChannelIdentity('ou_e685821b0906e078a5f8a37a100a8088')).toBe('ou_••••8088')
+    const workspaceSession = workbenchUrl('http://localhost:3001/', 'ws-1', null, { conversationId: 'workspace-conversation' })
+    expect(workspaceSession.toString()).toBe('http://localhost:3001/?workspace=ws-1&conversation=workspace-conversation')
+    expect(parseWorkbenchRoute(workspaceSession.search)).toMatchObject({ workspaceId: 'ws-1', demandId: null, conversationId: 'workspace-conversation' })
   })
 
   it('round-trips settings subpages without leaking them into Demand links', () => {

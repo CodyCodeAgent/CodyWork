@@ -69,6 +69,18 @@ describe('generic runtime protocol', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('indexes Workspace knowledge and adds explicit non-writing guidance for search sessions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-workspace-search-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'operations.md'), '# Operations handbook\nDo not inline the whole document.')
+    const bundle = resolveInstructionBundle({ workspacePath: root, workspaceSearch: true })
+    expect(bundle.systemInstructions).toContain('Workspace 级只读搜索会话')
+    expect(bundle.systemInstructions).toContain('严禁创建、修改、移动或删除')
+    expect(bundle.systemInstructions).toContain('docs/operations.md')
+    expect(bundle.systemInstructions).not.toContain('Do not inline the whole document.')
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('exposes standard capabilities and events through the test adapter', async () => {
     const runtime = new TestRuntimeAdapter()
     const info = await runtime.getInfo()

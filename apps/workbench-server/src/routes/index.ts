@@ -550,6 +550,22 @@ function buildRoutes(ctx: AppContext) {
     return conversationService(ctx).list(workspace.id, requiredParam(c, 'demandId'))
   })
 
+  add('GET', '/api/workspaces/:id/conversations', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return conversationService(ctx).listWorkspace(workspace.id)
+  })
+
+  add('GET', '/api/workspaces/:id/composer-options', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return conversationService(ctx).workspaceComposerOptions(workspace.id)
+  })
+
+  add('POST', '/api/workspaces/:id/conversations', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const title = typeof c.body.title === 'string' ? c.body.title : undefined
+    return conversationService(ctx).createWorkspace(workspace.id, title)
+  })
+
   add('GET', '/api/workspaces/:id/demands/:demandId/available-threads', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return conversationService(ctx).listAvailableNativeThreads(workspace.id, requiredParam(c, 'demandId'))
@@ -571,6 +587,13 @@ function buildRoutes(ctx: AppContext) {
     const nativeId = typeof c.body.nativeId === 'string' ? c.body.nativeId : ''
     const title = typeof c.body.title === 'string' ? c.body.title : undefined
     return conversationService(ctx).bind(workspace.id, requiredParam(c, 'demandId'), { nativeId, title })
+  })
+
+  add('GET', '/api/workspaces/:id/demands/:demandId/channel-bindings', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const demandId = requiredParam(c, 'demandId')
+    getDemand(ctx.db, workspace, demandId)
+    return channelService(ctx).listDemandBindings(workspace.id, demandId)
   })
 
   add('GET', '/api/workspaces/:id/conversations/:conversationId', (c) => {

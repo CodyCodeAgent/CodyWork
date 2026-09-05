@@ -12,6 +12,7 @@
         </div>
         <div class="sidebar-section-label"><span>WORKSPACE</span><small>上下文与资产</small></div>
         <button v-for="item in workspacePages" :key="item.page" class="sidebar-item" :class="{ active: activePage === item.page }" :aria-label="collapsed ? item.label : undefined" :title="collapsed ? item.label : undefined" @click="emit('navigate', item.page)"><span>{{ item.icon }}</span><span class="sidebar-label"><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span></button>
+        <button class="sidebar-item workspace-search-entry" :class="{ active: workspaceConversationActive }" :aria-label="collapsed ? '只读搜索' : undefined" :title="collapsed ? '只读搜索' : undefined" @click="emit('openWorkspaceConversations')"><span>⌕</span><span class="sidebar-label"><strong>只读搜索</strong><small>Workspace 会话 · 不改文件</small></span><em v-if="workspaceConversationCount">{{ workspaceConversationCount }}</em></button>
         <section class="sidebar-demand-section" aria-label="需求列表">
           <button class="sidebar-section-label sidebar-accordion-trigger" :class="{ expanded: demandExpanded }" type="button" :aria-expanded="demandExpanded" aria-controls="sidebar-demand-list" @click="emit('update:demandExpanded', !demandExpanded)"><span>WORK MODE</span><small>Demand / Worktree</small><em>{{ demands.length }}</em><i class="sidebar-accordion-chevron" aria-hidden="true">⌄</i></button>
           <div v-show="demandExpanded" id="sidebar-demand-list" class="sidebar-subnav">
@@ -55,6 +56,8 @@ const props = defineProps<{
   workspacePickerOpen: boolean
   demandExpanded: boolean
   collapsed: boolean
+  workspaceConversationCount: number
+  workspaceConversationActive: boolean
 }>()
 
 const realtimeLabel = computed(() => {
@@ -82,6 +85,7 @@ const emit = defineEmits<{
   createDemand: []
   navigate: [page: Exclude<Page, 'chat'>]
   openDemand: [demand: Demand]
+  openWorkspaceConversations: []
 }>()
 
 const workspacePages = [

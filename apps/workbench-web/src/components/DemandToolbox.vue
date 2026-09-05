@@ -24,6 +24,17 @@
           <p v-if="!canSettle" class="toolbox-note">{{ settleTitle }}</p>
         </section>
 
+        <section v-if="quickActions.length" class="toolbox-section" aria-labelledby="toolbox-quick-actions-title">
+          <div class="toolbox-section-head"><div><span class="toolbox-kicker">QUICK ACTIONS</span><h3 id="toolbox-quick-actions-title">快捷指令</h3></div><span class="toolbox-state">{{ quickActions.length }} 条</span></div>
+          <p class="toolbox-note">点击会立即作为一条新消息发送，并自动引用已配置的 Skill。</p>
+          <div class="toolbox-quick-actions" role="list" aria-label="需求开发快捷指令">
+            <button v-for="action in quickActions" :key="action.id" class="toolbox-quick-action" type="button" :disabled="quickActionsDisabled || action.missingSkillIds.length > 0" :title="quickActionTitle(action)" role="listitem" @click="executeQuickAction(action)">
+              <span><strong>{{ action.name }}</strong><small v-if="action.skills.length">{{ action.skills.length }} 个 Skill</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+            </button>
+          </div>
+          <p v-if="quickActionFeedback" class="toolbox-result" role="status">{{ quickActionFeedback }}</p>
+        </section>
+
         <section class="toolbox-section" aria-labelledby="toolbox-repositories-title">
           <div class="toolbox-section-head"><div><span class="toolbox-kicker">REPOSITORIES</span><h3 id="toolbox-repositories-title">Repo 与 Worktree</h3></div><button class="text-button" type="button" :disabled="!canAddRepository" @click="addRepository">添加已有 Repo</button></div>
           <p class="toolbox-note">同步只作用于 <code>services/</code> 的基线，不会修改当前 Demand 的 Worktree 或分支。</p>
@@ -43,7 +54,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import type { ConversationContextUsageState } from '@codycodeagent/cody-web-core/conversation'
-import type { Demand, Repository, RepositorySyncResult } from '../api'
+import type { Demand, QuickAction, Repository, RepositorySyncResult } from '../api'
 import { buildThreadContextUsagePresentation } from '../threadContextUsage'
 
 const props = defineProps<{
@@ -56,8 +67,11 @@ const props = defineProps<{
   syncingRepositoryId: string
   clearingRepositoryId: string
   syncResults: Record<string, RepositorySyncResult>
+  quickActions: QuickAction[]
+  quickActionsDisabled: boolean
+  quickActionFeedback: string
 }>()
-const emit = defineEmits<{ settle: []; 'add-repository': []; sync: [repositoryId: string]; cleanup: [repository: Repository] }>()
+const emit = defineEmits<{ settle: []; 'add-repository': []; sync: [repositoryId: string]; cleanup: [repository: Repository]; 'execute-quick-action': [action: QuickAction] }>()
 const open = ref(false)
 const trigger = ref<HTMLButtonElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
@@ -101,6 +115,13 @@ function addRepository(): void {
   closeToolbox()
   emit('add-repository')
 }
+function executeQuickAction(action: QuickAction): void {
+  closeToolbox()
+  emit('execute-quick-action', action)
+}
+function quickActionTitle(action: QuickAction): string {
+  return action.missingSkillIds.length ? `Skill 已失效，请到设置中修复：${action.skills.filter(skill => skill.status !== 'available').map(skill => skill.name).join('、')}` : `立即发送“${action.name}”`
+}
 function canSync(repository: Repository): boolean {
   return props.syncingRepositoryId === '' && props.clearingRepositoryId === '' && !repository.dirty && Boolean(repository.originUrl && repository.defaultRef)
 }
@@ -138,6 +159,7 @@ function cleanupTitle(repository: Repository): string {
 .token-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }.token-summary div { min-width: 0; padding: 8px; background: #f6f8fb; border-radius: 8px; }.token-summary span, .token-summary strong { display: block; }.token-summary span { color: var(--muted); font-size: 10px; }.token-summary strong { overflow: hidden; margin-top: 3px; color: #3f4d65; font: 700 12px/1.25 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .token-meter { position: relative; height: 7px; margin-top: 11px; background: #e7ebf2; border-radius: 999px; }.token-meter-fill { display: block; height: 100%; min-width: 3px; background: var(--blue); border-radius: inherit; transition: width 220ms ease; }.token-meter-threshold { position: absolute; top: -3px; width: 2px; height: 13px; background: #d79524; border: 2px solid #fff; border-radius: 999px; transform: translateX(-50%); }
 .toolbox-note, .toolbox-action p, .toolbox-repository-action p { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }.toolbox-action { margin-top: 10px; }.toolbox-action strong { color: #2e394b; font-size: 13px; }.toolbox-action p { max-width: 260px; }.toolbox-action .btn, .toolbox-repository-action .btn { flex: 0 0 auto; }
+.toolbox-quick-actions { display: grid; gap: 7px; margin-top: 11px; }.toolbox-quick-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 44px; padding: 9px 11px; color: #34415a; background: #f7f8ff; border: 1px solid #e0e5f5; border-radius: 9px; cursor: pointer; text-align: left; transition: color 160ms var(--ease), background 160ms var(--ease), border-color 160ms var(--ease); }.toolbox-quick-action:hover:not(:disabled) { color: #4055bb; background: #f0f2ff; border-color: #cbd4fa; }.toolbox-quick-action:focus-visible { outline: 3px solid rgba(91,92,240,.18); outline-offset: 2px; }.toolbox-quick-action:disabled { color: #9ca6b6; background: #f7f8fa; cursor: not-allowed; }.toolbox-quick-action span { min-width: 0; }.toolbox-quick-action strong, .toolbox-quick-action small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.toolbox-quick-action strong { font-size: 12px; }.toolbox-quick-action small { margin-top: 2px; color: var(--muted); font-size: 10px; }.toolbox-quick-action svg { flex: 0 0 auto; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }.toolbox-result { margin: 9px 0 0; padding: 8px; color: #2e785d; background: #edf9f2; border-radius: 7px; font-size: 11px; line-height: 1.45; }
 .toolbox-repositories { display: grid; gap: 9px; margin-top: 12px; }.toolbox-repository { padding: 11px; background: #f8fafc; border: 1px solid #e1e7f0; border-radius: 10px; }.toolbox-repository-head strong, .toolbox-repository-head small { display: block; }.toolbox-repository-head strong { color: #2d394d; font-size: 13px; }.toolbox-repository-head small { margin-top: 3px; color: var(--muted); font: 10px var(--mono); }.toolbox-repository-action { align-items: center; margin-top: 8px; }.toolbox-repository-action p { max-width: 250px; margin: 0; }.toolbox-repository-buttons { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }.repository-result { margin: 9px 0 0; padding: 8px; color: #2e785d; background: #edf9f2; border-radius: 7px; font-size: 11px; line-height: 1.45; }.repository-result[data-state='blocked'] { color: #9d630f; background: #fff5e5; }.repository-result[data-state='failed'] { color: #a63e4c; background: #fff0f1; }
 .text-button { padding: 0; color: #4268cf; background: transparent; border: 0; font-size: 12px; font-weight: 700; }.text-button:disabled { color: var(--muted); }
 @media (max-width: 760px) { .demand-toolbox-panel { right: 0; max-height: calc(100vh - 20px); } }

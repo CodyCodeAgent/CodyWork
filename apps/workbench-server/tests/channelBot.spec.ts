@@ -54,6 +54,9 @@ describe('CodyWork channel lifecycle', () => {
       'http://10.37.222.12:3001/?workspace=workspace-1&demand=demand-1&conversation=conversation-1',
     )
     expect(codyWorkConversationUrl('javascript:alert(1)', binding('binding-1'))).toBe('')
+    expect(codyWorkConversationUrl('http://10.37.222.12:3001/old?debug=1', {
+      ...binding('workspace-binding'), targetType: 'codywork-workspace', targetId: 'workspace-1', demandId: null,
+    })).toBe('http://10.37.222.12:3001/?workspace=workspace-1&conversation=conversation-1')
   })
 
   it('removes local Markdown image syntax from Feishu cards while retaining a readable placeholder', () => {

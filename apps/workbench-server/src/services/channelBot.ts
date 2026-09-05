@@ -105,7 +105,7 @@ export function codyWorkConversationUrl(publicOrigin: string | undefined, bindin
     url.search = ''
     url.hash = ''
     url.searchParams.set('workspace', binding.workspaceId)
-    url.searchParams.set('demand', binding.demandId)
+    if (binding.demandId) url.searchParams.set('demand', binding.demandId)
     url.searchParams.set('conversation', binding.conversationId)
     return url.toString()
   } catch {
@@ -215,9 +215,9 @@ export class CodyWorkChannelService {
     }
   }
 
-  listConversationBindings(conversationId: string) {
+  private presentBindings(bindings: CodyWorkChannelBinding[]) {
     const accounts = new Map(this.store.listAccounts().map(account => [account.id, account]))
-    return this.store.listBindingsForConversation(conversationId).map(binding => {
+    return bindings.map(binding => {
       const account = accounts.get(binding.accountId)
       const diagnostics = this.store.diagnostics(binding.accountId)
       return {
@@ -230,6 +230,14 @@ export class CodyWorkChannelService {
         deadLetters: diagnostics.outbox.deadLetter,
       }
     })
+  }
+
+  listConversationBindings(conversationId: string) {
+    return this.presentBindings(this.store.listBindingsForConversation(conversationId))
+  }
+
+  listDemandBindings(workspaceId: string, demandId: string) {
+    return this.presentBindings(this.store.listBindingsForDemand(workspaceId, demandId))
   }
 
   unbind(accountId: string, bindingId: string): boolean {
@@ -556,14 +564,25 @@ export class CodyWorkChannelService {
       const workspaceId = string(action.value.workspaceId)
       const workspace = this.workspaces.get(workspaceId)
       const demands = listDemands(this.database, workspace)
-      const card = selectionCard('选择 CodyWork 需求', `Workspace：**${workspace.name}**`, demands.map(demand => ({
+      const actions = demands.map(demand => ({
         text: demand.name, value: { action: 'channel.pick_demand', inboxId, workspaceId, demandId: demand.id },
-      })))
-      await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-demand:${workspaceId}`, revision: 1 })
+      }))
+      actions.unshift({ text: 'Workspace 只读搜索', value: { action: 'channel.pick_workspace_scope', inboxId, workspaceId, demandId: '' } })
+      const card = selectionCard('选择 CodyWork 运行范围', `Workspace：**${workspace.name}**\n\nWorkspace 搜索会话可读代码、知识库并运行查询命令，但不能修改任何文件；开发任务请选择下方 Demand。`, actions)
+      await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-scope:${workspaceId}`, revision: 1 })
       return card
     }
     const workspaceId = string(action.value.workspaceId)
     const demandId = string(action.value.demandId)
+    if (kind === 'channel.pick_workspace_scope') {
+      const workspace = this.workspaces.get(workspaceId)
+      const sessions = this.conversations.listWorkspace(workspaceId)
+      const actions = sessions.map(session => ({ text: session.title, value: { action: 'channel.pick_workspace_session', inboxId, workspaceId, demandId: '', conversationId: session.id } }))
+      actions.unshift({ text: '+ 新建只读搜索会话', value: { action: 'channel.pick_new_workspace_session', inboxId, workspaceId, demandId: '', conversationId: '' } })
+      const card = selectionCard('选择 Workspace 搜索会话', `Workspace：**${workspace.name}**\n\n飞书与浏览器将共享同一个只读 Codex Thread。可运行查询命令和联网，但文件写入会被沙箱阻止。`, actions)
+      await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-workspace-session:${workspaceId}`, revision: 2 })
+      return card
+    }
     if (kind === 'channel.pick_demand') {
       const workspace = this.workspaces.get(workspaceId)
       const demand = listDemands(this.database, workspace).find(item => item.id === demandId)
@@ -575,13 +594,26 @@ export class CodyWorkChannelService {
       await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:pick-session:${demandId}`, revision: 2 })
       return card
     }
-    if (kind !== 'channel.pick_session' && kind !== 'channel.pick_new_session') throw new Error('未知绑定步骤')
-    const isNewSession = kind === 'channel.pick_new_session'
+    const workspaceKinds = new Set(['channel.pick_workspace_session', 'channel.pick_new_workspace_session'])
+    const demandKinds = new Set(['channel.pick_session', 'channel.pick_new_session'])
+    if (!workspaceKinds.has(kind) && !demandKinds.has(kind)) throw new Error('未知绑定步骤')
+    const workspaceScope = workspaceKinds.has(kind)
+    const isNewSession = kind === 'channel.pick_new_session' || kind === 'channel.pick_new_workspace_session'
     const conversation = isNewSession
-      ? await this.conversations.create(workspaceId, demandId, '飞书会话')
+      ? workspaceScope
+        ? await this.conversations.createWorkspace(workspaceId, '飞书只读搜索', 'feishu')
+        : await this.conversations.create(workspaceId, demandId, '飞书会话', 'feishu')
       : this.conversations.get(workspaceId, string(action.value.conversationId))
+    if (workspaceScope && conversation.scope !== 'workspace') throw new Error('所选会话不是 Workspace 搜索会话')
+    if (!workspaceScope && (conversation.scope !== 'demand' || conversation.demandId !== demandId)) throw new Error('所选会话不属于当前 Demand')
     const binding = this.store.createBinding({
-      message: inbox.message, workspaceId, demandId, conversationId: conversation.id, threadId: conversation.nativeId, ownerIdentity: inbox.message.sender.id,
+      message: inbox.message,
+      targetType: workspaceScope ? 'codywork-workspace' : 'codywork-demand',
+      workspaceId,
+      demandId: workspaceScope ? null : demandId,
+      conversationId: conversation.id,
+      threadId: conversation.nativeId,
+      ownerIdentity: inbox.message.sender.id,
     })
     this.store.updateInbox(inbox.id, 'ready', { bindingId: binding.id })
     // A thread created by this callback is known to have no history.  Do not
@@ -590,7 +622,8 @@ export class CodyWorkChannelService {
     // place while the Feishu card reports a failed action.
     await this.observe(binding, { emptyHistory: isNewSession })
     const openUrl = this.openUrl(binding)
-    const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。接下来在本对话发送的消息会进入同一个 Codex Thread。`, {
+    const scopeNote = workspaceScope ? 'Workspace 只读搜索；可运行查询命令，但不能修改文件。' : 'Demand Worktree 开发会话。'
+    const card = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。${scopeNote}\n\n接下来在本对话发送的消息会进入同一个 Codex Thread。`, {
       color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
     })
     await this.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
@@ -613,6 +646,7 @@ export class CodyWorkChannelService {
     const sourceMessageId = channelMessage.sourceMessageId || inbox.message.messageId
     const replyMessageId = channelMessage.replyMessageId || inbox.message.messageId
     if (inbox.message.attachments.length) {
+      if (binding.targetType === 'codywork-workspace') throw new Error('Workspace 只读搜索会话暂不接收附件；请发送文字，或在 Demand 会话中处理附件')
       const workspace = this.workspaces.get(binding.workspaceId)
       const demand = listDemands(this.database, workspace).find(item => item.id === binding.demandId)
       if (!demand) throw new Error('绑定的需求不存在')
@@ -911,9 +945,11 @@ export class CodyWorkChannelService {
     inboxId: string,
   ): Promise<void> {
     const workspace = this.workspaces.get(binding.workspaceId)
-    const demand = listDemands(this.database, workspace).find(item => item.id === binding.demandId)
-    if (!demand) return
-    const root = await realpath(demand.path).catch(() => '')
+    const rootPath = binding.targetType === 'codywork-workspace'
+      ? workspace.path
+      : listDemands(this.database, workspace).find(item => item.id === binding.demandId)?.path
+    if (!rootPath) return
+    const root = await realpath(rootPath).catch(() => '')
     if (!root) return
     const inbox = this.store.getInbox(inboxId)
     const source = inbox.message as CodyWorkInboundMessage
@@ -1065,13 +1101,14 @@ export class CodyWorkChannelService {
     if (name === '/status') {
       const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
       const openUrl = this.openUrl(binding)
-      await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: `已绑定：${conversation.title}\nThread：${binding.threadId}\n连接：${this.runtimes.get(binding.accountId)?.provider.getState() ?? 'offline'}${openUrl ? `\n在 CodyWork 中打开：${openUrl}` : ''}` }, dedupeKey: `${inbox.id}:status`, terminal: true })
+      const scope = binding.targetType === 'codywork-workspace' ? 'Workspace 只读搜索（可运行命令，不可写文件）' : 'Demand Worktree'
+      await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: `已绑定：${conversation.title}\n范围：${scope}\nThread：${binding.threadId}\n连接：${this.runtimes.get(binding.accountId)?.provider.getState() ?? 'offline'}${openUrl ? `\n在 CodyWork 中打开：${openUrl}` : ''}` }, dedupeKey: `${inbox.id}:status`, terminal: true })
       this.store.updateInbox(inbox.id, 'completed', { bindingId: binding.id }); return
     }
     if (name === '/unbind') {
       this.detachBindingObservation(binding)
       this.store.deleteBinding(binding.accountId, inbox.conversationKey)
-      await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '已解除 CodyWork 绑定。下一条消息会重新选择 Workspace、需求和会话。' }, dedupeKey: `${inbox.id}:unbind`, terminal: true })
+      await this.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '已解除 CodyWork 绑定。下一条消息会重新选择 Workspace、运行范围和会话。' }, dedupeKey: `${inbox.id}:unbind`, terminal: true })
       this.store.updateInbox(inbox.id, 'completed'); return
     }
     if (name === '/stop') {

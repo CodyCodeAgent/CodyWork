@@ -142,6 +142,16 @@ function demandStartupSource(): RuntimeInstructionSource {
   return { kind: 'platform', label: 'CodyWork demand startup', sha256: hash(content), content }
 }
 
+function workspaceSearchStartupSource(): RuntimeInstructionSource {
+  const content = [
+    '这是一个 Workspace 级只读搜索会话。你可以读取当前 Workspace、检索知识库与代码、运行不会修改文件系统的查询命令，并可联网获取任务所需信息。',
+    '严禁创建、修改、移动或删除 Workspace 内的任何文件；如果用户要求开发或落盘修改，请明确建议其进入对应 Demand Worktree 会话。不要将只读限制误解为“不能运行命令”。',
+    '',
+    '优先根据 Workspace knowledge catalog 定位少量相关文档，再按需读取代码或运行查询。Skill 默认不注入；仅在用户使用 `$Skill` 显式引用时加载对应 Skill。',
+  ].join('\n')
+  return { kind: 'platform', label: 'CodyWork workspace search startup', sha256: hash(content), content }
+}
+
 function skillEntries(root: string): InstructionBundle['skills'] {
   if (!existsSync(root) || !statSync(root).isDirectory()) return []
   return readdirSync(root, { withFileTypes: true })
@@ -183,6 +193,7 @@ function instructionText(sources: RuntimeInstructionSource[]): string {
 export interface InstructionBundleInput {
   workspacePath: string
   demandPath?: string
+  workspaceSearch?: boolean
   platformInstructions?: string
   charterPath?: string
   repositoryPaths?: string[]
@@ -208,6 +219,10 @@ export function resolveInstructionBundle(input: InstructionBundleInput): Instruc
   if (input.demandPath) {
     sources.push(demandStartupSource())
     sources.push(...demandDocumentSources(input.demandPath))
+    const knowledgeCatalog = workspaceKnowledgeCatalogSource(workspacePath)
+    if (knowledgeCatalog) sources.push(knowledgeCatalog)
+  } else if (input.workspaceSearch) {
+    sources.push(workspaceSearchStartupSource())
     const knowledgeCatalog = workspaceKnowledgeCatalogSource(workspacePath)
     if (knowledgeCatalog) sources.push(knowledgeCatalog)
   }

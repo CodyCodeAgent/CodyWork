@@ -23,10 +23,13 @@ describe('CodyWork channel persistence', () => {
       .run('demand-1', 'workspace-1', 'Demand', 'channel-test', 'channel-test', 'in_progress', now, now)
     db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run('conversation-1', 'demand-1', 'workspace-1', 'thread-1', 'Channel', 'idle', 'workspace-write', 'policy', 'instructions', now, now)
-    return store.createBinding({
-      message: inbound(accountId), workspaceId: 'workspace-1', demandId: 'demand-1', conversationId: 'conversation-1',
+    const binding = store.createBinding({
+      message: inbound(accountId), targetType: 'codywork-demand', workspaceId: 'workspace-1', demandId: 'demand-1', conversationId: 'conversation-1',
       threadId: 'thread-1', ownerIdentity: 'user-1',
     })
+    expect(store.listBindings(accountId)).toMatchObject([{ id: binding.id, conversationId: 'conversation-1', conversationTitle: 'Channel' }])
+    expect(store.listBindingsForDemand('workspace-1', 'demand-1')).toMatchObject([{ id: binding.id, conversationId: 'conversation-1', conversationTitle: 'Channel' }])
+    return binding
   }
 
   it('encrypts credentials and defaults to disabled, deny-by-default access', () => {
@@ -40,6 +43,28 @@ describe('CodyWork channel persistence', () => {
     db.close()
     expect(readFileSync(path).includes(Buffer.from('super-secret'))).toBe(false)
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it('persists Workspace search bindings without inventing a Demand target', () => {
+    const db = new WorkbenchDb(':memory:')
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Search Bot', appId: 'cli_search', appSecret: 'secret' })
+    const now = new Date().toISOString()
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
+      .run('workspace-search', 'Search', '/tmp/channel-search-workspace', now, now)
+    db.db.prepare("INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, 'workspace', NULL, ?, ?, ?, 'idle', 'read-only', ?, ?, ?, ?)")
+      .run('conversation-search', 'workspace-search', 'thread-search', 'Read-only search', 'policy', 'instructions', now, now)
+
+    const created = store.createBinding({
+      message: inbound(account.id), targetType: 'codywork-workspace', workspaceId: 'workspace-search', demandId: null,
+      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1',
+    })
+    expect(created).toMatchObject({ targetType: 'codywork-workspace', targetId: 'workspace-search', demandId: null, conversationId: 'conversation-search' })
+    expect(() => store.createBinding({
+      message: inbound(account.id, 'bad-event', 'bad-message'), targetType: 'codywork-workspace', workspaceId: 'workspace-search', demandId: 'fake-demand',
+      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1',
+    })).toThrow('不能关联 Demand')
+    db.close()
   })
 
   it('deduplicates inbound events and preserves outbox delivery state', async () => {

@@ -149,4 +149,20 @@ describe('FeishuChannelSettings', () => {
     expect(wrapper.text()).toContain('SDK 正在自动重连')
     wrapper.unmount()
   })
+
+  it('shows the CodyWork conversation title for each Feishu binding', async () => {
+    api.listFeishuAccounts.mockResolvedValue([account('bound', true)])
+    api.feishuDiagnostics.mockResolvedValue(diagnostics('bound'))
+    api.listFeishuBindings.mockResolvedValue([{
+      id: 'binding-1', accountId: 'bound', conversationKey: 'feishu:bound:private:chat:', workspaceId: 'workspace-1',
+      targetType: 'codywork-workspace', demandId: null, conversationId: 'conversation-1', conversationTitle: '成本归属排查',
+      threadId: '019ff043-116d-7500-b0be-c801978bf975', ownerIdentity: 'ou_test', channelConversationId: 'oc_test', channelScope: 'private', updatedAtIso: '',
+    }])
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    await wrapper.find('details').trigger('toggle')
+    expect(wrapper.text()).toContain('成本归属排查')
+    expect(wrapper.text()).toContain('Workspace 只读搜索')
+  })
 })

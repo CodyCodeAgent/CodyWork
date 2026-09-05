@@ -1,4 +1,4 @@
-import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand, WorkspaceSkill } from './api'
+import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand, FeishuChannelBinding, WorkspaceSkill } from './api'
 import type { ConversationState } from '@codycodeagent/cody-web-core/conversation'
 
 export type HistoryMode = 'push' | 'replace' | 'none'
@@ -52,13 +52,22 @@ export function conversationStatusLabel(status: Conversation['status']): string 
   return '已完成'
 }
 
+/** A compact, accessible summary for conversations connected to Feishu. */
+export function conversationChannelBadge(conversation: Conversation, bindings: FeishuChannelBinding[]): { detail: string; label: string } | null {
+  if (conversation.createdVia !== 'feishu' && bindings.length === 0) return null
+  const label = conversation.createdVia === 'feishu' ? '由飞书机器人创建' : '已绑定飞书机器人'
+  if (!bindings.length) return { label, detail: `${label}；当前未绑定飞书会话。` }
+  const scopeLabel = (scope: string): string => ({ private: '私聊', group: '群聊', topic: '话题' } as Record<string, string>)[scope] ?? scope
+  return { label, detail: [label, ...bindings.map(binding => `${binding.botName || binding.accountName || 'CodyWork Bot'} · ${scopeLabel(binding.channelScope)} · ${binding.channelConversationId}`)].join('\n') }
+}
+
 export function canDeleteConversation(conversation: Conversation, total: number): boolean {
-  return total > 1 && conversation.status !== 'running' && conversation.status !== 'awaiting_approval'
+  return (conversation.scope === 'workspace' || total > 1) && conversation.status !== 'running' && conversation.status !== 'awaiting_approval'
 }
 
 export function deleteConversationTitle(conversation: Conversation, total: number): string {
   if (conversation.status === 'running' || conversation.status === 'awaiting_approval') return '执行中或待确认的会话不能删除'
-  return total <= 1 ? '每个 Demand 至少保留一个会话' : '删除会话'
+  return conversation.scope === 'demand' && total <= 1 ? '每个 Demand 至少保留一个会话' : '删除会话'
 }
 
 export function demandStatusLabel(status: Demand['status']): string {
@@ -151,9 +160,14 @@ export function workbenchUrl(current: string, workspaceId: string | null, demand
     url.searchParams.delete('settings')
   } else {
     url.searchParams.delete('demand')
-    url.searchParams.delete('conversation')
-    if (route?.page && route.page !== 'dashboard') url.searchParams.set('view', route.page)
-    else url.searchParams.delete('view')
+    if (route?.conversationId) {
+      url.searchParams.set('conversation', route.conversationId)
+      url.searchParams.delete('view')
+    } else {
+      url.searchParams.delete('conversation')
+      if (route?.page && route.page !== 'dashboard') url.searchParams.set('view', route.page)
+      else url.searchParams.delete('view')
+    }
     if (route?.page === 'settings' && route.settingsSection && route.settingsSection !== 'overview') url.searchParams.set('settings', route.settingsSection)
     else url.searchParams.delete('settings')
   }

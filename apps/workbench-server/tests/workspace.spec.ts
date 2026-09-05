@@ -78,6 +78,41 @@ describe('workspace-only server primitives', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('migrates Demand-only conversations to scoped conversations without orphaning child rows', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-conversation-scope-'))
+    const path = join(root, 'workspace.db')
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_opened_at TEXT NOT NULL);
+      CREATE TABLE demands (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name TEXT NOT NULL, branch_name TEXT NOT NULL, worktree_key TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY, demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, native_id TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'idle', permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+        policy_hash TEXT NOT NULL, instruction_hash TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE conversation_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        action TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      INSERT INTO workspaces VALUES ('ws-legacy', 'Legacy', '/tmp/legacy', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+      INSERT INTO demands VALUES ('demand-legacy', 'ws-legacy', 'Legacy demand', 'legacy', 'legacy', 'in_progress', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+      INSERT INTO conversations VALUES ('conversation-legacy', 'demand-legacy', 'ws-legacy', 'thread-legacy', 'Legacy session', 'idle', 'workspace-write', 'policy', 'instructions', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+      INSERT INTO conversation_audits (conversation_id, action, data_json, created_at) VALUES ('conversation-legacy', 'legacy.audit', '{}', '2026-09-01T00:00:00.000Z');
+    `)
+    legacy.close()
+
+    const db = new WorkbenchDb(path)
+    expect(db.db.prepare('SELECT scope, demand_id, created_via FROM conversations WHERE id = ?').get('conversation-legacy')).toEqual({ scope: 'demand', demand_id: 'demand-legacy', created_via: 'browser' })
+    expect(db.db.prepare('SELECT conversation_id FROM conversation_audits').get()).toEqual({ conversation_id: 'conversation-legacy' })
+    expect(db.db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    const columns = db.db.prepare('PRAGMA table_info(channel_bindings)').all() as Array<{ name: string; notnull: number }>
+    expect(columns.find(column => column.name === 'demand_id')?.notnull).toBe(0)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('accepts an empty local folder without creating a competing scaffold', () => {
     const root = mkdtempSync(join(tmpdir(), 'workspace-only-'))
     const folder = join(root, 'empty')

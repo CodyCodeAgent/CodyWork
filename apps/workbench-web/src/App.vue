@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell codywork-vue" data-testid="codywork-app">
-    <WorkbenchSidebar :workspace="workspace" :workspaces="workspaces" :demands="demands" :selected-demand-id="selectedDemand?.id ?? ''" :active-page="activePage" :realtime-active="Boolean(selectedConversation)" :socket-state="socketState" :workspace-picker-open="showWorkspacePicker" :demand-expanded="demandNavExpanded" :collapsed="workspaceSidebarCollapsed" @update:workspace-picker-open="showWorkspacePicker = $event" @update:demand-expanded="demandNavExpanded = $event" @update:collapsed="setWorkspaceSidebarCollapsed" @select-workspace="selectWorkspace" @remove-workspace="openDeleteWorkspace" @create-workspace="showCreateWorkspace = true" @create-demand="showCreateDemand = true" @navigate="goTo" @open-demand="openDemand" />
+    <WorkbenchSidebar :workspace="workspace" :workspaces="workspaces" :demands="demands" :selected-demand-id="selectedDemand?.id ?? ''" :active-page="activePage" :realtime-active="Boolean(selectedConversation)" :socket-state="socketState" :workspace-picker-open="showWorkspacePicker" :demand-expanded="demandNavExpanded" :collapsed="workspaceSidebarCollapsed" :workspace-conversation-count="workspaceConversations.length" :workspace-conversation-active="isWorkspaceConversationPage" @update:workspace-picker-open="showWorkspacePicker = $event" @update:demand-expanded="demandNavExpanded = $event" @update:collapsed="setWorkspaceSidebarCollapsed" @select-workspace="selectWorkspace" @remove-workspace="openDeleteWorkspace" @create-workspace="showCreateWorkspace = true" @create-demand="showCreateDemand = true" @navigate="goTo" @open-demand="openDemand" @open-workspace-conversations="openWorkspaceConversations" />
 
     <main class="main">
       <div v-if="error" class="app-error-banner" role="alert"><span>{{ error }}</span><button type="button" aria-label="关闭错误提示" @click="error = ''">×</button></div>
@@ -9,7 +9,7 @@
       <section v-else-if="activePage === 'dashboard'" class="workspace-page">
         <header class="topbar"><div><div class="eyebrow">{{ workspace.name.toUpperCase() }} / OVERVIEW</div><h1>Workspace 概览</h1></div><div class="topbar-actions"><span v-if="dashboard" :class="['cache-status', dashboard.cache.state]">{{ dashboardCacheLabel }}</span><button class="btn" :disabled="dashboardRefreshing" @click="requestDashboardRefresh">{{ dashboardRefreshing ? '刷新中…' : '刷新状态' }}</button><button class="btn primary" @click="showAddRepository = true">＋ 添加 Repo</button></div></header>
         <div class="workspace-body">
-          <div class="workspace-header-card"><span class="workspace-large-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><div class="workspace-header-copy"><h2>{{ workspace.name }}</h2><code>{{ workspace.path }}</code><p>所有会话都从 Workspace → Demand → Worktree 进入受限执行。</p></div><span class="ready-pill"><i />ready</span></div>
+          <div class="workspace-header-card"><span class="workspace-large-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><div class="workspace-header-copy"><h2>{{ workspace.name }}</h2><code>{{ workspace.path }}</code><p>只读搜索在 Workspace 中检索；开发会话从 Demand → Worktree 进入隔离执行。</p></div><span class="ready-pill"><i />ready</span></div>
           <div class="metric-grid" aria-label="Workspace 统计"><article class="metric-card"><small>REPOSITORIES</small><strong>{{ dashboard?.repositories.total ?? repositories.length }}</strong><span>登记开发仓库</span></article><article class="metric-card"><small>DEMANDS</small><strong>{{ dashboard?.demands.total ?? demands.length }}</strong><span>隔离 Worktree</span></article><article class="metric-card"><small>KNOWLEDGE</small><strong>{{ dashboard?.knowledge.documents ?? 0 }}</strong><span>可读文档</span></article><article class="metric-card"><small>SKILLS</small><strong>{{ dashboard?.skills.available ?? 0 }}</strong><span>可调用能力</span></article></div>
           <div class="workspace-grid"><article class="info-card repository-card"><div class="repository-card-head"><div><div class="card-kicker">REPOSITORIES</div><h3>开发根目录</h3></div><span class="repository-summary">{{ repositories.length }} 个项目</span></div><div v-if="repositories.length" class="repository-list" role="list" aria-label="开发仓库"><div v-for="repo in repositories" :key="repo.id" class="repository-row" role="listitem"><div class="repository-copy"><div class="repository-name"><strong>{{ repo.name }}</strong><code v-if="repo.defaultRef">{{ repo.defaultRef }}</code></div><small>{{ repo.path }}</small></div><div class="repository-statuses"><span v-if="repo.dirty" class="repository-status dirty">dirty</span><span v-else class="repository-status clean">clean</span><span v-if="repo.syncStatus === 'pull_failed'" class="repository-status sync-failed">sync failed</span><button v-if="repo.dirty" class="repository-clear-button" type="button" :disabled="Boolean(clearingRepositoryId)" :title="`丢弃 ${repo.name} 基线中的未提交改动`" @click="requestBaselineCleanup(repo)">清理</button></div></div></div><p v-else class="muted">先添加一个 Git 仓库或目录，再创建 Demand。</p><div class="repository-card-foot"><span>状态由后台扫描更新</span><button class="btn" @click="showAddRepository = true">管理仓库</button></div></article><article class="info-card next-step-card"><div class="card-kicker">NEXT STEP</div><h3>按需求进入执行</h3><p>Demand 为每个仓库创建独立 Worktree，并将可读写根目录注入 Codex policy。</p><button class="btn primary" @click="goTo('demands')">查看需求</button></article></div>
         </div>
@@ -46,15 +46,19 @@
         <div class="dashboard-note"><div><strong>每个需求都是一个独立执行上下文</strong><p>Codex 可以跨 Repo 协作，但只会读写当前需求登记的 Worktree 根目录。</p></div><code>{{ workspace.path }}</code></div>
         <div class="demand-grid"><button v-for="demand in demands" :key="demand.id" class="demand-card" @click="openDemand(demand)"><span :class="['demand-dot', demand.status]" /><div><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small><p>{{ demand.repositories.length }} 个 Repo · {{ demand.status === 'in_progress' ? '开发中' : demand.status }}</p></div><span>→</span></button><div v-if="demands.length === 0" class="empty-list"><strong>还没有需求</strong><span>先选择开发 Repo，再创建一个隔离的 Demand Worktree。</span><button class="btn primary" @click="showCreateDemand = true">创建需求</button></div></div>
       </section>
-      <section v-else-if="activePage === 'chat' && selectedDemand" class="demand-chat-page">
-        <header class="topbar chat-topbar"><div><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div><div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><DemandToolbox :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" @settle="settleConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" /><button class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div></header>
+      <section v-else-if="activePage === 'chat' && (selectedDemand || isWorkspaceConversationPage)" class="demand-chat-page">
+        <header class="topbar chat-topbar">
+          <div v-if="selectedDemand"><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
+          <div v-else><button class="back-link" @click="returnToWorkspace">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / READ-ONLY SEARCH</div><h1>只读搜索</h1><div class="workspace-readonly-note"><strong>文件系统只读</strong><span>可运行查询命令、联网并读取代码与知识库</span></div></div>
+          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" @settle="settleConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand" class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div>
+        </header>
         <div class="chat-layout">
           <aside :class="['conversation-sidebar', { collapsed: conversationSidebarCollapsed }]">
             <button v-if="conversationSidebarCollapsed" class="conversation-panel-toggle rail" type="button" :aria-label="'展开会话列表'" aria-expanded="false" title="展开会话列表" @click="setConversationSidebarCollapsed(false)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg><span>会话</span></button>
             <template v-else>
             <div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div><button class="conversation-panel-toggle" type="button" :aria-label="'收起会话列表'" aria-expanded="true" title="收起会话列表" @click="setConversationSidebarCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></button></div>
-            <div class="conversation-demand"><strong>{{ selectedDemand.name }}</strong><small>{{ selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo' }}</small></div>
-            <div class="conversation-list" role="list" aria-label="Demand 会话">
+            <div class="conversation-demand"><strong>{{ selectedDemand?.name ?? workspace?.name }}</strong><small>{{ selectedDemand ? (selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo') : 'Workspace 只读 · 可执行查询命令' }}</small></div>
+            <div class="conversation-list" role="list" :aria-label="selectedDemand ? 'Demand 会话' : 'Workspace 搜索会话'">
               <div v-for="conversation in conversations" :key="conversation.id" :class="['conversation-row-wrap', { active: conversation.id === selectedConversation?.id, editing: renamingConversationId === conversation.id }]" role="listitem">
                 <form v-if="renamingConversationId === conversation.id" class="conversation-rename-editor" @submit.prevent="saveConversationRename(conversation)">
                   <span :class="['conversation-status', displayConversationStatus(conversation)]" />
@@ -66,7 +70,7 @@
                   <button class="conversation-edit-action cancel" type="button" :disabled="savingConversationRename" aria-label="取消重命名" title="取消（Esc）" @click="cancelConversationRename"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
                 </form>
                 <template v-else>
-                  <button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', displayConversationStatus(conversation)]" /><span><strong>{{ conversation.title }}</strong><small>{{ statusLabel(displayConversationStatus(conversation)) }}</small></span></button>
+                  <button :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]" :aria-label="conversationRowAriaLabel(conversation)" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', displayConversationStatus(conversation)]" /><span><span class="conversation-title-line"><strong>{{ conversation.title }}</strong><span v-if="conversationChannelBadge(conversation, bindingsForConversation(conversation))" class="conversation-channel-badge" :title="conversationChannelBadge(conversation, bindingsForConversation(conversation))?.detail" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v3M7 9h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Z" /><path d="M8 20v1M16 20v1" /><circle cx="9" cy="14" r="1" /><circle cx="15" cy="14" r="1" /></svg></span></span><small>{{ statusLabel(displayConversationStatus(conversation)) }}</small></span></button>
                   <button class="conversation-edit-action rename" type="button" :aria-label="`重命名会话：${conversation.title}`" title="重命名会话" @click.stop="startConversationRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.5-1 9.8-9.8a2 2 0 0 0 0-2.8l-.7-.7a2 2 0 0 0-2.8 0L5 15.5 4 20Z" /></svg></button>
                   <button class="conversation-delete" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg></button>
                 </template>
@@ -84,12 +88,11 @@
             <div v-else-if="channelBindingMessage" class="channel-session-feedback" role="status">{{ channelBindingMessage }}</div>
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
               <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
-              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>开始这个需求的开发</h2><p>描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。</p></div></template></CodyConversation>
+              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>{{ selectedDemand ? '开始这个需求的开发' : '搜索这个 Workspace' }}</h2><p>{{ selectedDemand ? '描述目标即可。Codex 会看到当前 Demand 的 Worktree、策略和上下文。' : '询问代码、知识或运行查询命令。沙箱允许读取和联网，但不会修改 Workspace 文件。' }}</p></div></template></CodyConversation>
             </div>
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div class="composer">
-              <QuickActionBar :actions="demandQuickActions" :disabled="sending || uploadingImages || !selectedConversation" :feedback="quickActionFeedback" @execute="executeQuickAction" />
-              <div class="composer-hint">{{ selectedCollaborationModeKind === 'plan' ? 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。' : '当前消息只会在该 Demand 的 Worktree 内执行。输入 $ 可引用多个 Skill。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="true" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）' : '描述下一步…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 排队）') : '描述你希望完成的事情…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt" />
+              <div class="composer-hint">{{ selectedCollaborationModeKind === 'plan' ? 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。' : selectedDemand ? '当前消息只会在该 Demand 的 Worktree 内执行。输入 $ 可引用多个 Skill。' : 'Workspace 只读：可运行查询命令和联网，但不能写入任何文件。输入 $ 可引用多个 Skill。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="true" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）' : '描述下一步…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 排队）') : '描述你希望完成的事情…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectedModel = $event" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt" />
             </div>
           </section>
         </div>
@@ -101,7 +104,7 @@
     <div v-if="showAddRepository" class="modal-backdrop"><section class="modal-card"><div class="modal-head"><div><div class="eyebrow">REPOSITORY</div><h2>添加开发 Repo</h2></div><button class="icon-button" @click="showAddRepository = false">×</button></div><div class="mode-tabs"><button :class="{ active: repositorySource === 'folder' }" @click="repositorySource = 'folder'">本地目录</button><button :class="{ active: repositorySource === 'git' }" @click="repositorySource = 'git'">Git clone</button></div><label>显示名称</label><input v-model="repositoryName" class="input" placeholder="可选" /><template v-if="repositorySource === 'folder'"><label>仓库目录</label><input v-model="repositoryPath" class="input" placeholder="/Users/you/projects/repository" /><p class="field-help">该 Git 仓库会复制到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><template v-else><label>Git URL</label><input v-model="repositoryUrl" class="input" placeholder="git@github.com:org/repository.git" /><p class="field-help">仓库会克隆到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showAddRepository = false">取消</button><button class="btn primary" :disabled="creating || (repositorySource === 'folder' ? !repositoryPath.trim() : !repositoryUrl.trim())" @click="addRepository">{{ creating ? '正在添加…' : '添加 Repo' }}</button></div></section></div>
     <AddDemandRepositoryDialog v-if="selectedDemand" :visible="showAddDemandRepository" :demand="selectedDemand" :repositories="availableDemandRepositories" :selected-repository-id="selectedDemandRepositoryId" :adding="addingDemandRepository" :error="demandRepositoryError" @close="closeAddDemandRepository" @add="addDemandRepository" @update:selected-repository-id="selectedDemandRepositoryId = $event" />
     <BindThreadDialog :visible="showBindConversation" :binding="bindingConversation" :loading="threadPickerLoading" :manual-entry="manualThreadEntry" :selected-project="selectedThreadProject" :query="threadQuery" :native-id="boundNativeId" :title="boundConversationTitle" :error="modalError" :can-bind="canBindNativeThread" :all-thread-count="nativeThreads.length" :projects="threadProjects" :threads="filteredNativeThreads" @close="closeBindConversation" @bind="bindConversation" @select="selectNativeThread" @update:manual-entry="manualThreadEntry = $event" @update:selected-project="selectedThreadProject = $event" @update:query="threadQuery = $event" @update:native-id="boundNativeId = $event" @update:title="boundConversationTitle = $event" />
-    <div v-if="conversationPendingDelete" class="modal-backdrop"><section class="modal-card delete-conversation-modal" role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title"><div class="modal-head"><div><div class="eyebrow">REMOVE SESSION</div><h2 id="delete-conversation-title">删除会话？</h2></div><button class="icon-button" aria-label="关闭删除会话弹窗" :disabled="deletingConversation" @click="closeDeleteConversation">×</button></div><p>将从当前 Demand 移除“{{ conversationPendingDelete.title }}”的会话绑定。</p><p class="delete-conversation-note">不会删除原生 Codex Thread 或它的历史；仍可稍后重新绑定并继续。</p><p v-if="deleteConversationError" class="form-error" role="alert">{{ deleteConversationError }}</p><div class="modal-actions"><button class="btn" :disabled="deletingConversation" @click="closeDeleteConversation">取消</button><button class="btn danger" :disabled="deletingConversation" @click="deleteConversation">{{ deletingConversation ? '删除中…' : '删除会话' }}</button></div></section></div>
+    <div v-if="conversationPendingDelete" class="modal-backdrop"><section class="modal-card delete-conversation-modal" role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title"><div class="modal-head"><div><div class="eyebrow">REMOVE SESSION</div><h2 id="delete-conversation-title">删除会话？</h2></div><button class="icon-button" aria-label="关闭删除会话弹窗" :disabled="deletingConversation" @click="closeDeleteConversation">×</button></div><p>将从当前 {{ conversationPendingDelete.scope === 'workspace' ? 'Workspace' : 'Demand' }} 移除“{{ conversationPendingDelete.title }}”的会话绑定。</p><p class="delete-conversation-note">{{ conversationPendingDelete.scope === 'workspace' ? '原生 Codex Thread 和历史仍会保留，但 CodyWork 不再显示此会话绑定。' : '不会删除原生 Codex Thread 或它的历史；仍可稍后重新绑定并继续。' }}</p><p v-if="deleteConversationError" class="form-error" role="alert">{{ deleteConversationError }}</p><div class="modal-actions"><button class="btn" :disabled="deletingConversation" @click="closeDeleteConversation">取消</button><button class="btn danger" :disabled="deletingConversation" @click="deleteConversation">{{ deletingConversation ? '删除中…' : '删除会话' }}</button></div></section></div>
     <div v-if="workspacePendingDelete" class="modal-backdrop"><section class="modal-card delete-workspace-modal" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title"><div class="modal-head"><div><div class="eyebrow">REMOVE WORKSPACE</div><h2 id="delete-workspace-title">从 CodyWork 移除 Workspace？</h2></div><button class="icon-button" aria-label="关闭移除 Workspace 弹窗" :disabled="deletingWorkspace" @click="closeDeleteWorkspace">×</button></div><p>将移除“{{ workspacePendingDelete.name }}”在 CodyWork 中的登记，以及关联的 Repo、Demand、会话审计与缓存数据。</p><p class="delete-workspace-note">不会删除 <code>{{ workspacePendingDelete.path }}</code>，也不会删除其中的 Git 仓库、分支或 Worktree。</p><p class="delete-workspace-confirm">这是一次仅作用于 CodyWork 本地记录的操作。确认后可随时重新添加该目录。</p><p v-if="deleteWorkspaceError" class="form-error" role="alert">{{ deleteWorkspaceError }}</p><div class="modal-actions"><button class="btn" :disabled="deletingWorkspace" @click="closeDeleteWorkspace">取消</button><button class="btn danger" :disabled="deletingWorkspace" @click="deleteWorkspace">{{ deletingWorkspace ? '移除中…' : '确认移除' }}</button></div></section></div>
     <div v-if="baselineCleanupPending" class="modal-backdrop"><section class="modal-card baseline-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="baseline-cleanup-title" aria-describedby="baseline-cleanup-description"><div class="modal-head"><div><div class="eyebrow">DISCARD BASELINE CHANGES</div><h2 id="baseline-cleanup-title">清理基线变更？</h2></div><button class="icon-button" aria-label="关闭清理基线变更弹窗" :disabled="Boolean(clearingRepositoryId)" @click="closeBaselineCleanup">×</button></div><p id="baseline-cleanup-description">将丢弃 <strong>{{ baselineCleanupPending.name }}</strong> 基线仓库中的全部未提交修改和未跟踪文件。</p><p class="baseline-cleanup-note">不会切换分支、不会回退已提交代码、不会同步远端；<strong>不会修改任何 Demand Worktree。</strong></p><p class="baseline-cleanup-path"><code>{{ baselineCleanupPending.path }}</code></p><p v-if="baselineCleanupError" class="form-error" role="alert">{{ baselineCleanupError }}</p><div class="modal-actions"><button class="btn" :disabled="Boolean(clearingRepositoryId)" @click="closeBaselineCleanup">取消</button><button class="btn danger" :disabled="Boolean(clearingRepositoryId)" @click="confirmBaselineCleanup">{{ clearingRepositoryId ? '清理中…' : '确认丢弃基线变更' }}</button></div></section></div>
   </div>
@@ -136,7 +139,6 @@ import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import AddDemandRepositoryDialog from './components/AddDemandRepositoryDialog.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
 import DemandToolbox from './components/DemandToolbox.vue'
-import QuickActionBar from './components/QuickActionBar.vue'
 import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
 import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
@@ -168,6 +170,7 @@ import {
 } from './api'
 import {
   canDeleteConversation as canDeleteConversationRule,
+  conversationChannelBadge,
   conversationStatusFromState,
   conversationStatusLabel as statusLabel,
   dashboardCacheLabel as formatDashboardCacheLabel,
@@ -191,7 +194,7 @@ import {
 } from './workbenchUi'
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
 
-const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
+const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const workspaceConversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
 const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage, retryFailedUserMessage, interrupt: interruptConversationState } = useConversationController()
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const composerImages = ref<ComposerImage[]>([]); const composerImageError = ref(''); const uploadingImages = ref(false); const runtimeModels = ref<string[]>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketConnection = ref<ConversationSocketSnapshot>(initialConversationSocketSnapshot()); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const demandRepositoryQuery = ref(''); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 // Composer state belongs to a conversation. Keeping a single global draft made
@@ -215,6 +218,7 @@ const baselineCleanupPending = ref<Repository | null>(null)
 const clearingRepositoryId = ref('')
 const baselineCleanupError = ref('')
 const conversationChannelBindings = ref<FeishuChannelBinding[]>([])
+const demandConversationBindings = ref<FeishuChannelBinding[]>([])
 const channelBindingMessage = ref('')
 const unbindingChannel = ref(false)
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
@@ -222,6 +226,7 @@ let quickActionFeedbackTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
 const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
 const socketState = computed(() => socketConnection.value.status)
+const isWorkspaceConversationPage = computed(() => activePage.value === 'chat' && !selectedDemand.value)
 const socketLabel = computed(() => {
   const state = socketConnection.value
   if (state.status === 'connected') return '实时连接'
@@ -259,6 +264,15 @@ const demandBaselineRepositories = computed(() => {
 })
 const threadContextUsage = computed(() => conversationState.value.contextUsage)
 const conversationChannelBinding = computed(() => conversationChannelBindings.value[0] ?? null)
+const demandConversationBindingsByConversationId = computed(() => {
+  const result = new Map<string, FeishuChannelBinding[]>()
+  for (const binding of demandConversationBindings.value) {
+    const entries = result.get(binding.conversationId) ?? []
+    entries.push(binding)
+    result.set(binding.conversationId, entries)
+  }
+  return result
+})
 const channelBindingHasFailure = computed(() => Boolean((conversationChannelBinding.value?.deadLetters ?? 0) > 0 || (conversationChannelBinding.value?.pendingDeliveries ?? 0) > 0 || conversationChannelBinding.value?.lastError))
 const allSharedConversationEntries = computed(() => conversationEntriesFromState(conversationState.value))
 const hiddenConversationEntryCount = computed(() => hiddenMessageCount(allSharedConversationEntries.value.length, visibleConversationEntryCount.value))
@@ -292,7 +306,9 @@ const selectedCollaborationMode = computed(() => reconcileSelectedCollaborationM
 const selectedCollaborationModeKind = computed<'default' | 'plan'>(() => coreCollaborationModes.value.find(mode => mode.name === selectedCollaborationMode.value)?.mode ?? 'default')
 const composerSubmitModes = computed<CodyComposerOption[]>(() => [{ value: 'queue', label: '排队', description: '当前 Turn 结束后顺序执行。' }, { value: 'steer', label: '引导', description: '正在执行时发送给当前 Turn。' }])
 const composerReasoningOptions = computed<CodyComposerOption[]>(() => [{ value: 'none', label: '无推理' }, { value: 'minimal', label: '极低' }, { value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }, { value: 'xhigh', label: '极高' }])
-const composerPermissionOptions = computed<CodyComposerOption[]>(() => [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
+const composerPermissionOptions = computed<CodyComposerOption[]>(() => isWorkspaceConversationPage.value
+  ? [{ value: 'read-only', label: 'Workspace 只读', description: '可读取、联网和运行查询命令；文件系统写入由沙箱阻止。' }]
+  : [{ value: 'read-only', label: '只读', description: '只能读取当前 Demand 的可读根目录。' }, { value: 'workspace-write', label: 'Worktree 写入', description: '仅可写当前 Demand 的 Worktree，危险操作仍须审批。' }, { value: 'yolo', label: 'YOLO', description: '自动批准，但仍不能访问或写入 Worktree 之外。' }])
 const composerSkills = computed<CodyComposerOption[]>(() => runtimeSkills.value.map(skill => ({
   value: skill.id,
   label: skill.label,
@@ -343,6 +359,7 @@ async function saveConversationRename(conversation: Conversation): Promise<void>
   try {
     const renamed = await api.renameConversation(workspace.value.id, conversation.id, title)
     conversations.value = conversations.value.map(item => item.id === renamed.id ? renamed : item)
+    if (renamed.scope === 'workspace') workspaceConversations.value = workspaceConversations.value.map(item => item.id === renamed.id ? renamed : item)
     if (selectedConversation.value?.id === renamed.id) selectedConversation.value = renamed
     renamingConversationId.value = ''
     conversationRenameDraft.value = ''
@@ -361,13 +378,15 @@ async function deleteConversation(): Promise<void> {
     await api.deleteConversation(workspace.value.id, target.id)
     const remaining = conversations.value.filter(conversation => conversation.id !== target.id)
     conversations.value = remaining
+    if (target.scope === 'workspace') workspaceConversations.value = workspaceConversations.value.filter(conversation => conversation.id !== target.id)
     conversationPendingDelete.value = null
     if (selectedConversation.value?.id === target.id) {
       selectedConversation.value = null
       resetConversationState()
       draft.value = ''
       draftByConversationId.delete(target.id)
-      await openConversation(remaining[0]!)
+      if (remaining[0]) await openConversation(remaining[0]!)
+      else returnToWorkspace()
     }
   } catch (cause) { deleteConversationError.value = cause instanceof Error ? cause.message : String(cause) } finally { deletingConversation.value = false }
 }
@@ -478,12 +497,18 @@ async function selectWorkspace(next: Workspace, options: { demandId?: string | n
     error.value = `已恢复 Workspace，但无法同步打开状态：${cause instanceof Error ? cause.message : String(cause)}`
   }
   try {
-    const [nextDemands, nextRepositories] = await Promise.all([api.listDemands(next.id), api.listRepositories(next.id)])
+    const [nextDemands, nextRepositories, nextWorkspaceConversations] = await Promise.all([api.listDemands(next.id), api.listRepositories(next.id), api.listWorkspaceConversations(next.id)])
     demands.value = nextDemands
     repositories.value = nextRepositories
+    workspaceConversations.value = nextWorkspaceConversations
     await refreshDashboard()
     const requestedDemand = options.demandId ? demandFromRoute(options.demandId) : undefined
     if (requestedDemand) await openDemand(requestedDemand, options.history ?? 'push', options.conversationId)
+    else if (options.conversationId) {
+      const requestedConversation = nextWorkspaceConversations.find(item => item.id === options.conversationId)
+      if (requestedConversation) await openWorkspaceConversations(options.history ?? 'push', requestedConversation.id)
+      else error.value = '链接中的 Workspace 会话不存在，已打开 Workspace 概览。'
+    }
     else {
       activePage.value = options.page ?? 'dashboard'
       settingsSection.value = options.settingsSection ?? 'overview'
@@ -528,6 +553,7 @@ async function deleteWorkspace(): Promise<void> {
     demands.value = []
     repositories.value = []
     conversations.value = []
+    workspaceConversations.value = []
     selectedDemand.value = null
     selectedConversation.value = null
     resetConversationState()
@@ -739,8 +765,34 @@ async function confirmBaselineCleanup(): Promise<void> {
     clearingRepositoryId.value = ''
   }
 }
-async function openDemand(demand: Demand, history: HistoryMode = 'push', preferredConversationId: string | null = null): Promise<void> { selectedDemand.value = demand; activePage.value = 'chat'; updateRoute(demand, history); await Promise.all([loadComposerOptions(demand.id), loadSkills(), loadQuickActions()]); conversations.value = await api.listConversations(workspace.value!.id, demand.id); if (!conversations.value.length) { const created = await api.createConversation(workspace.value!.id, demand.id); conversations.value = [created] }; const target = conversations.value.find(item => item.id === preferredConversationId) ?? conversations.value[0]!; await openConversation(target, history === 'none' ? 'none' : 'replace') }
-function returnToDemandList(): void { selectedDemand.value = null; clearConversationState(); activePage.value = 'demands'; updateRoute(null, 'push') }
+async function openDemand(demand: Demand, history: HistoryMode = 'push', preferredConversationId: string | null = null): Promise<void> {
+  selectedDemand.value = demand
+  demandConversationBindings.value = []
+  activePage.value = 'chat'
+  updateRoute(demand, history)
+  await Promise.all([loadComposerOptions(demand.id), loadSkills(), loadQuickActions(), loadDemandChannelBindings(demand)])
+  conversations.value = await api.listConversations(workspace.value!.id, demand.id)
+  if (!conversations.value.length) {
+    const created = await api.createConversation(workspace.value!.id, demand.id)
+    conversations.value = [created]
+  }
+  const target = conversations.value.find(item => item.id === preferredConversationId) ?? conversations.value[0]!
+  await openConversation(target, history === 'none' ? 'none' : 'replace')
+}
+async function openWorkspaceConversations(history: HistoryMode = 'push', preferredConversationId: string | null = null): Promise<void> {
+  if (!workspace.value) return
+  selectedDemand.value = null
+  demandConversationBindings.value = []
+  activePage.value = 'chat'
+  await Promise.all([loadComposerOptions(), loadSkills()])
+  workspaceConversations.value = await api.listWorkspaceConversations(workspace.value.id)
+  if (!workspaceConversations.value.length) workspaceConversations.value = [await api.createWorkspaceConversation(workspace.value.id)]
+  conversations.value = workspaceConversations.value
+  const target = conversations.value.find(item => item.id === preferredConversationId) ?? conversations.value[0]!
+  await openConversation(target, history === 'none' ? 'none' : 'replace')
+}
+function returnToDemandList(): void { selectedDemand.value = null; demandConversationBindings.value = []; clearConversationState(); activePage.value = 'demands'; updateRoute(null, 'push') }
+function returnToWorkspace(): void { selectedDemand.value = null; demandConversationBindings.value = []; conversations.value = []; clearConversationState(); activePage.value = 'dashboard'; updateRoute(null, 'push') }
 async function restoreRoute(): Promise<void> {
   const route = routeParams()
   const nextWorkspace = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspace.value
@@ -755,6 +807,12 @@ async function restoreRoute(): Promise<void> {
       else error.value = '链接中的会话不存在。'
     }
     else if (!demand) error.value = '链接中的 Demand 不存在。'
+    return
+  }
+  if (route.conversationId) {
+    const conversation = workspaceConversations.value.find(item => item.id === route.conversationId)
+    if (conversation) await openWorkspaceConversations('none', conversation.id)
+    else error.value = '链接中的 Workspace 会话不存在。'
     return
   }
   selectedDemand.value = null
@@ -820,12 +878,37 @@ async function loadConversationChannelBindings(conversation: Conversation): Prom
   if (!activeWorkspace) return
   try {
     const bindings = await api.listConversationChannelBindings(activeWorkspace.id, conversation.id)
-    if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) conversationChannelBindings.value = bindings
+    if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) {
+      conversationChannelBindings.value = bindings
+      if (selectedDemand.value?.id === conversation.demandId) {
+        demandConversationBindings.value = [
+          ...demandConversationBindings.value.filter(binding => binding.conversationId !== conversation.id),
+          ...bindings,
+        ]
+      }
+    }
   } catch (cause) {
     if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) channelBindingMessage.value = cause instanceof Error ? cause.message : String(cause)
   }
 }
 function channelScopeLabel(scope: string): string { return ({ private: '私聊', group: '群聊', topic: '话题' } as Record<string, string>)[scope] ?? scope }
+function bindingsForConversation(conversation: Conversation): FeishuChannelBinding[] { return demandConversationBindingsByConversationId.value.get(conversation.id) ?? [] }
+function conversationRowAriaLabel(conversation: Conversation): string {
+  const status = statusLabel(displayConversationStatus(conversation))
+  const badge = conversationChannelBadge(conversation, bindingsForConversation(conversation))
+  return badge ? `${conversation.title}，${status}。${badge.detail}` : `${conversation.title}，${status}`
+}
+async function loadDemandChannelBindings(demand: Demand): Promise<void> {
+  const activeWorkspace = workspace.value
+  if (!activeWorkspace) return
+  try {
+    const bindings = await api.listDemandChannelBindings(activeWorkspace.id, demand.id)
+    if (workspace.value?.id === activeWorkspace.id && selectedDemand.value?.id === demand.id) demandConversationBindings.value = bindings
+  } catch {
+    // The conversation list remains usable if channel configuration is unavailable.
+    // Per-conversation binding details will be retried when a session is opened.
+  }
+}
 async function copyCurrentConversationLink(): Promise<void> {
   try { await copyText(window.location.href); channelBindingMessage.value = '会话链接已复制。' } catch { channelBindingMessage.value = '复制失败，请从浏览器地址栏复制。' }
 }
@@ -837,6 +920,7 @@ async function unbindCurrentChannel(): Promise<void> {
   try {
     await api.unbindFeishuConversation(binding.accountId, binding.id)
     conversationChannelBindings.value = conversationChannelBindings.value.filter(item => item.id !== binding.id)
+    demandConversationBindings.value = demandConversationBindings.value.filter(item => item.id !== binding.id)
     channelBindingMessage.value = '飞书绑定已解除；原生 Codex Thread 和历史仍然保留。'
   } catch (cause) { channelBindingMessage.value = cause instanceof Error ? cause.message : String(cause) } finally { unbindingChannel.value = false }
 }
@@ -849,7 +933,20 @@ async function workspaceCreated(created: Workspace): Promise<void> {
 }
 async function importExistingWorktrees(): Promise<void> { if (!workspace.value || importingWorktrees.value) return; importingWorktrees.value = true; try { const result = await api.importExistingWorktrees(workspace.value.id); demands.value = await api.listDemands(workspace.value.id); await refreshDashboard(); error.value = result.imported.length ? `已导入 ${result.imported.length} 个已有 Demand。` : result.skipped.length ? `没有可导入的 Worktree：${result.skipped[0]!.reason}` : '没有发现尚未导入的 Worktree。' } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { importingWorktrees.value = false } }
 async function createDemand(): Promise<void> { if (!workspace.value) return; creating.value = true; modalError.value = ''; try { const created = await api.createDemand(workspace.value.id, { name: demandName.value.trim(), ...(demandBranch.value.trim() ? { branchName: demandBranch.value.trim() } : {}), repositoryIds: selectedRepositoryIds.value }); demands.value = await api.listDemands(workspace.value.id); showCreateDemand.value = false; demandName.value = ''; demandBranch.value = ''; demandRepositoryQuery.value = ''; selectedRepositoryIds.value = []; const demand = demands.value.find((item) => item.id === created.demand.id); if (demand) await openDemand(demand) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { creating.value = false } }
-async function createConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || creatingConversation.value) return; creatingConversation.value = true; error.value = ''; try { const created = await api.createConversation(workspace.value.id, selectedDemand.value.id); conversations.value = [created, ...conversations.value]; await openConversation(created) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { creatingConversation.value = false } }
+async function createConversation(): Promise<void> {
+  if (!workspace.value || creatingConversation.value || (!selectedDemand.value && !isWorkspaceConversationPage.value)) return
+  creatingConversation.value = true
+  error.value = ''
+  try {
+    const created = selectedDemand.value
+      ? await api.createConversation(workspace.value.id, selectedDemand.value.id)
+      : await api.createWorkspaceConversation(workspace.value.id)
+    conversations.value = [created, ...conversations.value]
+    if (created.scope === 'workspace') workspaceConversations.value = conversations.value
+    await openConversation(created)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
+  finally { creatingConversation.value = false }
+}
 async function settleConversation(): Promise<void> {
   if (!selectedDemand.value || !selectedConversation.value) return
   if (selectedConversation.value.permissionMode === 'read-only') { error.value = '只读会话不能更新 Demand 文档，请先切换到 Worktree 写入模式。'; return }
@@ -1018,8 +1115,8 @@ async function uploadImages(files: File[]): Promise<void> {
   }
 }
 function removeComposerImage(imageId: string): void { composerImageError.value = ''; persistComposerImages(composerImages.value.filter(image => image.id !== imageId)) }
-async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
-async function loadComposerOptions(demandId: string): Promise<void> { if (!workspace.value) return; try { const options = await api.composerOptions(workspace.value.id, demandId); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!selectedModel.value && options.models.length) selectedModel.value = options.models[0]! } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; selectedSkillsForTurn.value = [] } }
+async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item); if (updated.scope === 'workspace') workspaceConversations.value = workspaceConversations.value.map(item => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
+async function loadComposerOptions(demandId?: string): Promise<void> { if (!workspace.value) return; try { const options = demandId ? await api.composerOptions(workspace.value.id, demandId) : await api.workspaceComposerOptions(workspace.value.id); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!selectedModel.value && options.models.length) selectedModel.value = options.models[0]! } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; selectedSkillsForTurn.value = [] } }
 function selectCollaborationMode(name: string): void {
   const next = coreCollaborationModes.value.find(mode => mode.name === name) ?? coreCollaborationModes.value[0]
   if (!next) return
@@ -1028,7 +1125,7 @@ function selectCollaborationMode(name: string): void {
   if (next.reasoningEffort) selectedReasoning.value = next.reasoningEffort
 }
 function selectReasoning(value: string): void { if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)) selectedReasoning.value = value }
-async function selectPermission(value: string): Promise<void> { if (value !== 'read-only' && value !== 'workspace-write' && value !== 'yolo') return; const previous = permission.value; permission.value = value; await savePermission(); if (error.value) permission.value = previous }
+async function selectPermission(value: string): Promise<void> { if (value !== 'read-only' && value !== 'workspace-write' && value !== 'yolo') return; if (selectedConversation.value?.scope === 'workspace' && value !== 'read-only') { error.value = 'Workspace 会话固定为只读；需要修改代码时请进入 Demand Worktree'; return }; const previous = permission.value; permission.value = value; await savePermission(); if (error.value) permission.value = previous }
 async function interrupt(): Promise<void> { if (selectedConversation.value) await interruptConversationState() }
 async function copyText(text: string): Promise<void> {
   try {

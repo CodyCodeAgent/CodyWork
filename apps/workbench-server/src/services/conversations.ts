@@ -1,6 +1,6 @@
 import { composerHasContent } from '@codycodeagent/cody-web-core/composer'
 import { resolve } from 'node:path'
-import { WorkbenchDb, ConversationPermissionMode, ConversationRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
+import { WorkbenchDb, ConversationCreatedVia, ConversationPermissionMode, ConversationRow, WorkspaceRow, nowIso, makeId } from '../db/index.js'
 import { getDemand } from './demands.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../runtime/policy.js'
 import type {
@@ -15,9 +15,11 @@ import type {
 
 export interface ConversationView {
   id: string
-  demandId: string
+  scope: ConversationRow['scope']
+  demandId: string | null
   nativeId: string
   title: string
+  createdVia: ConversationCreatedVia
   status: ConversationRow['status']
   permissionMode: ConversationPermissionMode
   policyHash: string
@@ -69,9 +71,11 @@ type DemandContext = {
 function toView(row: ConversationRow): ConversationView {
   return {
     id: row.id,
+    scope: row.scope,
     demandId: row.demand_id,
     nativeId: row.native_id,
     title: row.title,
+    createdVia: row.created_via,
     status: 'idle',
     permissionMode: row.permission_mode,
     policyHash: row.policy_hash,
@@ -119,7 +123,13 @@ export class ConversationService {
   diagnostics() { return this.runtime.diagnostics?.() ?? null }
 
   list(workspaceId: string, demandId: string): ConversationView[] {
-    const rows = this.db.db.prepare('SELECT * FROM conversations WHERE workspace_id = ? AND demand_id = ? ORDER BY updated_at DESC, created_at DESC').all(workspaceId, demandId) as unknown as ConversationRow[]
+    const rows = this.db.db.prepare("SELECT * FROM conversations WHERE workspace_id = ? AND scope = 'demand' AND demand_id = ? ORDER BY updated_at DESC, created_at DESC").all(workspaceId, demandId) as unknown as ConversationRow[]
+    return rows.map(toView)
+  }
+
+  listWorkspace(workspaceId: string): ConversationView[] {
+    this.workspacePath(workspaceId)
+    const rows = this.db.db.prepare("SELECT * FROM conversations WHERE workspace_id = ? AND scope = 'workspace' ORDER BY updated_at DESC, created_at DESC").all(workspaceId) as unknown as ConversationRow[]
     return rows.map(toView)
   }
 
@@ -141,8 +151,7 @@ export class ConversationService {
   async history(workspaceId: string, conversationId: string): Promise<RuntimeConversationSnapshot> {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
-    const demand = this.requireDemand(workspaceId, row.demand_id)
-    const context = this.contextFor(demand, row.permission_mode)
+    const context = this.contextForRow(row)
     const snapshot = await this.runtime.readConversationSnapshot({ conversationId, nativeId: row.native_id, context })
     return { ...snapshot, events: snapshot.events.map(event => this.withPublicImageUrls(event)) }
   }
@@ -178,7 +187,7 @@ export class ConversationService {
     return () => { this.allChannelListeners.delete(listener) }
   }
 
-  async create(workspaceId: string, demandId: string, title?: string): Promise<ConversationView> {
+  async create(workspaceId: string, demandId: string, title?: string, createdVia: ConversationCreatedVia = 'browser'): Promise<ConversationView> {
     const demand = this.requireDemand(workspaceId, demandId)
     const context = this.contextFor(demand, 'workspace-write')
     const id = makeId('conversation')
@@ -186,10 +195,12 @@ export class ConversationService {
     const now = nowIso()
     const row: ConversationRow = {
       id,
+      scope: 'demand',
       demand_id: demand.id,
       workspace_id: workspaceId,
       native_id: handle.nativeId,
       title: title?.trim() || '新会话',
+      created_via: createdVia,
       status: 'idle',
       permission_mode: 'workspace-write',
       policy_hash: context.effectivePolicy.hash,
@@ -197,16 +208,45 @@ export class ConversationService {
       created_at: now,
       updated_at: now,
     }
-    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    this.db.db.prepare('INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
-        row.id, row.demand_id, row.workspace_id, row.native_id,
-        row.title, row.status, row.permission_mode,
+        row.id, row.scope, row.demand_id, row.workspace_id, row.native_id,
+        row.title, row.created_via, row.status, row.permission_mode,
         row.policy_hash, row.instruction_hash, row.created_at,
         row.updated_at,
       )
     this.handles.set(id, handle)
     this.contexts.set(id, context)
     this.attachRuntimeStream(handle)
+    return this.get(workspaceId, id)
+  }
+
+  async createWorkspace(workspaceId: string, title?: string, createdVia: ConversationCreatedVia = 'browser'): Promise<ConversationView> {
+    const context = this.workspaceContext(workspaceId)
+    const id = makeId('conversation')
+    const handle = await this.runtime.createConversation({ conversationId: id, context })
+    const now = nowIso()
+    const row: ConversationRow = {
+      id,
+      scope: 'workspace',
+      demand_id: null,
+      workspace_id: workspaceId,
+      native_id: handle.nativeId,
+      title: title?.trim() || 'Workspace 搜索',
+      created_via: createdVia,
+      status: 'idle',
+      permission_mode: 'read-only',
+      policy_hash: context.effectivePolicy.hash,
+      instruction_hash: context.instructionBundle.sha256,
+      created_at: now,
+      updated_at: now,
+    }
+    this.db.db.prepare('INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.scope, row.demand_id, row.workspace_id, row.native_id, row.title, row.created_via, row.status, row.permission_mode, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
+    this.handles.set(id, handle)
+    this.contexts.set(id, context)
+    this.attachRuntimeStream(handle)
+    this.audit(id, 'conversation.workspace_created', { workspaceId, policyHash: context.effectivePolicy.hash })
     return this.get(workspaceId, id)
   }
 
@@ -226,10 +266,12 @@ export class ConversationService {
     const now = nowIso()
     const row: ConversationRow = {
       id,
+      scope: 'demand',
       demand_id: demand.id,
       workspace_id: workspaceId,
       native_id: nativeId,
       title: input.title?.trim() || `已绑定 Thread ${nativeId.slice(0, 8)}`,
+      created_via: 'browser',
       status: 'idle',
       permission_mode: 'workspace-write',
       policy_hash: context.effectivePolicy.hash,
@@ -237,8 +279,8 @@ export class ConversationService {
       created_at: now,
       updated_at: now,
     }
-    this.db.db.prepare('INSERT INTO conversations (id, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(row.id, row.demand_id, row.workspace_id, row.native_id, row.title, row.status, row.permission_mode, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
+    this.db.db.prepare('INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(row.id, row.scope, row.demand_id, row.workspace_id, row.native_id, row.title, row.created_via, row.status, row.permission_mode, row.policy_hash, row.instruction_hash, row.created_at, row.updated_at)
     this.audit(id, 'conversation.bound', { nativeId, demandId: demand.id, policyHash: context.effectivePolicy.hash })
     return this.get(workspaceId, id)
   }
@@ -246,6 +288,10 @@ export class ConversationService {
   async composerOptions(workspaceId: string, demandId: string): Promise<RuntimeComposerOptions> {
     const demand = this.requireDemand(workspaceId, demandId)
     return this.runtime.getComposerOptions(this.contextFor(demand, 'workspace-write'))
+  }
+
+  async workspaceComposerOptions(workspaceId: string): Promise<RuntimeComposerOptions> {
+    return this.runtime.getComposerOptions(this.workspaceContext(workspaceId))
   }
 
   /**
@@ -317,6 +363,9 @@ export class ConversationService {
 
   async setPermission(workspaceId: string, conversationId: string, mode: ConversationPermissionMode): Promise<ConversationView> {
     const row = this.requireConversation(workspaceId, conversationId)
+    if (row.scope === 'workspace' && mode !== 'read-only') {
+      throw new Error('Workspace 会话固定为只读；需要修改代码时请进入 Demand Worktree')
+    }
     await this.ensureHandle(row)
     const context = this.contexts.get(conversationId)
     if (context) {
@@ -373,8 +422,10 @@ export class ConversationService {
     if (state?.activeTurnId || state?.pendingRequestCount) {
       throw new Error('会话正在执行或等待确认，请先停止后再删除')
     }
-    const count = this.db.db.prepare('SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND demand_id = ?').get(workspaceId, row.demand_id) as { count: number }
-    if (count.count <= 1) throw new Error('每个 Demand 至少保留一个会话')
+    if (row.scope === 'demand') {
+      const count = this.db.db.prepare("SELECT COUNT(*) AS count FROM conversations WHERE workspace_id = ? AND scope = 'demand' AND demand_id = ?").get(workspaceId, row.demand_id) as { count: number }
+      if (count.count <= 1) throw new Error('每个 Demand 至少保留一个会话')
+    }
 
     this.onConversationRemoving?.(workspaceId, conversationId)
     // Local audit records are deleted through their foreign-key cascade; native Thread is retained.
@@ -445,6 +496,28 @@ export class ConversationService {
     }, mode)
   }
 
+  private workspaceContext(workspaceId: string): RuntimeContext {
+    const workspacePath = this.workspacePath(workspaceId)
+    const bundle = resolveInstructionBundle({ workspacePath, workspaceSearch: true })
+    return {
+      workspacePath,
+      instructionBundle: bundle,
+      effectivePolicy: resolveEffectivePolicy({
+        workspacePath,
+        readableRoots: [workspacePath],
+        writableRoots: [],
+        shell: 'full',
+        approval: 'workbench',
+      }),
+    }
+  }
+
+  private contextForRow(row: ConversationRow): RuntimeContext {
+    if (row.scope === 'workspace') return this.workspaceContext(row.workspace_id)
+    if (!row.demand_id) throw new Error('需求会话缺少 Demand')
+    return this.contextFor(this.requireDemand(row.workspace_id, row.demand_id), row.permission_mode)
+  }
+
   private workspacePath(workspaceId: string): string {
     const row = this.db.db.prepare('SELECT path FROM workspaces WHERE id = ?').get(workspaceId) as { path?: string } | undefined
     if (!row?.path) throw new Error('Workspace 不存在')
@@ -479,8 +552,7 @@ export class ConversationService {
 
   private async restore(row: ConversationRow): Promise<void> {
     if (this.handles.has(row.id)) return
-    const demand = this.requireDemand(row.workspace_id, row.demand_id)
-    const context = permissionPolicy(this.contextFor(demand, row.permission_mode), row.permission_mode)
+    const context = this.contextForRow(row)
     const handle = await this.runtime.resumeConversation({ conversationId: row.id, nativeId: row.native_id, context })
     this.handles.set(row.id, handle)
     this.contexts.set(row.id, context)

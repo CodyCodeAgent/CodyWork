@@ -8,3 +8,4 @@ lib/
 .sessions/
 .runtime/
 website/
+channel-credentials.key

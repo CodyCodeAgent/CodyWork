@@ -184,9 +184,11 @@ export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'com
 
 export interface Conversation {
   id: string
-  demandId: string
+  scope: 'demand' | 'workspace'
+  demandId: string | null
   nativeId: string
   title: string
+  createdVia: 'browser' | 'feishu'
   status: ConversationStatus
   permissionMode: ConversationPermissionMode
   policyHash: string
@@ -275,8 +277,10 @@ export interface FeishuChannelBinding {
   id: string
   conversationKey: string
   workspaceId: string
-  demandId: string
+  targetType: 'codywork-demand' | 'codywork-workspace'
+  demandId: string | null
   conversationId: string
+  conversationTitle: string
   threadId: string
   ownerIdentity: string
   channelConversationId: string
@@ -330,6 +334,7 @@ export const api = {
   feishuDiagnostics: (id: string) => request<FeishuChannelDiagnostics>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/diagnostics`),
   listFeishuBindings: (id: string) => request<FeishuChannelBinding[]>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/bindings`),
   listConversationChannelBindings: (workspaceId: string, conversationId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/channel-bindings`),
+  listDemandChannelBindings: (workspaceId: string, demandId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/channel-bindings`),
   unbindFeishuConversation: (accountId: string, bindingId: string) => request<{ unbound: boolean }>('DELETE', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/bindings/${encodeURIComponent(bindingId)}`),
   retryFeishuOutbox: (accountId: string, outboxId: string) => request<{ retried: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/outbox/${encodeURIComponent(outboxId)}/retry`),
   testRuntime: () => request<{ runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
@@ -374,12 +379,18 @@ export const api = {
     request<Demand>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/repositories`, { repositoryId }),
   listConversations: (workspaceId: string, demandId: string) =>
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
+  listWorkspaceConversations: (workspaceId: string) =>
+    request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/conversations`),
   listAvailableNativeThreads: (workspaceId: string, demandId: string) =>
     request<AvailableNativeThread[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/available-threads`),
   composerOptions: (workspaceId: string, demandId: string) =>
     request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/composer-options`),
+  workspaceComposerOptions: (workspaceId: string) =>
+    request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/composer-options`),
   createConversation: (workspaceId: string, demandId: string, title?: string) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
+  createWorkspaceConversation: (workspaceId: string, title?: string) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations`, title ? { title } : {}),
   bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>

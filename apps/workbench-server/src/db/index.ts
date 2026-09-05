@@ -37,6 +37,7 @@ export interface DemandRow {
 
 export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'disconnected'
 export type ConversationPermissionMode = 'read-only' | 'workspace-write' | 'yolo'
+export type ConversationCreatedVia = 'browser' | 'feishu'
 
 export interface RuntimeSettingsRow {
   id: number
@@ -46,10 +47,12 @@ export interface RuntimeSettingsRow {
 
 export interface ConversationRow {
   id: string
-  demand_id: string
+  scope: 'demand' | 'workspace'
+  demand_id: string | null
   workspace_id: string
   native_id: string
   title: string
+  created_via: ConversationCreatedVia
   status: ConversationStatus
   permission_mode: ConversationPermissionMode
   policy_hash: string
@@ -134,16 +137,19 @@ export class WorkbenchDb {
       );
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
-        demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
+        scope TEXT NOT NULL DEFAULT 'demand' CHECK (scope IN ('demand', 'workspace')),
+        demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
         native_id TEXT NOT NULL,
         title TEXT NOT NULL,
+        created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
         status TEXT NOT NULL DEFAULT 'idle',
         permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
         policy_hash TEXT NOT NULL,
         instruction_hash TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL AND permission_mode = 'read-only')),
         UNIQUE(native_id)
       );
       CREATE TABLE IF NOT EXISTS conversation_audits (
@@ -248,7 +254,7 @@ export class WorkbenchDb {
         thread_id TEXT NOT NULL,
         owner_identity TEXT NOT NULL,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-        demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,
+        demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -424,6 +430,7 @@ export class WorkbenchDb {
             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             native_id TEXT NOT NULL UNIQUE,
             title TEXT NOT NULL,
+            created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
             status TEXT NOT NULL DEFAULT 'idle',
             permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
             policy_hash TEXT NOT NULL,
@@ -450,6 +457,79 @@ export class WorkbenchDb {
       } finally {
         this.db.exec('PRAGMA foreign_keys = ON;')
       }
+    }
+    const scopedConversationColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name?: string; notnull?: number }[]
+    const scopedBindingColumns = this.db.prepare('PRAGMA table_info(channel_bindings)').all() as { name?: string; notnull?: number }[]
+    const conversationDemand = scopedConversationColumns.find(column => column.name === 'demand_id')
+    const bindingDemand = scopedBindingColumns.find(column => column.name === 'demand_id')
+    if (!scopedConversationColumns.some(column => column.name === 'scope') || conversationDemand?.notnull === 1 || bindingDemand?.notnull === 1) {
+      // Workspace search sessions are real read-only conversations, not hidden
+      // synthetic Demands. Rebuild the two parent tables once so demand_id can
+      // be null while preserving every existing native Thread and channel row.
+      this.db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;')
+      try {
+        this.db.exec(`
+          BEGIN IMMEDIATE;
+          ALTER TABLE channel_bindings RENAME TO channel_bindings_scope_retired;
+          ALTER TABLE conversations RENAME TO conversations_scope_retired;
+          CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT 'demand' CHECK (scope IN ('demand', 'workspace')),
+            demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            native_id TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
+            status TEXT NOT NULL DEFAULT 'idle',
+            permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+            policy_hash TEXT NOT NULL,
+            instruction_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL AND permission_mode = 'read-only'))
+          );
+          INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at)
+            SELECT id, 'demand', demand_id, workspace_id, native_id, title, 'browser', status, permission_mode, policy_hash, instruction_hash, created_at, updated_at
+            FROM conversations_scope_retired;
+          CREATE TABLE channel_bindings (
+            id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+            conversation_key TEXT NOT NULL,
+            channel_conversation_id TEXT NOT NULL,
+            channel_scope TEXT NOT NULL,
+            channel_root_id TEXT,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            owner_identity TEXT NOT NULL,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(provider, account_id, conversation_key)
+          );
+          INSERT INTO channel_bindings (id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, workspace_id, demand_id, conversation_id, created_at, updated_at)
+            SELECT id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, workspace_id, demand_id, conversation_id, created_at, updated_at
+            FROM channel_bindings_scope_retired;
+          DROP TABLE channel_bindings_scope_retired;
+          DROP TABLE conversations_scope_retired;
+          CREATE INDEX channel_bindings_target ON channel_bindings(workspace_id, demand_id, conversation_id);
+          COMMIT;
+        `)
+      } catch (error) {
+        if (this.db.isTransaction) this.db.exec('ROLLBACK;')
+        throw error
+      } finally {
+        this.db.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;')
+      }
+      const violations = this.db.prepare('PRAGMA foreign_key_check').all()
+      if (violations.length) throw new Error('Workspace conversation migration left invalid foreign keys')
+    }
+    const conversationOriginColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name?: string }[]
+    if (!conversationOriginColumns.some(column => column.name === 'created_via')) {
+      this.db.exec("ALTER TABLE conversations ADD COLUMN created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu'));")
     }
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
     if (runtimeColumns.some(column => column.name !== 'id' && column.name !== 'codex_command' && column.name !== 'updated_at')) {
