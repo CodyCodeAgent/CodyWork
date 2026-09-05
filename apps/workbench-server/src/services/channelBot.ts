@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { extname, isAbsolute, relative, resolve } from 'node:path'
 import {
@@ -21,6 +21,7 @@ import {
   ChannelStore,
   type ChannelAccount,
   type ChannelAccountInput,
+  type ChannelAccessRequest,
   type ChannelInteractiveRequest,
   type CodyWorkChannelBinding,
   type ChannelGroupProfile,
@@ -57,6 +58,7 @@ type CodyWorkInboundMessage = ChannelInboundMessage & {
 }
 
 const PROJECTION_THROTTLE_MS = 700
+const ACCESS_REQUEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000
 const FEISHU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'])
 
 function record(value: unknown): Record<string, unknown> {
@@ -116,6 +118,71 @@ export function codyWorkConversationUrl(publicOrigin: string | undefined, bindin
 
 function selectionCard(title: string, text: string, actions: Array<{ text: string; value: Record<string, unknown> }>): FeishuCard {
   return feishuSelectionCard(title, text, actions)
+}
+
+type SignedAccessRequest = {
+  v: 1
+  requestId: string
+  accountId: string
+  requesterIdentity: string
+  administratorIdentity: string
+  expiresAtMs: number
+}
+
+function signAccessRequest(request: ChannelAccessRequest, appSecret: string): string {
+  const payload: SignedAccessRequest = {
+    v: 1,
+    requestId: request.id,
+    accountId: request.accountId,
+    requesterIdentity: request.requesterIdentity,
+    administratorIdentity: request.administratorIdentity,
+    expiresAtMs: Date.parse(request.expiresAtIso),
+  }
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  const signature = createHmac('sha256', appSecret).update(encoded).digest('base64url')
+  return `${encoded}.${signature}`
+}
+
+function verifyAccessRequestToken(account: ChannelAccount & { appSecret: string }, token: string, nowMs: number): SignedAccessRequest | null {
+  const [encoded, suppliedSignature, extra] = token.split('.')
+  if (!encoded || !suppliedSignature || extra) return null
+  const expectedSignature = createHmac('sha256', account.appSecret).update(encoded).digest('base64url')
+  const supplied = Buffer.from(suppliedSignature)
+  const expected = Buffer.from(expectedSignature)
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as Partial<SignedAccessRequest>
+    if (payload.v !== 1 || payload.accountId !== account.id || typeof payload.requestId !== 'string') return null
+    if (!/^ou_[A-Za-z0-9_-]+$/u.test(payload.requesterIdentity ?? '') || !/^ou_[A-Za-z0-9_-]+$/u.test(payload.administratorIdentity ?? '')) return null
+    if (typeof payload.expiresAtMs !== 'number' || payload.expiresAtMs > nowMs + ACCESS_REQUEST_MAX_AGE_MS + 60_000) return null
+    return payload as SignedAccessRequest
+  } catch {
+    return null
+  }
+}
+
+function accessRequestCard(request: ChannelAccessRequest, token: string): FeishuCard {
+  const source = request.sourceScope === 'private' ? '私聊' : `${request.sourceScope === 'topic' ? '话题' : '群聊'} \`${request.sourceConversationId.slice(0, 80)}\``
+  return feishuTextCard('飞书机器人访问申请', `用户 \`${request.requesterIdentity.slice(0, 100)}\` 在${source}中请求使用 CodyWork。\n\n批准只会精确加入这个 Open ID，不会开启全员访问。`, {
+    color: 'orange',
+    actions: [
+      { text: '允许访问', value: { action: 'channel.access_approve', accessRequestToken: token }, type: 'primary' },
+      { text: '拒绝', value: { action: 'channel.access_reject', accessRequestToken: token }, type: 'danger' },
+    ],
+    note: `申请将在 ${request.expiresAtIso} 失效`,
+  })
+}
+
+function resolvedAccessRequestCard(request: ChannelAccessRequest): FeishuCard {
+  const approved = request.status === 'approved'
+  return feishuTextCard(approved ? '已允许访问' : request.status === 'expired' ? '访问申请已失效' : '已拒绝访问', approved
+    ? `已将 \`${request.requesterIdentity.slice(0, 100)}\` 精确加入机器人白名单。对方现在可以回到原会话重试。`
+    : request.status === 'expired'
+      ? '这项访问申请已经过期，请让对方重新发送消息申请。'
+      : `未向 \`${request.requesterIdentity.slice(0, 100)}\` 开放机器人访问。`, {
+    color: approved ? 'green' : request.status === 'expired' ? 'grey' : 'red',
+    note: request.resolvedAtIso ? `操作人：${request.resolvedByIdentity} · ${request.resolvedAtIso}` : undefined,
+  })
 }
 
 function isFlatGroup(message: ChannelInboundMessage): boolean {
@@ -185,7 +252,7 @@ export class CodyWorkChannelService {
     private readonly database: WorkbenchDb,
     private readonly conversations: ConversationService,
     private readonly workspaces: WorkspaceRegistry,
-    private readonly options: { publicOrigin?: string } = {},
+    private readonly options: { publicOrigin?: string; now?: () => Date } = {},
   ) {
     this.store = new ChannelStore(database)
     // One process-lifetime subscription follows ConversationService's owner
@@ -221,6 +288,8 @@ export class CodyWorkChannelService {
   listAccounts(): ChannelAccount[] { return this.store.listAccounts() }
 
   listBindings(accountId: string) { return this.store.listBindings(accountId) }
+
+  private now(): Date { return this.options.now?.() ?? new Date() }
 
   private openUrl(binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string {
     return codyWorkConversationUrl(this.options?.publicOrigin, binding)
@@ -488,11 +557,11 @@ export class CodyWorkChannelService {
   private allowed(account: ChannelAccount, message: ChannelInboundMessage, binding: CodyWorkChannelBinding | null): { allowed: boolean; reason: string } {
     if (message.sender.type !== 'user') return { allowed: false, reason: 'non_user' }
     if (!message.sender.id) return { allowed: false, reason: 'missing_sender' }
-    if (!account.allowAllUsers && !account.allowedUserIds.includes(message.sender.id)) return { allowed: false, reason: 'sender_denied' }
     if (message.conversation.scope !== 'private' && !account.allowedConversationIds.includes(message.conversation.id)) return { allowed: false, reason: 'conversation_denied' }
-    if (message.mentionsOtherRecipient && !message.addressedToAgent) return { allowed: false, reason: 'addressed_elsewhere' }
+    if (message.mentionsOtherRecipient) return { allowed: false, reason: 'addressed_elsewhere' }
     if (message.conversation.scope !== 'private' && account.groupMentionMode === 'always' && !message.addressedToAgent) return { allowed: false, reason: 'mention_required' }
     if (message.conversation.scope !== 'private' && account.groupMentionMode === 'bound' && !binding && !message.addressedToAgent) return { allowed: false, reason: 'mention_required' }
+    if (!account.allowAllUsers && !account.allowedUserIds.includes(message.sender.id)) return { allowed: false, reason: 'sender_denied' }
     return { allowed: true, reason: '' }
   }
 
@@ -510,6 +579,10 @@ export class CodyWorkChannelService {
       const binding = this.store.findBinding(account.id, key)
       const decision = this.allowed(account, routedMessage, binding)
       if (!decision.allowed) {
+        if (decision.reason === 'sender_denied') {
+          await this.requestAccess(account, routedMessage, claimed.item.id)
+          return
+        }
         this.store.updateInbox(claimed.item.id, 'ignored', { lastError: decision.reason })
         this.store.audit(account.id, 'channel.inbound.ignored', 'channel_inbox', claimed.item.id, true, {
           provider: routedMessage.provider, accountId: routedMessage.accountId, eventId: routedMessage.eventId, messageId: routedMessage.messageId,
@@ -537,6 +610,104 @@ export class CodyWorkChannelService {
         }).catch(replyError => this.failAccount(message.accountId, 'channel.command.error_reply', replyError))
       }
     }
+  }
+
+  private async requestAccess(account: ChannelAccount, message: ChannelInboundMessage, inboxId: string): Promise<void> {
+    const administratorIdentity = account.allowedUserIds[0]
+    if (!/^ou_[A-Za-z0-9_-]+$/u.test(message.sender.id) || !/^ou_[A-Za-z0-9_-]+$/u.test(administratorIdentity ?? '')) {
+      this.store.updateInbox(inboxId, 'ignored', { lastError: 'sender_denied_no_administrator' })
+      this.store.audit(account.id, 'channel.access.request_skipped', 'channel_inbox', inboxId, false, {
+        requesterIdentity: message.sender.id, sourceConversationId: message.conversation.id, reason: 'no_administrator',
+      }, '机器人没有可接收授权申请的有效管理员 Open ID')
+      return
+    }
+    const now = this.now()
+    const createdAtIso = now.toISOString()
+    const expiresAtIso = new Date(now.getTime() + ACCESS_REQUEST_MAX_AGE_MS).toISOString()
+    const result = this.store.createAccessRequest({
+      accountId: account.id,
+      requesterIdentity: message.sender.id,
+      administratorIdentity,
+      sourceInboxId: inboxId,
+      sourceConversationId: message.conversation.id,
+      sourceScope: message.conversation.scope,
+      sourceMessageId: message.messageId,
+      createdAtIso,
+      expiresAtIso,
+    })
+    if (result.created) {
+      const secret = this.store.getAccount(account.id).appSecret
+      const card = accessRequestCard(result.request, signAccessRequest(result.request, secret))
+      const sent = await this.enqueue(account.id, {
+        kind: 'send_user_card', targetId: administratorIdentity, payload: { card },
+        dedupeKey: `access-request:${result.request.id}:administrator`, terminal: true,
+      })
+      if (sent.remoteMessageId) this.store.updateAccessRequestRemoteMessage(account.id, result.request.id, sent.remoteMessageId)
+    }
+    await this.enqueue(account.id, {
+      kind: 'reply_text', targetId: message.messageId,
+      payload: {
+        text: result.created
+          ? '当前账号尚未加入机器人白名单，已向管理员发送访问申请。批准后请重新发送原消息。'
+          : '访问申请仍在等待管理员处理。批准后请重新发送原消息。',
+        replyInThread: message.conversation.scope === 'topic',
+      },
+      dedupeKey: `${inboxId}:access-request-feedback`, terminal: true,
+    })
+    this.store.updateInbox(inboxId, 'ignored', { lastError: result.created ? 'access_requested' : 'access_request_pending' })
+    this.store.audit(account.id, result.created ? 'channel.access.requested' : 'channel.access.request_reused', 'channel_access_request', result.request.id, true, {
+      requesterIdentity: message.sender.id, administratorIdentity, sourceConversationId: message.conversation.id,
+      sourceScope: message.conversation.scope, inboxId,
+    })
+  }
+
+  private async handleAccessAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
+    const account = this.store.getAccount(accountId)
+    const token = string(action.value.accessRequestToken)
+    const signed = verifyAccessRequestToken(account, token, this.now().getTime())
+    if (!signed) throw new Error('访问申请已失效或校验失败，请让对方重新申请')
+    if (signed.administratorIdentity !== action.actorId) throw new Error('只有机器人管理员可以处理访问申请')
+    const persisted = this.store.getAccessRequest(accountId, signed.requestId)
+    if (persisted.requesterIdentity !== signed.requesterIdentity || persisted.administratorIdentity !== signed.administratorIdentity
+      || Date.parse(persisted.expiresAtIso) !== signed.expiresAtMs) {
+      throw new Error('访问申请身份校验失败')
+    }
+    const decision = string(action.value.action) === 'channel.access_approve' ? 'approved' : 'rejected'
+    const resolved = this.store.resolveAccessRequest({
+      accountId, id: persisted.id, actorIdentity: action.actorId, decision, resolvedAtIso: this.now().toISOString(),
+    })
+    if (resolved.request.status !== 'expired' && decision !== resolved.request.status) {
+      throw new Error(resolved.request.status === 'approved' ? '访问申请已经批准' : '访问申请已经拒绝')
+    }
+    const runtime = this.runtimes.get(accountId)
+    if (runtime && resolved.request.status === 'approved') runtime.account = this.store.getAccount(accountId)
+    const card = resolvedAccessRequestCard(resolved.request)
+    const remoteMessageId = action.remoteMessageId || resolved.request.adminRemoteMessageId
+    if (remoteMessageId) {
+      await this.enqueue(accountId, {
+        kind: 'update_card', targetId: remoteMessageId, payload: { card },
+        dedupeKey: `access-request:${resolved.request.id}:resolved`, terminal: true,
+      })
+    }
+    if (resolved.request.status !== 'expired') {
+      await this.enqueue(accountId, {
+        kind: 'send_user_card', targetId: resolved.request.requesterIdentity,
+        payload: { card: feishuTextCard(
+          resolved.request.status === 'approved' ? 'CodyWork 访问申请已通过' : 'CodyWork 访问申请未通过',
+          resolved.request.status === 'approved' ? '你现在可以回到原会话重新发送消息。' : '管理员未开放本次访问。',
+          { color: resolved.request.status === 'approved' ? 'green' : 'grey' },
+        ) },
+        dedupeKey: `access-request:${resolved.request.id}:requester:${resolved.request.status}`, terminal: true,
+      })
+    }
+    if (resolved.changed) {
+      const auditAction = resolved.request.status === 'approved' ? 'channel.access.granted'
+        : resolved.request.status === 'rejected' ? 'channel.access.rejected' : 'channel.access.expired'
+      this.store.audit(accountId, auditAction, 'channel_access_request', resolved.request.id, true, {
+        requesterIdentity: resolved.request.requesterIdentity, administratorIdentity: action.actorId,
+      })
+    }
+    return card
   }
 
   private async requestWorkspace(inboxId: string): Promise<void> {
@@ -575,6 +746,7 @@ export class CodyWorkChannelService {
       let card: FeishuCard | null = null
       if (kind.startsWith('channel.pick_')) card = await this.handleBindingAction(accountId, action)
       else if (kind === 'channel.group_setting_mode') card = await this.handleGroupSettingAction(accountId, action)
+      else if (kind === 'channel.access_approve' || kind === 'channel.access_reject') card = await this.handleAccessAction(accountId, action)
       else if (kind === 'channel.approval') await this.handleApprovalAction(accountId, action)
       else if (kind === 'channel.question') await this.handleQuestionAction(accountId, action)
       else if (kind === 'channel.retry_outbox') this.retryOutbox(accountId, string(action.value.outboxId))

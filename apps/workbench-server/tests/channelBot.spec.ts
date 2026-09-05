@@ -6,7 +6,8 @@ import { createConversationState } from '@codycodeagent/cody-web-core/conversati
 import type { ChannelInboundMessage, ChannelInboxItem } from '@codycodeagent/cody-web-core/channel'
 import type { ConversationEvent } from '../src/services/conversations.js'
 import { CodyWorkChannelService, codyWorkConversationUrl, feishuProjectionBody } from '../src/services/channelBot.js'
-import type { ChannelAccountSecret, CodyWorkChannelBinding } from '../src/services/channelStore.js'
+import { ChannelStore, type ChannelAccountSecret, type CodyWorkChannelBinding } from '../src/services/channelStore.js'
+import { WorkbenchDb } from '../src/db/index.js'
 
 function binding(id: string, conversationId = 'conversation-1'): CodyWorkChannelBinding {
   return {
@@ -46,6 +47,24 @@ function bareService(): any {
     observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), renderInFlight: new Map(), reconciliationInFlight: new Set(), reconnectTimers: new Map(), runtimes: new Map(),
   })
   return service
+}
+
+function findActionValue(value: unknown, action: string): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findActionValue(child, action)
+      if (found) return found
+    }
+    return null
+  }
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  if (row.action === action) return row
+  for (const child of Object.values(row)) {
+    const found = findActionValue(child, action)
+    if (found) return found
+  }
+  return null
 }
 
 describe('CodyWork channel lifecycle', () => {
@@ -112,6 +131,102 @@ describe('CodyWork channel lifecycle', () => {
     expect(service.allowed(account, topicMessage, null)).toEqual({ allowed: false, reason: 'conversation_denied' })
     account.allowedConversationIds.push('group-chat-1')
     expect(service.allowed(account, topicMessage, null)).toEqual({ allowed: true, reason: '' })
+  })
+
+  it('keeps unauthorized ambient, disallowed, and ambiguous group traffic silent', () => {
+    const service = bareService()
+    const account = { allowAllUsers: false, allowedUserIds: ['ou_owner'], allowedConversationIds: ['group-chat-1'], groupMentionMode: 'always' }
+    const incoming = message('hello', 'access-boundary')
+    incoming.sender.id = 'ou_guest'
+    incoming.conversation = { id: 'group-chat-1', scope: 'group' }
+    incoming.addressedToAgent = false
+    expect(service.allowed(account, incoming, null)).toEqual({ allowed: false, reason: 'mention_required' })
+
+    incoming.conversation.id = 'unknown-group'
+    incoming.addressedToAgent = true
+    expect(service.allowed(account, incoming, null)).toEqual({ allowed: false, reason: 'conversation_denied' })
+
+    incoming.conversation.id = 'group-chat-1'
+    incoming.mentionsOtherRecipient = true
+    expect(service.allowed(account, incoming, null)).toEqual({ allowed: false, reason: 'addressed_elsewhere' })
+
+    incoming.mentionsOtherRecipient = false
+    expect(service.allowed(account, incoming, null)).toEqual({ allowed: false, reason: 'sender_denied' })
+  })
+
+  it('routes an explicit unauthorized private message into access-request handling instead of a Codex turn', async () => {
+    const service = bareService()
+    const incoming = message('hello', 'unauthorized-private')
+    incoming.sender.id = 'ou_guest'
+    const claimed = inbox('unauthorized-inbox', incoming.text)
+    claimed.message = incoming
+    const account = {
+      id: 'account-1', enabled: true, allowAllUsers: false, allowedUserIds: ['ou_owner'], allowedConversationIds: [], groupMentionMode: 'always',
+    }
+    service.store = {
+      getGroupProfile: () => null, claimInbound: () => ({ item: claimed, created: true }), listAccounts: () => [account],
+      updateRuntime: vi.fn(), findBinding: () => null,
+    }
+    service.requestAccess = vi.fn(async () => undefined)
+    service.submitInbox = vi.fn(async () => undefined)
+
+    await service.onMessage(incoming)
+
+    expect(service.requestAccess).toHaveBeenCalledWith(account, incoming, claimed.id)
+    expect(service.submitInbox).not.toHaveBeenCalled()
+  })
+
+  it('sends a signed narrow-access card and grants the requester after administrator approval', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'codywork-channel-access-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    try {
+      const store = new ChannelStore(db)
+      const account = store.saveAccount(null, {
+        name: 'Test Bot', appId: 'cli_access_flow', appSecret: 'secret', allowAllUsers: false, allowedUserIds: ['ou_owner'],
+      })
+      const incoming = message('please grant access', 'access-flow')
+      incoming.accountId = account.id
+      incoming.sender.id = 'ou_guest'
+      const source = store.claimInbound(incoming).item
+      const service = bareService()
+      service.store = store
+      service.options = { now: () => new Date('2026-09-05T00:00:00.000Z') }
+      const deliveries: any[] = []
+      service.enqueue = vi.fn(async (_accountId: string, input: any) => {
+        deliveries.push(input)
+        return { id: `outbox-${deliveries.length}`, remoteMessageId: input.kind === 'send_user_card' && input.targetId === 'ou_owner' ? 'admin-card-1' : undefined }
+      })
+
+      await service.requestAccess(account, incoming, source.id)
+
+      expect(deliveries).toMatchObject([
+        { kind: 'send_user_card', targetId: 'ou_owner' },
+        { kind: 'reply_text', targetId: incoming.messageId, payload: { text: expect.stringContaining('已向管理员发送访问申请') } },
+      ])
+      const token = String(findActionValue(deliveries[0].payload.card, 'channel.access_approve')?.accessRequestToken ?? '')
+      expect(token).not.toBe('')
+      await expect(service.handleAccessAction(account.id, {
+        value: { action: 'channel.access_approve', accessRequestToken: `${token}x` }, actorId: 'ou_owner', remoteMessageId: 'admin-card-1', eventId: 'tampered',
+      })).rejects.toThrow('校验失败')
+      await expect(service.handleAccessAction(account.id, {
+        value: { action: 'channel.access_approve', accessRequestToken: token }, actorId: 'ou_guest', remoteMessageId: 'admin-card-1', eventId: 'wrong-actor',
+      })).rejects.toThrow('只有机器人管理员')
+
+      service.options.now = () => new Date('2026-09-06T00:00:00.000Z')
+      const resolved = await service.handleAccessAction(account.id, {
+        value: { action: 'channel.access_approve', accessRequestToken: token }, actorId: 'ou_owner', remoteMessageId: 'admin-card-1', eventId: 'approved',
+      })
+      expect(JSON.stringify(resolved)).toContain('已允许访问')
+      expect(JSON.stringify(resolved)).not.toContain('channel.access_')
+      expect(store.listAccounts()).toMatchObject([{ allowAllUsers: false, allowedUserIds: ['ou_owner', 'ou_guest'] }])
+      expect(deliveries.slice(2)).toMatchObject([
+        { kind: 'update_card', targetId: 'admin-card-1' },
+        { kind: 'send_user_card', targetId: 'ou_guest' },
+      ])
+    } finally {
+      db.close()
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('restores the previous account and runtime when a reconnecting update fails', async () => {

@@ -121,6 +121,24 @@ export type ChannelInteractiveRequest = {
   request: Record<string, unknown>
 }
 
+export type ChannelAccessRequest = {
+  id: string
+  accountId: string
+  requesterIdentity: string
+  administratorIdentity: string
+  sourceInboxId: string
+  sourceConversationId: string
+  sourceScope: 'private' | 'group' | 'topic'
+  sourceMessageId: string
+  status: 'pending' | 'approved' | 'rejected' | 'expired'
+  expiresAtIso: string
+  resolvedAtIso: string
+  resolvedByIdentity: string
+  adminRemoteMessageId: string
+  createdAtIso: string
+  updatedAtIso: string
+}
+
 export type ChannelTurnLink = {
   id: string
   inboxId: string
@@ -193,6 +211,21 @@ function toOutbox(row: OutboxRow): ChannelOutboxItem {
     attempts: row.attempts, availableAtIso: row.available_at, ...(row.lease_expires_at ? { leaseExpiresAtIso: row.lease_expires_at } : {}),
     ...(row.remote_message_id ? { remoteMessageId: row.remote_message_id } : {}), ...(row.revision === null ? {} : { revision: row.revision }),
     terminal: Boolean(row.terminal), ...(row.last_error ? { lastError: row.last_error } : {}),
+  }
+}
+
+function toAccessRequest(row: Record<string, unknown>): ChannelAccessRequest {
+  const scope = String(row.source_scope)
+  const status = String(row.status)
+  return {
+    id: String(row.id), accountId: String(row.account_id), requesterIdentity: String(row.requester_identity),
+    administratorIdentity: String(row.administrator_identity), sourceInboxId: String(row.source_inbox_id),
+    sourceConversationId: String(row.source_conversation_id), sourceScope: scope === 'group' ? 'group' : scope === 'topic' ? 'topic' : 'private',
+    sourceMessageId: String(row.source_message_id),
+    status: status === 'approved' ? 'approved' : status === 'rejected' ? 'rejected' : status === 'expired' ? 'expired' : 'pending',
+    expiresAtIso: String(row.expires_at), resolvedAtIso: String(row.resolved_at ?? ''),
+    resolvedByIdentity: String(row.resolved_by_identity ?? ''), adminRemoteMessageId: String(row.admin_remote_message_id ?? ''),
+    createdAtIso: String(row.created_at), updatedAtIso: String(row.updated_at),
   }
 }
 
@@ -274,6 +307,99 @@ export class ChannelStore implements ChannelOutboxStore {
         account.connectedAt, account.lastEventAt, account.lastDeliveryAt, account.lastCloseCode, account.lastCloseReason || null,
         account.lastDisconnectedAt, account.reconnectAttempts, account.nextReconnectAt, account.updatedAt, account.id)
     if (result.changes === 0) throw new Error('飞书机器人不存在')
+  }
+
+  createAccessRequest(input: {
+    accountId: string
+    requesterIdentity: string
+    administratorIdentity: string
+    sourceInboxId: string
+    sourceConversationId: string
+    sourceScope: ChannelAccessRequest['sourceScope']
+    sourceMessageId: string
+    createdAtIso: string
+    expiresAtIso: string
+  }): { request: ChannelAccessRequest; created: boolean } {
+    const id = makeId('access')
+    this.database.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.database.db.prepare("UPDATE channel_access_requests SET status = 'expired', updated_at = ? WHERE account_id = ? AND requester_identity = ? AND status = 'pending' AND expires_at <= ?")
+        .run(input.createdAtIso, input.accountId, input.requesterIdentity, input.createdAtIso)
+      const existing = this.database.db.prepare("SELECT * FROM channel_access_requests WHERE account_id = ? AND requester_identity = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1")
+        .get(input.accountId, input.requesterIdentity) as Record<string, unknown> | undefined
+      if (existing) {
+        this.database.db.exec('COMMIT')
+        return { request: toAccessRequest(existing), created: false }
+      }
+      this.database.db.prepare(`INSERT INTO channel_access_requests (
+        id, account_id, requester_identity, administrator_identity, source_inbox_id, source_conversation_id,
+        source_scope, source_message_id, status, expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`).run(
+        id, input.accountId, input.requesterIdentity, input.administratorIdentity, input.sourceInboxId,
+        input.sourceConversationId, input.sourceScope, input.sourceMessageId, input.expiresAtIso,
+        input.createdAtIso, input.createdAtIso,
+      )
+      const row = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE id = ?').get(id) as Record<string, unknown>
+      this.database.db.exec('COMMIT')
+      return { request: toAccessRequest(row), created: true }
+    } catch (error) {
+      if (this.database.db.isTransaction) this.database.db.exec('ROLLBACK')
+      throw error
+    }
+  }
+
+  getAccessRequest(accountId: string, id: string): ChannelAccessRequest {
+    const row = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE account_id = ? AND id = ?').get(accountId, id) as Record<string, unknown> | undefined
+    if (!row) throw new Error('访问申请不存在或已失效')
+    return toAccessRequest(row)
+  }
+
+  updateAccessRequestRemoteMessage(accountId: string, id: string, remoteMessageId: string): void {
+    if (!remoteMessageId) return
+    this.database.db.prepare('UPDATE channel_access_requests SET admin_remote_message_id = ?, updated_at = ? WHERE account_id = ? AND id = ?')
+      .run(remoteMessageId, nowIso(), accountId, id)
+  }
+
+  resolveAccessRequest(input: {
+    accountId: string
+    id: string
+    actorIdentity: string
+    decision: 'approved' | 'rejected'
+    resolvedAtIso: string
+  }): { request: ChannelAccessRequest; changed: boolean } {
+    this.database.db.exec('BEGIN IMMEDIATE')
+    try {
+      const row = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE account_id = ? AND id = ?').get(input.accountId, input.id) as Record<string, unknown> | undefined
+      if (!row) throw new Error('访问申请不存在或已失效')
+      const request = toAccessRequest(row)
+      if (request.administratorIdentity !== input.actorIdentity) throw new Error('只有机器人管理员可以处理访问申请')
+      if (request.status !== 'pending') {
+        this.database.db.exec('COMMIT')
+        return { request, changed: false }
+      }
+      if (request.expiresAtIso <= input.resolvedAtIso) {
+        this.database.db.prepare("UPDATE channel_access_requests SET status = 'expired', updated_at = ? WHERE id = ? AND status = 'pending'")
+          .run(input.resolvedAtIso, request.id)
+        const expired = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE id = ?').get(request.id) as Record<string, unknown>
+        this.database.db.exec('COMMIT')
+        return { request: toAccessRequest(expired), changed: true }
+      }
+      if (input.decision === 'approved') {
+        const account = this.database.db.prepare('SELECT allowed_user_ids_json FROM channel_accounts WHERE id = ?').get(input.accountId) as { allowed_user_ids_json: string } | undefined
+        if (!account) throw new Error('飞书机器人不存在')
+        const allowed = stringList([...parseStringList(account.allowed_user_ids_json), request.requesterIdentity])
+        this.database.db.prepare('UPDATE channel_accounts SET allow_all_users = 0, allowed_user_ids_json = ?, updated_at = ? WHERE id = ?')
+          .run(JSON.stringify(allowed), input.resolvedAtIso, input.accountId)
+      }
+      this.database.db.prepare(`UPDATE channel_access_requests SET status = ?, resolved_at = ?, resolved_by_identity = ?, updated_at = ?
+        WHERE id = ? AND status = 'pending'`).run(input.decision, input.resolvedAtIso, input.actorIdentity, input.resolvedAtIso, request.id)
+      const resolved = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE id = ?').get(request.id) as Record<string, unknown>
+      this.database.db.exec('COMMIT')
+      return { request: toAccessRequest(resolved), changed: true }
+    } catch (error) {
+      if (this.database.db.isTransaction) this.database.db.exec('ROLLBACK')
+      throw error
+    }
   }
 
   deleteAccount(id: string): void {
@@ -658,6 +784,7 @@ export class ChannelStore implements ChannelOutboxStore {
         deadLetter: count('channel_outbox', 'dead_letter'),
         failures: this.listFailedDeliveries(accountId),
       },
+      accessRequests: { pending: count('channel_access_requests', 'pending') },
     }
   }
 

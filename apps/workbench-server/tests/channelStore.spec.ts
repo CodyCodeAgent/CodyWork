@@ -255,4 +255,55 @@ describe('CodyWork channel persistence', () => {
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
+
+  it('persists one pending access request and grants only its exact requester', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, {
+      name: 'Test Bot', appId: 'cli_access_request', appSecret: 'secret', allowAllUsers: false, allowedUserIds: ['ou_owner'],
+    })
+    const source = store.claimInbound({ ...inbound(account.id), sender: { id: 'ou_guest', type: 'user' } }).item
+    const input = {
+      accountId: account.id, requesterIdentity: 'ou_guest', administratorIdentity: 'ou_owner',
+      sourceInboxId: source.id, sourceConversationId: 'chat-1', sourceScope: 'private' as const,
+      sourceMessageId: source.message.messageId, createdAtIso: '2026-09-05T00:00:00.000Z', expiresAtIso: '2026-09-12T00:00:00.000Z',
+    }
+    const first = store.createAccessRequest(input)
+    const duplicate = store.createAccessRequest({ ...input, sourceMessageId: 'another-message' })
+
+    expect(first.created).toBe(true)
+    expect(duplicate).toMatchObject({ created: false, request: { id: first.request.id, status: 'pending' } })
+    expect(store.resolveAccessRequest({
+      accountId: account.id, id: first.request.id, actorIdentity: 'ou_owner', decision: 'approved', resolvedAtIso: '2026-09-06T00:00:00.000Z',
+    })).toMatchObject({ changed: true, request: { status: 'approved', requesterIdentity: 'ou_guest' } })
+    expect(store.listAccounts()).toMatchObject([{ allowAllUsers: false, allowedUserIds: ['ou_owner', 'ou_guest'] }])
+    expect(store.resolveAccessRequest({
+      accountId: account.id, id: first.request.id, actorIdentity: 'ou_owner', decision: 'approved', resolvedAtIso: '2026-09-06T00:00:01.000Z',
+    })).toMatchObject({ changed: false, request: { status: 'approved' } })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('expires access requests and never grants from a late approval', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, {
+      name: 'Test Bot', appId: 'cli_access_expiry', appSecret: 'secret', allowAllUsers: false, allowedUserIds: ['ou_owner'],
+    })
+    const source = store.claimInbound({ ...inbound(account.id), sender: { id: 'ou_guest', type: 'user' } }).item
+    const request = store.createAccessRequest({
+      accountId: account.id, requesterIdentity: 'ou_guest', administratorIdentity: 'ou_owner', sourceInboxId: source.id,
+      sourceConversationId: 'chat-1', sourceScope: 'private', sourceMessageId: source.message.messageId,
+      createdAtIso: '2026-09-05T00:00:00.000Z', expiresAtIso: '2026-09-12T00:00:00.000Z',
+    }).request
+
+    expect(store.resolveAccessRequest({
+      accountId: account.id, id: request.id, actorIdentity: 'ou_owner', decision: 'approved', resolvedAtIso: '2026-09-13T00:00:00.000Z',
+    })).toMatchObject({ changed: true, request: { status: 'expired' } })
+    expect(store.listAccounts()).toMatchObject([{ allowAllUsers: false, allowedUserIds: ['ou_owner'] }])
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
 })

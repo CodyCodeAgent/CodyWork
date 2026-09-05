@@ -364,6 +364,28 @@ export class WorkbenchDb {
         updated_at TEXT NOT NULL,
         UNIQUE(account_id, request_key)
       );
+      CREATE TABLE IF NOT EXISTS channel_access_requests (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        requester_identity TEXT NOT NULL,
+        administrator_identity TEXT NOT NULL,
+        source_inbox_id TEXT NOT NULL REFERENCES channel_inbox(id) ON DELETE CASCADE,
+        source_conversation_id TEXT NOT NULL,
+        source_scope TEXT NOT NULL CHECK (source_scope IN ('private', 'group', 'topic')),
+        source_message_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+        expires_at TEXT NOT NULL,
+        resolved_at TEXT,
+        resolved_by_identity TEXT,
+        admin_remote_message_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS channel_access_requests_pending
+        ON channel_access_requests(account_id, requester_identity)
+        WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS channel_access_requests_recent
+        ON channel_access_requests(account_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS channel_audit_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id TEXT,
