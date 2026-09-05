@@ -43,7 +43,7 @@ function event(type: ConversationEvent['type'], input: Partial<ConversationEvent
 function bareService(): any {
   const service = Object.create(CodyWorkChannelService.prototype)
   Object.assign(service, {
-    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), reconciliationInFlight: new Set(), reconnectTimers: new Map(), runtimes: new Map(),
+    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), renderInFlight: new Map(), reconciliationInFlight: new Set(), reconnectTimers: new Map(), runtimes: new Map(),
   })
   return service
 }
@@ -208,6 +208,35 @@ describe('CodyWork channel lifecycle', () => {
     expect(service.store.updateTurnLink).toHaveBeenCalledWith('channel-command-1', { turnId: 'turn-1', status: 'running' })
     expect(service.store.updateInbox).toHaveBeenCalledWith('inbox-1', 'submitted', { turnId: 'turn-1' })
     expect(service.scheduleRender).toHaveBeenCalledWith(value, 'turn-1', true)
+  })
+
+  it('serializes card renders for one turn so a terminal projection cannot reuse a running revision', async () => {
+    vi.useFakeTimers()
+    try {
+      const service = bareService()
+      const value = binding('binding-1')
+      let finishFirst: (() => void) | undefined
+      const first = new Promise<void>(resolve => { finishFirst = resolve })
+      service.render = vi.fn().mockReturnValueOnce(first).mockResolvedValueOnce(undefined)
+      service.failAccount = vi.fn()
+
+      service.scheduleRender(value, 'turn-1', true)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(service.render).toHaveBeenCalledTimes(1)
+
+      service.scheduleRender(value, 'turn-1', true)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(service.render).toHaveBeenCalledTimes(1)
+
+      finishFirst?.()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(service.render).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('asks a flat group to choose its session model before it chooses a Workspace', async () => {

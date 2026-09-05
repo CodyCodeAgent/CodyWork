@@ -170,6 +170,13 @@ export class CodyWorkChannelService {
   private readonly observationInitializations = new Map<string, Promise<void>>()
   private readonly pendingConversationEvents = new Map<string, ConversationEvent[]>()
   private readonly renderTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /**
+   * A card revision is a per-Turn sequence. Timers debounce high-frequency
+   * events, but they cannot prevent a terminal event arriving while an older
+   * render is still delivering. Serialize each sequence so a completed
+   * projection always reads the revision committed by the prior projection.
+   */
+  private readonly renderInFlight = new Map<string, Promise<void>>()
   private readonly reconciliationInFlight = new Set<string>()
   private readonly reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribeConversationEvents: () => void
@@ -206,6 +213,7 @@ export class CodyWorkChannelService {
     this.reconciliationInFlight.clear()
     for (const timer of this.renderTimers.values()) clearTimeout(timer)
     this.renderTimers.clear()
+    this.renderInFlight.clear()
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer)
     this.reconnectTimers.clear()
   }
@@ -1001,7 +1009,16 @@ export class CodyWorkChannelService {
     if (previous) clearTimeout(previous)
     const timer = setTimeout(() => {
       this.renderTimers.delete(key)
-      void this.render(binding, turnId).catch(error => this.failAccount(binding.accountId, 'channel.render', error))
+      const prior = this.renderInFlight.get(key) ?? Promise.resolve()
+      const current = prior
+        .catch(() => undefined)
+        .then(() => this.render(binding, turnId))
+      this.renderInFlight.set(key, current)
+      void current
+        .catch(error => this.failAccount(binding.accountId, 'channel.render', error))
+        .finally(() => {
+          if (this.renderInFlight.get(key) === current) this.renderInFlight.delete(key)
+        })
     }, immediate ? 0 : PROJECTION_THROTTLE_MS)
     this.renderTimers.set(key, timer)
   }
