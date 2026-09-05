@@ -82,6 +82,7 @@ export class WorkbenchDb {
     this.db = new DatabaseSync(dbPath)
     this.db.exec(`
       PRAGMA foreign_keys = ON;
+      PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS workspaces (
         id TEXT PRIMARY KEY,

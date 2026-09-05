@@ -244,6 +244,7 @@ export class CodyWorkChannelService {
    * projection always reads the revision committed by the prior projection.
    */
   private readonly renderInFlight = new Map<string, Promise<void>>()
+  private readonly flushInFlight = new Map<string, Promise<void>>()
   private readonly reconciliationInFlight = new Set<string>()
   private readonly reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly unsubscribeConversationEvents: () => void
@@ -281,6 +282,8 @@ export class CodyWorkChannelService {
     for (const timer of this.renderTimers.values()) clearTimeout(timer)
     this.renderTimers.clear()
     this.renderInFlight.clear()
+    await Promise.allSettled(this.flushInFlight.values())
+    this.flushInFlight.clear()
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer)
     this.reconnectTimers.clear()
   }
@@ -429,7 +432,7 @@ export class CodyWorkChannelService {
 
   retryOutbox(accountId: string, outboxId: string): void {
     this.store.retryOutbox(accountId, outboxId)
-    void this.runtimes.get(accountId)?.outbox.flush()
+    this.flushInBackground(accountId, 'channel.outbox.manual_retry')
   }
 
   private async startAccount(accountId: string): Promise<void> {
@@ -441,7 +444,7 @@ export class CodyWorkChannelService {
       deliver: async item => this.deliver(provider, accountId, item),
       classifyError: error => provider.classifyError(error),
     })
-    const flushTimer = setInterval(() => { void this.flushAndReconcile(accountId) }, 2_000)
+    const flushTimer = setInterval(() => this.flushInBackground(accountId), 2_000)
     flushTimer.unref?.()
     this.runtimes.set(accountId, { account, provider, outbox, flushTimer })
     try {
@@ -1526,7 +1529,21 @@ export class CodyWorkChannelService {
     }
   }
 
-  private async flushAndReconcile(accountId: string): Promise<void> {
+  private flushInBackground(accountId: string, action = 'channel.outbox.background_flush'): void {
+    void this.flushAndReconcile(accountId).catch(error => this.reportBackgroundFailure(accountId, action, error))
+  }
+
+  private flushAndReconcile(accountId: string): Promise<void> {
+    const active = this.flushInFlight.get(accountId)
+    if (active) return active
+    const task = this.runFlushAndReconcile(accountId).finally(() => {
+      if (this.flushInFlight.get(accountId) === task) this.flushInFlight.delete(accountId)
+    })
+    this.flushInFlight.set(accountId, task)
+    return task
+  }
+
+  private async runFlushAndReconcile(accountId: string): Promise<void> {
     const runtime = this.runtimes.get(accountId)
     if (!runtime) return
     await runtime.outbox.flush()
@@ -1590,8 +1607,32 @@ export class CodyWorkChannelService {
 
   private failAccount(accountId: string, action: string, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error)
-    this.store.updateRuntime(accountId, { connectionState: this.runtimes.get(accountId)?.provider.getState() ?? 'failed', error: message })
-    this.store.audit(accountId, action, 'channel_account', accountId, false, {}, message)
+    console.error(`[codywork] ${action} failed for ${accountId}: ${message}`)
+    // Failure reporting itself uses the same SQLite database. Never let a
+    // second transient lock escape a background Promise and terminate Node.
+    try {
+      this.store.updateRuntime(accountId, { connectionState: this.runtimes.get(accountId)?.provider.getState() ?? 'failed', error: message })
+    } catch (reportError) {
+      console.error(`[codywork] failed to persist ${action} runtime state for ${accountId}: ${reportError instanceof Error ? reportError.message : String(reportError)}`)
+    }
+    try {
+      this.store.audit(accountId, action, 'channel_account', accountId, false, {}, message)
+    } catch (reportError) {
+      console.error(`[codywork] failed to persist ${action} audit for ${accountId}: ${reportError instanceof Error ? reportError.message : String(reportError)}`)
+    }
+  }
+
+  private reportBackgroundFailure(accountId: string, action: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`[codywork] ${action} failed for ${accountId}: ${message}`)
+    // Outbox polling is not the provider connection state. Keep the account
+    // connected and let the next interval retry instead of showing a false
+    // Feishu disconnect. Audit persistence remains best effort under DB locks.
+    try {
+      this.store.audit(accountId, action, 'channel_account', accountId, false, {}, message)
+    } catch (reportError) {
+      console.error(`[codywork] failed to persist ${action} audit for ${accountId}: ${reportError instanceof Error ? reportError.message : String(reportError)}`)
+    }
   }
 
   private scheduleAccountReconnect(accountId: string): void {

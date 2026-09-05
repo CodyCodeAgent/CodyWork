@@ -321,8 +321,8 @@ export class ChannelStore implements ChannelOutboxStore {
     expiresAtIso: string
   }): { request: ChannelAccessRequest; created: boolean } {
     const id = makeId('access')
-    this.database.db.exec('BEGIN IMMEDIATE')
     try {
+      this.database.db.exec('BEGIN IMMEDIATE')
       this.database.db.prepare("UPDATE channel_access_requests SET status = 'expired', updated_at = ? WHERE account_id = ? AND requester_identity = ? AND status = 'pending' AND expires_at <= ?")
         .run(input.createdAtIso, input.accountId, input.requesterIdentity, input.createdAtIso)
       const existing = this.database.db.prepare("SELECT * FROM channel_access_requests WHERE account_id = ? AND requester_identity = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1")
@@ -367,8 +367,8 @@ export class ChannelStore implements ChannelOutboxStore {
     decision: 'approved' | 'rejected'
     resolvedAtIso: string
   }): { request: ChannelAccessRequest; changed: boolean } {
-    this.database.db.exec('BEGIN IMMEDIATE')
     try {
+      this.database.db.exec('BEGIN IMMEDIATE')
       const row = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE account_id = ? AND id = ?').get(input.accountId, input.id) as Record<string, unknown> | undefined
       if (!row) throw new Error('访问申请不存在或已失效')
       const request = toAccessRequest(row)
@@ -724,8 +724,8 @@ export class ChannelStore implements ChannelOutboxStore {
 
   async claim(input: Parameters<ChannelOutboxStore['claim']>[0]): Promise<ChannelOutboxItem[]> {
     const leaseUntil = new Date(Date.parse(input.nowIso) + input.leaseMs).toISOString()
-    this.database.db.exec('BEGIN IMMEDIATE')
     try {
+      this.database.db.exec('BEGIN IMMEDIATE')
       const rows = this.database.db.prepare(`SELECT * FROM channel_outbox WHERE provider = ? AND account_id = ?
         AND ((status IN ('pending','retry_wait') AND available_at <= ?) OR (status IN ('leased','sending') AND lease_expires_at <= ?))
         ORDER BY available_at, created_at LIMIT ?`).all(input.provider, input.accountId, input.nowIso, input.nowIso, input.limit) as unknown as OutboxRow[]
@@ -734,7 +734,8 @@ export class ChannelStore implements ChannelOutboxStore {
       this.database.db.exec('COMMIT')
       return rows.map(row => toOutbox({ ...row, status: 'leased', attempts: row.attempts + 1, lease_expires_at: leaseUntil }))
     } catch (error) {
-      this.database.db.exec('ROLLBACK'); throw error
+      if (this.database.db.isTransaction) this.database.db.exec('ROLLBACK')
+      throw error
     }
   }
 

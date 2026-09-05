@@ -44,7 +44,7 @@ function event(type: ConversationEvent['type'], input: Partial<ConversationEvent
 function bareService(): any {
   const service = Object.create(CodyWorkChannelService.prototype)
   Object.assign(service, {
-    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), renderInFlight: new Map(), reconciliationInFlight: new Set(), reconnectTimers: new Map(), runtimes: new Map(),
+    observed: new Map(), observationInitializations: new Map(), pendingConversationEvents: new Map(), renderTimers: new Map(), renderInFlight: new Map(), flushInFlight: new Map(), reconciliationInFlight: new Set(), reconnectTimers: new Map(), runtimes: new Map(),
   })
   return service
 }
@@ -445,6 +445,40 @@ describe('CodyWork channel lifecycle', () => {
 
     expect(calls).toEqual(['bindings', 'identity', 'inbox', 'flush', 'turns', 'provider'])
     clearInterval(service.runtimes.get('account-1').flushTimer)
+  })
+
+  it('serializes overlapping outbox flushes for the same account', async () => {
+    const service = bareService()
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const flush = vi.fn(() => blocked)
+    service.runtimes.set('account-1', { outbox: { flush } })
+    service.database = { db: { prepare: () => ({ all: () => [] }) } }
+
+    const first = service.flushAndReconcile('account-1')
+    const second = service.flushAndReconcile('account-1')
+
+    expect(first).toBe(second)
+    expect(flush).toHaveBeenCalledTimes(1)
+    release()
+    await Promise.all([first, second])
+    expect(service.flushInFlight.size).toBe(0)
+  })
+
+  it('contains background flush failures even when failure persistence is also locked', async () => {
+    const service = bareService()
+    const error = new Error('database is locked')
+    service.flushAndReconcile = vi.fn(async () => { throw error })
+    service.store = {
+      audit: vi.fn(() => { throw error }),
+    }
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    service.flushInBackground('account-1')
+    await vi.waitFor(() => expect(service.store.audit).toHaveBeenCalled())
+
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('channel.outbox.background_flush failed'))
+    consoleError.mockRestore()
   })
 
   it('installs every persisted observer before waiting for any history snapshot', async () => {

@@ -1,4 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +17,46 @@ function inbound(accountId: string, eventId = 'event-1', messageId = `message-${
 }
 
 describe('CodyWork channel persistence', () => {
+  it('waits briefly for transient SQLite writer contention', () => {
+    const db = new WorkbenchDb(':memory:')
+    const row = db.db.prepare('PRAGMA busy_timeout').get() as { timeout: number }
+    expect(row.timeout).toBe(5_000)
+    db.close()
+  })
+
+  it('claims Outbox work after another process releases a transient writer lock', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-lock-'))
+    const path = join(root, 'workspace.db')
+    const db = new WorkbenchDb(path)
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, { name: 'Lock Bot', appId: 'cli_lock', appSecret: 'secret' })
+    await store.enqueue({
+      id: 'outbox-lock', provider: 'feishu', accountId: account.id, kind: 'send_text', targetId: 'chat-1',
+      payload: { text: 'wait for lock' }, dedupeKey: 'lock-key', terminal: true,
+    })
+    const holder = spawn(process.execPath, ['--input-type=module', '-e', `
+      import { DatabaseSync } from 'node:sqlite'
+      const db = new DatabaseSync(process.argv.at(-1))
+      db.exec('BEGIN IMMEDIATE')
+      process.stdout.write('locked\\n')
+      setTimeout(() => { db.exec('COMMIT'); db.close() }, 200)
+    `, path], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const holderExit = once(holder, 'exit')
+    try {
+      await once(holder.stdout!, 'data')
+      const claimed = await store.claim({
+        provider: 'feishu', accountId: account.id, limit: 10, leaseMs: 1_000, nowIso: new Date().toISOString(),
+      })
+      expect(claimed).toMatchObject([{ id: 'outbox-lock', status: 'leased' }])
+      const [exitCode] = await holderExit
+      expect(exitCode).toBe(0)
+    } finally {
+      holder.kill()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   function createBindingFixture(db: WorkbenchDb, store: ChannelStore, accountId: string) {
     const now = new Date().toISOString()
     db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
