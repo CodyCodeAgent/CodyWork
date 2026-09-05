@@ -189,6 +189,8 @@ export interface CodyWorkRuntime {
   submitTurn(request: SendTurnRequest): SubmitTurnResult
   sendTurn(request: SendTurnRequest): Promise<SendTurnResult>
   interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }>
+  /** Releases a short-lived product binding without stopping the shared App Server owner. */
+  releaseConversation?(conversation: ConversationHandle): void
   close(): Promise<void>
   /** Bounded runtime diagnostics suitable for an authenticated product surface. */
   diagnostics?(): unknown

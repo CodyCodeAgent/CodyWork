@@ -98,6 +98,26 @@ function emitTurn(threadId, prompt, turnCwd = '') {
   recordTurn(threadId, turnId, itemId, prompt, text)
 }
 
+function emitPendingTurn(threadId, prompt, turnCwd = '') {
+  const turnId = `turn-${++turnSequence}`
+  const itemId = `item-${turnSequence}`
+  pendingTurns.set(turnId, { threadId, prompt, itemId })
+  notify('turn/started', { threadId, turnId, turn: { id: turnId } })
+  notify('item/started', {
+    threadId,
+    turnId,
+    item: {
+      id: itemId,
+      type: 'commandExecution',
+      command: '/usr/bin/sleep 180',
+      cwd: turnCwd,
+      status: 'inProgress',
+      aggregatedOutput: '',
+    },
+  })
+  notify('item/commandExecution/outputDelta', { threadId, turnId, itemId, delta: 'fixture long-running command started\n' })
+}
+
 rl.on('line', line => {
   let message
   try { message = JSON.parse(line) } catch { return }
@@ -231,7 +251,8 @@ rl.on('line', line => {
     }
     write({ id: message.id, result: { turn: { id: `turn-${turnSequence + 1}` } } })
     const turnCwd = String(message.params?.cwd ?? '')
-    if (prompt.includes('DISCONNECT')) setTimeout(() => { recordFailedTurn(threadId, prompt); process.exit(23) }, 5)
+    if (prompt.includes('PAUSE_E2E')) setTimeout(() => emitPendingTurn(threadId, prompt, turnCwd), 5)
+    else if (prompt.includes('DISCONNECT')) setTimeout(() => { recordFailedTurn(threadId, prompt); process.exit(23) }, 5)
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
     else setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })

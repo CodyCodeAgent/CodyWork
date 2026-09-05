@@ -343,6 +343,15 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     return { supported: await this.requireManager().interrupt(session.handle.id) }
   }
 
+  releaseConversation(conversation: ConversationHandle): void {
+    const session = this.sessions.get(conversation.id)
+    if (!session) return
+    this.requireManager().detach(session.handle.id)
+    this.sessions.delete(conversation.id)
+    this.sessionIdByThreadId.delete(session.binding.threadId)
+    this.listeners.delete(conversation.id)
+  }
+
   async respondApproval(conversation: ConversationHandle, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void> {
     await this.requireManager().respondApproval(this.require(conversation).handle.id, approvalId, outcome === 'rejected' ? 'decline' : 'accept')
   }

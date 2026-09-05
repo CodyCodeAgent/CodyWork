@@ -19,7 +19,7 @@
         <header class="topbar"><div><div class="eyebrow">WORKSPACE / SKILLS</div><h1>Skills</h1></div><button class="btn" @click="loadSkills(true)">刷新</button></header>
         <div class="skills-body">
           <div class="skill-install-card"><div><div class="card-kicker">ADD CAPABILITY</div><h2>为当前 Workspace 安装 Skill</h2><p>Skill 会被安装到 Workspace 的 <code>.agents/skills</code>，并且仍受当前 Workspace 写入策略约束。</p></div><div class="skill-install-form"><input v-model="skillSource" class="input" placeholder="Git URL 或 Skill 来源" /><button class="btn primary" :disabled="installingSkill || !skillSource.trim()" @click="installSkill">{{ installingSkill ? '安装中…' : '安装' }}</button></div></div>
-          <div v-if="skillJob" class="skill-run-result" :class="skillJob.status">{{ skillJob.message ?? skillJob.status }}<template v-if="skillJob.events.length"> · {{ skillJob.events.length }} 个运行事件</template></div>
+          <button v-if="skillJob && skillJob.workspaceId === workspace.id" class="skill-run-result" :class="skillJob.status" type="button" @click="showSkillInstallDialog = true"><span class="skill-run-result-copy"><strong>{{ skillInstallStatusLabel(skillJob.status) }}</strong><small>{{ skillJob.message || (skillInstallIsActive(skillJob.status) ? 'Agent 正在执行，点击查看实时输出。' : '点击查看完整执行记录。') }}</small></span><span>{{ skillJob.events.length }} 个事件 · 查看执行</span></button>
           <div class="skills-layout">
             <article class="skills-list-card">
               <div class="skills-list-head"><strong>全部 Skills</strong><span>{{ skillSearchSummary(skills.length, filteredSkills.length, skillQuery) }}</span></div>
@@ -100,6 +100,7 @@
     </main>
 
     <WorkspaceSetupDialog :visible="showCreateWorkspace" @close="showCreateWorkspace = false" @completed="workspaceCreated" />
+    <SkillInstallDialog :visible="showSkillInstallDialog" :job="skillJob" :pausing="pausingSkillInstall" @close="showSkillInstallDialog = false" @pause="pauseSkillInstall" />
     <div v-if="showCreateDemand" class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-demand-title"><div class="modal-head"><div><div class="eyebrow">NEW DEMAND</div><h2 id="create-demand-title">创建隔离需求</h2></div><button class="icon-button" aria-label="关闭创建需求弹窗" @click="showCreateDemand = false">×</button></div><label>需求名</label><input v-model="demandName" class="input" placeholder="例如：统一 AI 工作对话" /><label>分支名</label><input v-model="demandBranch" class="input" placeholder="可选，默认按需求名生成" /><fieldset class="demand-repository-fieldset"><legend>开发 Repo</legend><label class="sr-only" for="demand-repository-search">搜索开发 Repo</label><div class="demand-repository-search"><input id="demand-repository-search" v-model="demandRepositoryQuery" class="input" type="search" autocomplete="off" placeholder="按名称、路径或分支搜索…" aria-describedby="demand-repository-search-summary" /><button v-if="demandRepositoryQuery" class="repo-search-clear" type="button" aria-label="清除 Repo 搜索" @click="demandRepositoryQuery = ''">清除</button></div><p id="demand-repository-search-summary" class="demand-repository-summary" role="status">{{ demandRepositorySearchSummary }}</p><div class="repo-picker"><label v-for="repo in filteredDemandCreationRepositories" :key="repo.id" class="repo-option"><input v-model="selectedRepositoryIds" type="checkbox" :value="repo.id" /><span><strong>{{ repo.name }}</strong><small>{{ repo.path }}</small></span><code v-if="repo.defaultRef" class="demand-repository-ref">{{ repo.defaultRef }}</code></label><p v-if="filteredDemandCreationRepositories.length === 0" class="repo-picker-empty">没有匹配的 Repo。可尝试名称、目录路径或分支名。</p></div></fieldset><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showCreateDemand = false">取消</button><button class="btn primary" :disabled="creating || !demandName.trim() || selectedRepositoryIds.length === 0" @click="createDemand">创建并进入</button></div></section></div>
     <div v-if="showAddRepository" class="modal-backdrop"><section class="modal-card"><div class="modal-head"><div><div class="eyebrow">REPOSITORY</div><h2>添加开发 Repo</h2></div><button class="icon-button" @click="showAddRepository = false">×</button></div><div class="mode-tabs"><button :class="{ active: repositorySource === 'folder' }" @click="repositorySource = 'folder'">本地目录</button><button :class="{ active: repositorySource === 'git' }" @click="repositorySource = 'git'">Git clone</button></div><label>显示名称</label><input v-model="repositoryName" class="input" placeholder="可选" /><template v-if="repositorySource === 'folder'"><label>仓库目录</label><input v-model="repositoryPath" class="input" placeholder="/Users/you/projects/repository" /><p class="field-help">该 Git 仓库会复制到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><template v-else><label>Git URL</label><input v-model="repositoryUrl" class="input" placeholder="git@github.com:org/repository.git" /><p class="field-help">仓库会克隆到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showAddRepository = false">取消</button><button class="btn primary" :disabled="creating || (repositorySource === 'folder' ? !repositoryPath.trim() : !repositoryUrl.trim())" @click="addRepository">{{ creating ? '正在添加…' : '添加 Repo' }}</button></div></section></div>
     <AddDemandRepositoryDialog v-if="selectedDemand" :visible="showAddDemandRepository" :demand="selectedDemand" :repositories="availableDemandRepositories" :selected-repository-id="selectedDemandRepositoryId" :adding="addingDemandRepository" :error="demandRepositoryError" @close="closeAddDemandRepository" @add="addDemandRepository" @update:selected-repository-id="selectedDemandRepositoryId = $event" />
@@ -142,11 +143,13 @@ import DemandToolbox from './components/DemandToolbox.vue'
 import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
 import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
+import SkillInstallDialog from './components/SkillInstallDialog.vue'
 import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepositories'
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
 import { quickActionsForScene, resolveQuickActionSkills } from './quickActions'
+import { skillInstallIsActive, skillInstallStatusLabel } from './skillInstallPresentation'
 import {
   api,
   type AvailableNativeThread,
@@ -201,7 +204,7 @@ const draft = ref(''); const sending = ref(false); const permission = ref<Conver
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
 const composerImagesByConversationId = new Map<string, ComposerImage[]>()
-const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillQuery = ref(''); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillQuery = ref(''); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const showSkillInstallDialog = ref(false); const pausingSkillInstall = ref(false); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 const settingsSection = ref<WorkbenchSettingsSection>('overview')
 const quickActions = ref<QuickAction[]>([])
 const selectedQuickActionId = ref('')
@@ -650,19 +653,32 @@ async function deleteQuickAction(id: string): Promise<void> {
 function openSkill(skill: WorkspaceSkill): void { selectedSkill.value = skill }
 async function installSkill(): Promise<void> {
   if (!workspace.value || !skillSource.value.trim() || installingSkill.value) return
+  const workspaceId = workspace.value.id
   installingSkill.value = true
   try {
-    const created = await api.installSkill(workspace.value.id, skillSource.value.trim())
+    let job = await api.installSkill(workspaceId, skillSource.value.trim())
     skillSource.value = ''
-    let job = await api.skillInstallStatus(workspace.value.id, created.jobId)
     skillJob.value = job
-    while (job.status === 'running') {
+    showSkillInstallDialog.value = true
+    while (skillInstallIsActive(job.status)) {
       await new Promise(resolve => window.setTimeout(resolve, 500))
-      job = await api.skillInstallStatus(workspace.value.id, created.jobId)
-      skillJob.value = job
+      job = await api.skillInstallStatus(workspaceId, job.id)
+      if (skillJob.value?.id === job.id) skillJob.value = job
     }
-    await loadSkills(true)
+    if (workspace.value?.id === workspaceId) await loadSkills(true)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } finally { installingSkill.value = false }
+}
+async function pauseSkillInstall(): Promise<void> {
+  const job = skillJob.value
+  if (!job || job.status !== 'running' || pausingSkillInstall.value) return
+  pausingSkillInstall.value = true
+  try {
+    skillJob.value = await api.pauseSkillInstall(job.workspaceId, job.id)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    pausingSkillInstall.value = false
+  }
 }
 async function loadRuntime(): Promise<void> {
   runtime.value = await api.runtimeSettings()

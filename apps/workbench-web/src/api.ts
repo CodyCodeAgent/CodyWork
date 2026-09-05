@@ -107,12 +107,14 @@ export interface SkillInstallEvent {
   type: string
   timestamp?: string
   data: Record<string, unknown>
+  itemId?: string
+  turnId?: string
 }
 export interface SkillInstallStatus {
   id: string
   workspaceId: string
   source: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'pausing' | 'paused' | 'completed' | 'failed'
   message?: string
   events: SkillInstallEvent[]
   installed?: Array<{ id: string; name: string; path: string; status: string }>
@@ -355,8 +357,9 @@ export const api = {
   refreshDashboard: (id: string) => request<DashboardSnapshot>('POST', `/api/workspaces/${id}/dashboard/refresh`),
   listSkills: (id: string, forceReload = false) => request<WorkspaceSkill[]>('GET', `/api/workspaces/${id}/skills${forceReload ? '?force=1' : ''}`),
   getSkill: (id: string, skillId: string) => request<WorkspaceSkill>('GET', `/api/workspaces/${id}/skills/${encodeURIComponent(skillId)}`),
-  installSkill: (id: string, source: string) => request<{ jobId: string; source: string }>('POST', `/api/workspaces/${id}/skills`, { source }),
+  installSkill: (id: string, source: string) => request<SkillInstallStatus>('POST', `/api/workspaces/${id}/skills`, { source }),
   skillInstallStatus: (id: string, jobId: string) => request<SkillInstallStatus>('GET', `/api/workspaces/${id}/skills/install/${encodeURIComponent(jobId)}`),
+  pauseSkillInstall: (id: string, jobId: string) => request<SkillInstallStatus>('POST', `/api/workspaces/${id}/skills/install/${encodeURIComponent(jobId)}/pause`),
   listQuickActions: (id: string) => request<QuickAction[]>('GET', `/api/workspaces/${id}/quick-actions`),
   createQuickAction: (id: string, input: QuickActionInput) => request<QuickAction>('POST', `/api/workspaces/${id}/quick-actions`, input),
   updateQuickAction: (id: string, actionId: string, input: QuickActionInput) => request<QuickAction>('PATCH', `/api/workspaces/${id}/quick-actions/${encodeURIComponent(actionId)}`, input),

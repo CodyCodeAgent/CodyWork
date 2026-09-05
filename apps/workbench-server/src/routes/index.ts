@@ -268,7 +268,7 @@ function workspaceSetup(ctx: AppContext): WorkspaceSetupCoordinator {
 }
 
 function skillInstalls(ctx: AppContext): SkillInstallCoordinator {
-  if (!ctx.skillInstalls) ctx.skillInstalls = new SkillInstallCoordinator(ctx.db)
+  if (!ctx.skillInstalls) ctx.skillInstalls = new SkillInstallCoordinator(conversationService(ctx).getRuntime())
   return ctx.skillInstalls
 }
 
@@ -429,13 +429,17 @@ function buildRoutes(ctx: AppContext) {
   add('POST', '/api/workspaces/:id/skills', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     const source = typeof c.body.source === 'string' ? c.body.source.trim() : ''
-    const job = skillInstalls(ctx).start(row, source)
-    return { jobId: job.id, source: job.source }
+    return skillInstalls(ctx).start(row, source)
   })
 
   add('GET', '/api/workspaces/:id/skills/install/:jobId', (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return skillInstalls(ctx).get(workspace.id, requiredParam(c, 'jobId'))
+  })
+
+  add('POST', '/api/workspaces/:id/skills/install/:jobId/pause', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return skillInstalls(ctx).pause(workspace.id, requiredParam(c, 'jobId'))
   })
 
   add('GET', '/api/workspaces/:id/repositories', (c) => {

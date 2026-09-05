@@ -470,8 +470,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .skill-event strong, .skill-event small { display: block; }
 .skill-event strong { color: #4a5972; font-weight: 650; }
 .skill-event small { max-width: 520px; margin-top: 3px; overflow: hidden; color: #8d99aa; text-overflow: ellipsis; white-space: nowrap; }
-.skill-run-result { padding: 12px; margin-top: 12px; color: #287a57; background: #eefaf3; border: 1px solid #ccebd9; border-radius: 8px; white-space: pre-wrap; font-size: 11px; line-height: 1.6; }
-.skill-run-result.failed { color: #a44d52; background: #fff1f1; border-color: #f1d4d4; }
+.skill-run-result { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: 100%; min-height: 58px; padding: 11px 14px; margin: 0 0 14px; color: #52627a; background: #f8f9fc; border: 1px solid #dfe4ed; border-radius: 10px; text-align: left; transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease), background 160ms var(--ease); }
+.skill-run-result:hover { background: #fff; border-color: #bfc9dc; box-shadow: 0 6px 18px rgba(28,38,58,.06); }
+.skill-run-result > span:last-child { flex: 0 0 auto; color: #62739a; font-size: 10px; font-weight: 700; }
+.skill-run-result-copy { min-width: 0; }
+.skill-run-result-copy strong, .skill-run-result-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-run-result-copy strong { color: #35435d; font-size: 11px; }
+.skill-run-result-copy small { margin-top: 3px; color: #7f8b9d; font-size: 10px; font-weight: 500; }
+.skill-run-result.running { background: #f3f3ff; border-color: #d9d9ff; }
+.skill-run-result.pausing, .skill-run-result.paused { background: #fff8ea; border-color: #f0d7ab; }
+.skill-run-result.completed { background: #eefaf3; border-color: #ccebd9; }
+.skill-run-result.failed { background: #fff1f1; border-color: #f1d4d4; }
 .knowledge-page { min-height: 100%; }
 .knowledge-body { max-width: 1180px; padding: 28px 36px 70px; margin: 0 auto; }
 .knowledge-body code { color: #526bb4; font: 11px var(--mono); }
