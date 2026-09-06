@@ -56,6 +56,9 @@ type ProductSession = {
   reasoningEffort: ReasoningEffort | ''
 }
 
+const CODYWORK_DEMAND_PERMISSION_PROFILE = 'codywork_demand'
+const CODYWORK_DEMAND_PERMISSION_CONFIG = `permissions.${CODYWORK_DEMAND_PERMISSION_PROFILE}={filesystem={":root"="read",":tmpdir"="write",":workspace_roots"={"."="write"}},network={enabled=true,mode="full"}}`
+
 function isReasoningEffort(value: string): value is ReasoningEffort {
   return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)
 }
@@ -71,12 +74,9 @@ function approvalPolicy(mode: RuntimePermissionMode): 'never' | 'untrusted' {
   return mode === 'yolo' || mode === 'read-only' ? 'never' : 'untrusted'
 }
 
-function sandboxPolicy(context: RuntimeContext, mode: RuntimePermissionMode): TurnInput['sandboxPolicy'] {
-  if (mode === 'read-only') return { type: 'readOnly', networkAccess: true }
-  return {
-    type: 'workspaceWrite', writableRoots: context.effectivePolicy.writableRoots,
-    networkAccess: true, excludeTmpdirEnvVar: true, excludeSlashTmp: true,
-  }
+function turnPermissions(mode: RuntimePermissionMode): Pick<TurnInput, 'permissions' | 'sandboxPolicy'> {
+  if (mode === 'read-only') return { sandboxPolicy: { type: 'readOnly', networkAccess: true } }
+  return { permissions: CODYWORK_DEMAND_PERMISSION_PROFILE }
 }
 
 function policyInstructions(context: RuntimeContext): string {
@@ -97,7 +97,8 @@ function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, 
       // point that bootstrap phase at a Workspace: a large Workspace skill
       // catalog would be implicitly injected even when the user referenced no
       // `$Skill`. The actual Turn below always receives the Demand Worktree.
-      cwd: bootstrapCwd, approvalPolicy: approvalPolicy(mode), sandbox: mode === 'read-only' ? 'read-only' : 'workspace-write',
+      cwd: bootstrapCwd, approvalPolicy: approvalPolicy(mode),
+      ...(mode === 'read-only' ? { sandbox: 'read-only' as const } : { permissions: CODYWORK_DEMAND_PERMISSION_PROFILE }),
       runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
       baseInstructions: context.instructionBundle.systemInstructions, developerInstructions: policyInstructions(context),
       experimentalRawEvents: false, ephemeral: false,
@@ -106,7 +107,7 @@ function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, 
       cwd: executionCwd,
       runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
       approvalPolicy: approvalPolicy(mode),
-      sandboxPolicy: sandboxPolicy(context, mode),
+      ...turnPermissions(mode),
     },
   }
 }
@@ -322,7 +323,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       runtimeWorkspaceRoots: turnMode === 'read-only' ? [] : session.context.effectivePolicy.writableRoots,
-      approvalPolicy: approvalPolicy(turnMode), sandboxPolicy: sandboxPolicy(session.context, turnMode),
+      approvalPolicy: approvalPolicy(turnMode), ...turnPermissions(turnMode),
       ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
     if (request.clientCommandId) this.commandPermissionModes.set(request.clientCommandId, turnMode)
@@ -410,7 +411,12 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       // workspace skill before the user has referenced one. Keep the process
       // in CodyWork's neutral runtime directory; each thread/turn still gets
       // its Demand Worktree cwd and policy explicitly.
-      this.host = createAppServerHost({ command: this.command(), cwd: this.runtimeOwnerCwd(), ...(this.options.env ? { env: this.options.env } : {}), initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } } })
+      this.host = createAppServerHost({
+        ...this.appServerCommand(),
+        cwd: this.runtimeOwnerCwd(),
+        ...(this.options.env ? { env: this.options.env } : {}),
+        initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } },
+      })
       this.catalog = new CodexSessionCatalog(this.host)
       const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
         const session = this.sessions.get(binding.id)
@@ -467,7 +473,18 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   private requireCatalog(): CodexSessionCatalog { if (!this.catalog) throw new Error('Codex Session Catalog 尚未初始化'); return this.catalog }
   private requireHost(): AppServerHost { if (!this.host) throw new Error('Codex App Server 尚未初始化'); return this.host }
   private requireManager(): CodexSessionManager { if (!this.manager) throw new Error('Codex Session Manager 尚未初始化'); return this.manager }
-  private command(): string { return this.options.command?.trim() || 'codex app-server --stdio' }
+  private appServerCommand(): { command: string; args?: string[] } {
+    const command = this.options.command?.trim()
+    if (command && command !== 'codex app-server --stdio') return { command }
+    // `workspace-write` deliberately protects `.git` even when it appears in
+    // writable roots. A named permission profile is the supported explicit
+    // opt-out: every runtime root is writable, including the bound baseline
+    // repository's common Git directory, while all other paths remain read-only.
+    return {
+      command: 'codex',
+      args: ['-c', CODYWORK_DEMAND_PERMISSION_CONFIG, 'app-server', '--stdio'],
+    }
+  }
   private runtimeOwnerCwd(): string { return realpathSync.native(this.options.appServerCwd ?? process.cwd()) }
   private modeFromContext(context: RuntimeContext): RuntimePermissionMode { return context.effectivePolicy.approval === 'none' ? 'yolo' : context.effectivePolicy.writableRoots.length ? 'workspace-write' : 'read-only' }
   private turnKey(threadId: string, turnId: string): string { return `${threadId}:${turnId}` }

@@ -366,7 +366,7 @@
 
 ## E2E-019 权限与网络边界
 
-前置条件：分别创建 read-only、workspace-write 和 yolo 会话；准备当前 Demand Worktree、其他 Demand/用户目录中的无风险可读文件、Worktree 内外两个无风险写入测试路径，以及一个无敏感数据的网络地址。
+前置条件：分别创建 read-only、workspace-write 和 yolo 会话；准备当前 Demand Worktree、其他 Demand/用户目录中的无风险可读文件、Worktree 内外两个无风险写入测试路径、一个一次性 bare Git remote，以及一个无敏感数据的网络地址。
 
 步骤：
 
@@ -374,15 +374,18 @@
 2. 在三种模式下分别读取 Workspace 外、其他用户目录和全局 Skill 目录中的无风险测试文件。
 3. 在 read-only 下尝试写入 Worktree。
 4. 在 workspace-write 下写入 Worktree 内文件，再尝试写入 Workspace/Worktree 外路径。
-5. 在 yolo 下执行一项明确限定在测试 Worktree 内的变更。
+5. 在 workspace-write 下修改一次性仓库文件，提交并推送当前 Demand 分支；从 bare remote 校验提交确实存在。
+6. 在 yolo 下执行一项明确限定在测试 Worktree 内的变更，并再次提交、推送当前 Demand 分支。
+7. 尝试修改绑定仓库的基线工作区文件和另一个 Demand Worktree 文件。
 
 关键断言：
 
 - 三种模式都允许网络访问。
 - 三种模式的读取都不受用户、目录或文件边界限制；全局 Skill 及其依赖可直接读取。
 - read-only 拒绝文件写入。
-- workspace-write 只允许写入当前 Demand Worktree，拒绝越界路径。
-- yolo 不等于突破当前 Demand 的写入边界。
+- workspace-write 允许写入当前 Demand Worktree 及其绑定仓库的完整 Git 元数据目录，因此 `git commit`、`git push` 可用；仍拒绝其他越界路径。
+- yolo 同样可以提交和推送，但不等于突破当前 Demand 文件与绑定仓库 Git 元数据的写入边界。
+- 提交和推送只改变 Demand 分支与 Git 元数据，不修改基线工作区或其他 Demand Worktree 文件。
 - 拒绝与审批信息说明目标和原因，不出现空审批卡。
 
 ## E2E-020 飞书机器人端到端通道

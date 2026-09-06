@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -29,6 +30,52 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('allows Demand conversations to write the bound repositories full Git metadata directories', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-git-metadata-'))
+    const baseline = join(root, 'services', 'demo')
+    const worktree = join(root, 'worktrees', 'publish', 'services', 'demo')
+    mkdirSync(baseline, { recursive: true })
+    mkdirSync(join(root, 'worktrees', 'publish', 'services'), { recursive: true })
+    const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    git(baseline, ['init', '-b', 'main'])
+    git(baseline, ['config', 'user.email', 'test@example.com'])
+    git(baseline, ['config', 'user.name', 'CodyWork Test'])
+    writeFileSync(join(baseline, 'README.md'), '# baseline\n')
+    git(baseline, ['add', 'README.md'])
+    git(baseline, ['commit', '-m', 'initial'])
+    git(baseline, ['worktree', 'add', '-b', 'feature/publish', worktree])
+
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspaceId = makeId('ws')
+    const demandId = makeId('demand')
+    const repositoryId = makeId('repo')
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)').run(workspaceId, 'Git metadata test', root, now, now)
+    db.db.prepare('INSERT INTO repositories (id, workspace_id, name, baseline_path, origin_url, default_ref, inspected_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(repositoryId, workspaceId, 'demo', baseline, null, 'main', now)
+    db.db.prepare('INSERT INTO demands (id, workspace_id, name, branch_name, worktree_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(demandId, workspaceId, 'Publish', 'feature/publish', 'publish', 'in_progress', now, now)
+    db.db.prepare('INSERT INTO demand_repositories (demand_id, repository_id, branch_name, worktree_path, base_ref, base_commit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(demandId, repositoryId, 'feature/publish', worktree, 'main', git(baseline, ['rev-parse', 'main']), now)
+
+    class CapturingRuntime extends TestRuntimeAdapter {
+      createdContext: Parameters<TestRuntimeAdapter['createConversation']>[0]['context'] | null = null
+      override async createConversation(request: Parameters<TestRuntimeAdapter['createConversation']>[0]) {
+        this.createdContext = request.context
+        return super.createConversation(request)
+      }
+    }
+    const runtime = new CapturingRuntime()
+    const conversations = new ConversationService(db, runtime)
+    await conversations.create(workspaceId, demandId, 'Git publish')
+
+    expect(runtime.createdContext?.effectivePolicy.writableRoots).toEqual(expect.arrayContaining([
+      realpathSync(worktree),
+      realpathSync(join(baseline, '.git')),
+    ]))
+    expect(runtime.createdContext?.effectivePolicy.writableRoots).not.toContain(realpathSync(baseline))
+
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('creates first-class Workspace sessions that can run commands but can never gain file-write permission', async () => {
     class WorkspaceRuntime extends TestRuntimeAdapter {
       createdContexts: Parameters<TestRuntimeAdapter['createConversation']>[0]['context'][] = []

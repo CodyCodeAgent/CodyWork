@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import type { ConversationPermissionMode, ConversationRow, WorkspaceRow, WorkbenchDb } from '../db/index.js'
 import type { RuntimeContext } from '../runtime/protocol.js'
@@ -14,6 +15,18 @@ export type DemandConversationContext = {
   updatedAt: string
   workspaceId: string
   repositories: { id: string; name: string; worktreePath: string }[]
+}
+
+function gitCommonDirectory(repositoryPath: string): string | null {
+  try {
+    const path = execFileSync('git', ['-C', repositoryPath, 'rev-parse', '--git-common-dir'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return path ? resolve(repositoryPath, path) : null
+  } catch {
+    return null
+  }
 }
 
 function withPermission(context: RuntimeContext, mode: ConversationPermissionMode): RuntimeContext {
@@ -46,8 +59,18 @@ export class ConversationContextResolver {
   demandContext(demand: DemandConversationContext, mode: ConversationPermissionMode): RuntimeContext {
     const workspacePath = this.workspacePath(demand.workspaceId)
     const repositories = demand.repositories.map(repository => repository.worktreePath)
+    const gitMetadataRoots = demand.repositories.flatMap(repository => {
+      const row = this.database.db.prepare('SELECT baseline_path FROM repositories WHERE id = ? AND workspace_id = ?')
+        .get(repository.id, demand.workspaceId) as { baseline_path?: string } | undefined
+      const gitDirectory = row?.baseline_path ? gitCommonDirectory(row.baseline_path) : null
+      return gitDirectory ? [gitDirectory] : []
+    })
     const demandPath = resolve(workspacePath, 'worktrees', demand.worktreeKey)
-    const writableRoots = [...repositories, resolve(demandPath, 'docs')]
+    // Linked Worktrees keep objects, refs, locks and logs in the baseline
+    // repository's common Git directory. The whole common directory is
+    // intentionally writable so a Demand can commit and push its own branch;
+    // baseline working-tree files remain outside the writable roots.
+    const writableRoots = [...repositories, resolve(demandPath, 'docs'), ...gitMetadataRoots]
     const bundle = resolveInstructionBundle({ workspacePath, demandPath, repositoryPaths: repositories })
     return withPermission({
       workspacePath,

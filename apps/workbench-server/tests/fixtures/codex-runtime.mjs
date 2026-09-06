@@ -134,6 +134,8 @@ rl.on('line', line => {
       write({ id: message.id, error: { code: -32602, message: 'CodyWork threads must be durable' } })
     } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length === 0) {
       write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
+    } else if (message.params?.permissions !== 'codywork_demand' || Object.hasOwn(message.params ?? {}, 'sandbox')) {
+      write({ id: message.id, error: { code: -32602, message: 'missing CodyWork permission profile' } })
     } else {
       lastThreadCwd = String(message.params?.cwd ?? '')
       const threadId = `native-fixture-thread-${++threadSequence}`
@@ -237,11 +239,10 @@ rl.on('line', line => {
     }
     const policy = message.params?.sandboxPolicy
     const invalidWritePolicy = !prompt.includes('EXPECT_READ_ONLY') && (
-      policy?.type !== 'workspaceWrite'
-      || !Array.isArray(policy?.writableRoots)
-      || policy.writableRoots.length === 0
-      || policy.networkAccess !== true
-      || Object.hasOwn(policy, 'readOnlyAccess')
+      message.params?.permissions !== 'codywork_demand'
+      || Object.hasOwn(message.params ?? {}, 'sandboxPolicy')
+      || !Array.isArray(message.params?.runtimeWorkspaceRoots)
+      || message.params.runtimeWorkspaceRoots.length === 0
     )
     const invalidReadPolicy = prompt.includes('EXPECT_READ_ONLY') && (policy?.type !== 'readOnly' || policy?.networkAccess !== true)
     const invalidCollaborationMode = prompt.includes('REAL') && message.params?.collaborationMode?.mode !== 'plan'
