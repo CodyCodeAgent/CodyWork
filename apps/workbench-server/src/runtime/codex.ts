@@ -56,6 +56,10 @@ type ProductSession = {
   reasoningEffort: ReasoningEffort | ''
 }
 
+function isReasoningEffort(value: string): value is ReasoningEffort {
+  return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)
+}
+
 function workspaceCheck(path: string): WorkspaceCheckResult {
   return { status: 'ready', present: [path], missing: [], message: 'Codex App Server uses the CodyWork Workspace' }
 }
@@ -126,6 +130,8 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   private readonly sessions = new Map<string, ProductSession>()
   private readonly sessionIdByThreadId = new Map<string, string>()
   private readonly listeners = new Map<string, Set<(event: RuntimeEvent) => void>>()
+  private readonly commandPermissionModes = new Map<string, RuntimePermissionMode>()
+  private readonly turnPermissionModes = new Map<string, RuntimePermissionMode>()
   private unsubscribeManager: (() => void) | null = null
 
   constructor(private readonly options: CodexOptions = {}) {}
@@ -233,7 +239,23 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       this.listSkillCatalog({ workspacePath: context.workspacePath, ...(context.demandPath ? { demandPath: context.demandPath } : {}) }),
     ])
     return {
-      models: models.status === 'fulfilled' ? [...new Set(models.value.map(model => model.id || model.model).filter(Boolean))] : [],
+      models: models.status === 'fulfilled' ? models.value.flatMap((model) => {
+        const id = model.id || model.model
+        if (!id) return []
+        const supportedReasoningEfforts = model.supportedReasoningEfforts.filter(isReasoningEffort)
+        const defaultReasoningEffort = isReasoningEffort(model.defaultReasoningEffort)
+          ? model.defaultReasoningEffort
+          : supportedReasoningEfforts[0]
+        if (!defaultReasoningEffort) return []
+        return [{
+          id,
+          label: model.label || id,
+          description: model.description,
+          isDefault: model.isDefault,
+          defaultReasoningEffort,
+          supportedReasoningEfforts,
+        }]
+      }) : [],
       skills: skills.status === 'fulfilled' ? skills.value.filter(skill => skill.enabled) : [],
       collaborationModes: modes.status === 'fulfilled' ? modes.value.flatMap(mode => {
         if (!mode.name) return []
@@ -292,22 +314,25 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
 
   submitTurn(request: SendTurnRequest): import('./protocol.js').SubmitTurnResult {
     const session = this.require(request.conversation)
+    const turnMode = request.executionProfile?.permissionMode ?? session.mode
     if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
     if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
     const turn: TurnInput = {
       input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills, localImages: request.localImages }),
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
-      runtimeWorkspaceRoots: session.context.effectivePolicy.writableRoots,
-      approvalPolicy: approvalPolicy(session.mode), sandboxPolicy: sandboxPolicy(session.context, session.mode),
+      runtimeWorkspaceRoots: turnMode === 'read-only' ? [] : session.context.effectivePolicy.writableRoots,
+      approvalPolicy: approvalPolicy(turnMode), sandboxPolicy: sandboxPolicy(session.context, turnMode),
       ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
+    if (request.clientCommandId) this.commandPermissionModes.set(request.clientCommandId, turnMode)
     const submission = this.requireManager().submit(
       session.handle.id,
       turn,
       request.mode === 'steer' ? 'steer' : 'queue',
       request.clientCommandId,
     )
+    this.commandPermissionModes.set(submission.clientCommandId, turnMode)
     // Workspace setup and one-shot Skill installation consume progress as a
     // callback. Keep that observer deliberately passive: Core remains the
     // only reducer/terminal owner and this adapter only forwards the native
@@ -325,6 +350,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const unsubscribe = request.onEvent ? this.listen(session.handle.id, forward) : () => undefined
     const started = submission.started.then((handle) => {
       nativeTurnId = handle.turnId
+      this.turnPermissionModes.set(this.turnKey(handle.threadId, handle.turnId), turnMode)
       for (const event of buffered.splice(0)) forward(event)
       return handle
     })
@@ -340,7 +366,11 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
         finalText: outcome.assistantText,
         events: outcome.events.map(event => toRuntimeEvent(event, session.handle.id)),
       }
-    }).finally(unsubscribe)
+    }).finally(() => {
+      unsubscribe()
+      this.commandPermissionModes.delete(submission.clientCommandId)
+      if (nativeTurnId) this.turnPermissionModes.delete(this.turnKey(session.binding.threadId, nativeTurnId))
+    })
     return { clientCommandId: submission.clientCommandId, started, completed }
   }
 
@@ -370,6 +400,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     this.unsubscribeManager?.(); this.unsubscribeManager = null
     await this.manager?.dispose(); await this.host?.dispose()
     this.manager = null; this.catalog = null; this.host = null; this.sessions.clear(); this.sessionIdByThreadId.clear(); this.listeners.clear()
+    this.commandPermissionModes.clear(); this.turnPermissionModes.clear()
   }
 
   private async ensureRuntime(): Promise<CodexSessionManager> {
@@ -384,16 +415,25 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
         const session = this.sessions.get(binding.id)
         if (!session) return { action: 'deny', reason: 'CodyWork session is not attached.' }
+        const mode = this.turnPermissionModes.get(this.turnKey(operation.threadId, operation.turnId)) ?? session.mode
         const paths = referencedPaths(operation.params)
         if (paths.some(path => session.context.effectivePolicy.deniedRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'Path is denied by CodyWork policy.' }
+        if (mode === 'read-only' && operation.method.includes('fileChange')) return { action: 'deny', reason: 'File changes are forbidden for this command.' }
         if (operation.method.includes('fileChange') && paths.some(path => !session.context.effectivePolicy.writableRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'File change is outside the Demand Worktree.' }
-        if (session.mode === 'yolo') return { action: 'allow', reason: 'CodyWork YOLO mode inside the fixed sandbox.' }
+        if (mode === 'yolo') return { action: 'allow', reason: 'CodyWork YOLO mode inside the fixed sandbox.' }
         return { action: 'ask' }
       } }
       this.manager = new CodexSessionManager({ host: this.host, policy })
       this.unsubscribeManager = this.manager.subscribe(event => {
         const conversationId = this.sessionIdByThreadId.get(event.threadId)
         if (!conversationId) return
+        if (event.type === 'command.bound' && event.itemId && event.turnId) {
+          const mode = this.commandPermissionModes.get(event.itemId)
+          if (mode) this.turnPermissionModes.set(this.turnKey(event.threadId, event.turnId), mode)
+        }
+        if (event.turnId && ['turn.completed', 'turn.failed', 'turn.interrupted', 'turn.disconnected'].includes(event.type)) {
+          this.turnPermissionModes.delete(this.turnKey(event.threadId, event.turnId))
+        }
         const wrapped = toRuntimeEvent(event, conversationId)
         for (const listener of this.listeners.get(conversationId) ?? []) listener(wrapped)
       })
@@ -430,4 +470,5 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   private command(): string { return this.options.command?.trim() || 'codex app-server --stdio' }
   private runtimeOwnerCwd(): string { return realpathSync.native(this.options.appServerCwd ?? process.cwd()) }
   private modeFromContext(context: RuntimeContext): RuntimePermissionMode { return context.effectivePolicy.approval === 'none' ? 'yolo' : context.effectivePolicy.writableRoots.length ? 'workspace-write' : 'read-only' }
+  private turnKey(threadId: string, turnId: string): string { return `${threadId}:${turnId}` }
 }

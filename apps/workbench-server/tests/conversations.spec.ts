@@ -82,7 +82,7 @@ describe('conversation websocket control plane', () => {
     const conversation = await conversations.create(test.workspaceId, test.demandId, 'Shared owner bus')
     const channelEvents: string[] = []
     const browserEvents: string[] = []
-    const unsubscribeChannel = conversations.subscribeAllChannels(event => channelEvents.push(event.type))
+    const unsubscribeChannel = conversations.events.subscribe({}, event => channelEvents.push(event.type))
     conversations.subscribe(conversation.id, event => browserEvents.push(event.type))
 
     await conversations.send(test.workspaceId, conversation.id, 'one owner stream')
@@ -90,7 +90,82 @@ describe('conversation websocket control plane', () => {
 
     expect(channelEvents).toEqual(browserEvents)
     expect(channelEvents).toContain('turn.completed')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('completed')
     unsubscribeChannel()
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('keeps source execution profiles turn-scoped instead of mutating the shared conversation default', async () => {
+    class ProfileRuntime extends TestRuntimeAdapter {
+      readonly profiles: Array<string | undefined> = []
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        this.profiles.push(request.executionProfile?.permissionMode)
+        return super.submitTurn(request)
+      }
+    }
+    const test = await fixture()
+    const runtime = new ProfileRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Shared execution profile')
+
+    await conversations.submitCommand({
+      workspaceId: test.workspaceId,
+      conversationId: conversation.id,
+      origin: {
+        kind: 'channel', provider: 'feishu', accountId: 'account-1', bindingId: 'binding-1',
+        messageId: 'message-1', conversationKey: 'private:chat-1',
+      },
+      prompt: 'channel command',
+      executionProfile: { permissionMode: 'yolo' },
+    })
+    await conversations.send(test.workspaceId, conversation.id, 'browser command')
+
+    expect(runtime.profiles).toEqual(['yolo', 'workspace-write'])
+    expect(conversations.get(test.workspaceId, conversation.id).permissionMode).toBe('workspace-write')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('routes channel stop, approval and question actions through one origin-aware gateway', async () => {
+    class ActionRuntime extends TestRuntimeAdapter {
+      readonly actions: Array<{ kind: string; requestId?: string; value?: unknown }> = []
+      override async interrupt(conversation: Parameters<TestRuntimeAdapter['interrupt']>[0]) {
+        this.actions.push({ kind: 'interrupt' })
+        return super.interrupt(conversation)
+      }
+      async respondApproval(_conversation: { id: string; nativeId: string }, requestId: string, outcome: 'allowed-once' | 'rejected') {
+        this.actions.push({ kind: 'approval', requestId, value: outcome })
+      }
+      async respondQuestion(_conversation: { id: string; nativeId: string }, requestId: string, answer: unknown) {
+        this.actions.push({ kind: 'question', requestId, value: answer })
+      }
+    }
+    const test = await fixture()
+    const runtime = new ActionRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Channel actions')
+    const origin = {
+      kind: 'channel' as const, provider: 'feishu' as const, accountId: 'account-1', bindingId: 'binding-1',
+      messageId: 'message-1', conversationKey: 'topic:chat-1:root-1',
+    }
+
+    await conversations.executeAction({ kind: 'interrupt', workspaceId: test.workspaceId, conversationId: conversation.id, origin })
+    await conversations.executeAction({ kind: 'approval.resolve', workspaceId: test.workspaceId, conversationId: conversation.id, origin, requestId: 'approval-1', outcome: 'allowed-once' })
+    await conversations.executeAction({ kind: 'question.resolve', workspaceId: test.workspaceId, conversationId: conversation.id, origin, requestId: 'question-1', answer: 'yes' })
+
+    expect(runtime.actions).toEqual([
+      { kind: 'interrupt' },
+      { kind: 'approval', requestId: 'approval-1', value: 'allowed-once' },
+      { kind: 'question', requestId: 'question-1', value: 'yes' },
+    ])
+    const audits = test.db.db.prepare("SELECT action, data_json FROM conversation_audits WHERE conversation_id = ? AND action IN ('turn.interrupt','approval.resolved','question.resolved') ORDER BY id")
+      .all(conversation.id) as Array<{ action: string; data_json: string }>
+    expect(audits).toHaveLength(3)
+    expect(audits.map(row => JSON.parse(row.data_json))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ origin: expect.objectContaining({ kind: 'channel', bindingId: 'binding-1', messageId: 'message-1' }) }),
+    ]))
+
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
@@ -228,7 +303,7 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('does not present persisted SQLite status as native Runtime state', async () => {
+  it('presents durable lifecycle status without reconstructing native Runtime history', async () => {
     class PendingApprovalRuntime extends TestRuntimeAdapter {
       override async readConversationSnapshot(request: Parameters<TestRuntimeAdapter['readConversationSnapshot']>[0]) {
         const timestamp = nowIso()
@@ -244,7 +319,7 @@ describe('conversation websocket control plane', () => {
     const conversation = await conversations.create(test.workspaceId, test.demandId, 'Interrupted owner')
     test.db.db.prepare("UPDATE conversations SET status = 'awaiting_approval' WHERE id = ?").run(conversation.id)
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('awaiting_approval')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toMatchObject({ events: [
       expect.objectContaining({ type: 'user.completed', turnId: 'turn-pending' }),
       expect.objectContaining({ type: 'turn.started', turnId: 'turn-pending' }),
@@ -458,16 +533,16 @@ describe('conversation websocket control plane', () => {
     await Promise.all([once(socket, 'open'), once(secondTab, 'open')])
     await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })
     await new Promise(resolve => setTimeout(resolve, 50))
-    expect(events).toEqual(['command.queued', 'command.bound', 'user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
+    expect(events).toEqual(['command.queued', 'command.bound', 'user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'assistant.completed', 'tool.completed', 'turn.completed'])
     expect(secondTabEvents).toEqual(events)
-    expect(test.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(first.data.id)).toEqual({ status: 'idle' })
+    expect(test.db.db.prepare('SELECT status FROM conversations WHERE id = ?').get(first.data.id)).toEqual({ status: 'completed' })
     const firstTabClosed = once(socket, 'close')
     socket.close(1000, 'first tab closed')
     await firstTabClosed
     await fetch(`${base}/conversations/${first.data.id}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'second tab remains connected' }) })
     await new Promise(resolve => setTimeout(resolve, 50))
-    expect(events).toHaveLength(8)
-    expect(secondTabEvents).toHaveLength(16)
+    expect(events).toHaveLength(9)
+    expect(secondTabEvents).toHaveLength(18)
     const history = await (await fetch(`${base}/conversations/${first.data.id}/history`)).json() as { data: { events: { type: string }[] } }
     expect(history.data.events.some(event => event.type === 'assistant.delta')).toBe(true)
     const deletion = await (await fetch(`${base}/conversations/${second.data.id}`, { method: 'DELETE' })).json() as { data: { deleted: boolean } }
@@ -506,7 +581,7 @@ describe('conversation websocket control plane', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(runtime.submitCalls).toBe(1)
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual({ events: [], watermark: 0 })
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'runtime.resumed'").get(conversation.id)).toBeUndefined()
 
@@ -536,7 +611,7 @@ describe('conversation websocket control plane', () => {
     await conversations.send(test.workspaceId, conversation.id, 'do not lose the reason')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('failed')
     await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual({ events: [], watermark: 0 })
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'command.failed'").get(conversation.id)).toEqual({ action: 'command.failed' })
 
@@ -572,12 +647,12 @@ describe('conversation websocket control plane', () => {
     await conversations.send(test.workspaceId, conversation.id, 'do not silently resend')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('disconnected')
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('returns an interrupted turn to idle without recording a Runtime failure', async () => {
+  it('persists an interrupted turn as terminal without recording a Runtime failure', async () => {
     class InterruptedRuntime extends TestRuntimeAdapter {
       override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         const timestamp = nowIso()
@@ -601,7 +676,7 @@ describe('conversation websocket control plane', () => {
     await conversations.send(test.workspaceId, conversation.id, 'stop this turn')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('idle')
+    expect(conversations.get(test.workspaceId, conversation.id).status).toBe('completed')
     expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'turn.failed'").get(conversation.id)).toBeUndefined()
 
     test.db.close()

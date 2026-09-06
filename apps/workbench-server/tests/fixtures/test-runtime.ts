@@ -94,24 +94,27 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     const clientCommandId = request.clientCommandId ?? `command-${randomUUID()}`
     const turnId = `turn-${randomUUID()}`
     const events: RuntimeEvent[] = []
-    const emit = (type: RuntimeEvent['type'], data: Record<string, unknown>, options: { native?: boolean; turnId?: string } = {}): void => {
+    const emit = (type: RuntimeEvent['type'], data: Record<string, unknown>, options: { native?: boolean; turnId?: string; itemId?: string } = {}): void => {
       const timestamp = nowIso()
       const event: RuntimeEvent = {
         id: randomUUID(), type, conversationId: request.conversation.id, threadId: request.conversation.nativeId,
         ...(options.turnId === '' ? {} : { turnId: options.turnId ?? turnId }),
+        ...(options.itemId ? { itemId: options.itemId } : {}),
         timestamp, atIso: timestamp, data,
       }
       if (options.native !== false) events.push(event)
       request.onEvent?.(event)
     }
-    emit('command.queued', { clientCommandId, text: request.prompt }, { native: false, turnId: '' })
-    emit('command.bound', { clientCommandId, nativeTurnId: turnId }, { native: false })
+    emit('command.queued', { clientCommandId, text: request.prompt }, { native: false, turnId: '', itemId: clientCommandId })
+    emit('command.bound', { clientCommandId, nativeTurnId: turnId }, { native: false, itemId: clientCommandId })
     const completed = Promise.resolve().then(() => {
       emit('user.completed', { text: request.prompt, ...(request.localImages?.length ? { images: request.localImages.map(image => image.path) } : {}) })
       emit('turn.started', { prompt: request.prompt })
       emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
       const context = this.contexts.get(request.conversation.id)
-      emit('assistant.delta', { text: `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}` })
+      const assistantText = `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}`
+      emit('assistant.delta', { text: assistantText })
+      emit('assistant.completed', { text: assistantText })
       emit('tool.completed', { tool: { kind: 'command', title: 'Policy check', status: 'completed', summary: 'csr.policy.check', details: [] } })
       emit('turn.completed', { status: 'completed' })
       this.history.set(request.conversation.nativeId, events)

@@ -97,7 +97,7 @@ describe('generic runtime protocol', () => {
     })
     const result = await runtime.sendTurn({ conversation, prompt: 'hello' })
     expect(result.finalText).toContain('hello')
-    expect(result.events.map(event => event.type)).toEqual(['user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'tool.completed', 'turn.completed'])
+    expect(result.events.map(event => event.type)).toEqual(['user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'assistant.completed', 'tool.completed', 'turn.completed'])
     await runtime.close()
   })
 
@@ -124,7 +124,14 @@ describe('generic runtime protocol', () => {
       source: 'vscode',
     })]))
     await expect(runtime.getComposerOptions(context)).resolves.toEqual({
-      models: ['gpt-5.6-sol'],
+      models: [{
+        id: 'gpt-5.6-sol',
+        label: 'GPT 5.6 Sol',
+        description: 'fixture model',
+        isDefault: true,
+        defaultReasoningEffort: 'high',
+        supportedReasoningEfforts: ['medium', 'high'],
+      }],
       skills: [{
         id: '/skills/fixture-skill/SKILL.md',
         name: 'fixture-skill',
@@ -271,6 +278,19 @@ describe('generic runtime protocol', () => {
     await runtime.setPermission(conversation, 'read-only')
     await expect(runtime.sendTurn({ conversation, prompt: 'EXPECT_READ_ONLY' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
     await runtime.setPermission(conversation, 'yolo')
+
+    // Browser and channel sources may share one native Thread while choosing
+    // different execution profiles. A restrictive channel command must not
+    // mutate the default used by the next browser command.
+    await expect(runtime.sendTurn({
+      conversation,
+      prompt: 'EXPECT_READ_ONLY SOURCE_SCOPED',
+      executionProfile: { permissionMode: 'read-only' },
+    })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
+    await expect(runtime.sendTurn({
+      conversation,
+      prompt: 'SOURCE_SCOPED_DEFAULT_REMAINS_WRITE',
+    })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
 
     await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT' })).rejects.toThrow('exited')
     expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })

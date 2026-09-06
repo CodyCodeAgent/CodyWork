@@ -7,6 +7,9 @@
 - Keep framework-neutral Codex protocol, runtime, event normalization, conversation reconciliation, composer, and reusable conversation presentation in `@codycodeagent/cody-web-core`.
 - Native Codex Thread history is the durable source of truth for conversation messages. Do not add a second message cache or reconstruct ordering in the product UI.
 - Remote channels must reuse Core's provider-neutral Inbox, binding, Turn projection, interactive-request bridge, and durable Outbox contracts. A channel may persist delivery and presentation state, but must not mirror the Codex transcript or create another Turn state machine.
+- Browser and channel commands, stops, approvals, and question responses must enter through the same origin-aware `ConversationCommandGateway`. Source defaults are carried in a Turn-scoped execution profile and must never mutate another source's defaults or the conversation scope ceiling.
+- `ConversationEventHub` is the only product event fan-out and `ConversationProjectionHost` is the only server-side reducer for channel views. Do not add a second snapshot/live join or source-specific conversation reducer.
+- Keep provider connection supervision, durable Outbox delivery, channel projection, and native Runtime ownership separate. Outbox failures are not provider disconnects; provider disconnects are not Runtime failures.
 - Treat browser realtime and external channel connections as independent transports. Never restart the Codex App Server because a browser or channel connection failed, and never silently resend a command whose native admission is uncertain.
 - Preserve unrelated working-tree changes. Never clean, reset, or overwrite a user's repository to prepare a test fixture.
 

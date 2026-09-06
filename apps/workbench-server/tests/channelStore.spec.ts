@@ -67,7 +67,7 @@ describe('CodyWork channel persistence', () => {
       .run('conversation-1', 'demand-1', 'workspace-1', 'thread-1', 'Channel', 'idle', 'workspace-write', 'policy', 'instructions', now, now)
     const binding = store.createBinding({
       message: inbound(accountId), targetType: 'codywork-demand', workspaceId: 'workspace-1', demandId: 'demand-1', conversationId: 'conversation-1',
-      threadId: 'thread-1', ownerIdentity: 'user-1',
+      threadId: 'thread-1', ownerIdentity: 'user-1', permissionMode: 'workspace-write', notificationPolicy: 'mirror-requests',
     })
     expect(store.listBindings(accountId)).toMatchObject([{ id: binding.id, conversationId: 'conversation-1', conversationTitle: 'Channel' }])
     expect(store.listBindingsForDemand('workspace-1', 'demand-1')).toMatchObject([{ id: binding.id, conversationId: 'conversation-1', conversationTitle: 'Channel' }])
@@ -99,12 +99,12 @@ describe('CodyWork channel persistence', () => {
 
     const created = store.createBinding({
       message: inbound(account.id), targetType: 'codywork-workspace', workspaceId: 'workspace-search', demandId: null,
-      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1',
+      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1', permissionMode: 'read-only', notificationPolicy: 'mirror-requests',
     })
     expect(created).toMatchObject({ targetType: 'codywork-workspace', targetId: 'workspace-search', demandId: null, conversationId: 'conversation-search' })
     expect(() => store.createBinding({
       message: inbound(account.id, 'bad-event', 'bad-message'), targetType: 'codywork-workspace', workspaceId: 'workspace-search', demandId: 'fake-demand',
-      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1',
+      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1', permissionMode: 'read-only', notificationPolicy: 'mirror-requests',
     })).toThrow('不能关联 Demand')
     db.close()
   })

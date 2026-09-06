@@ -215,7 +215,14 @@ export interface AvailableNativeThread {
 }
 
 export interface ComposerOptions {
-  models: string[]
+  models: Array<{
+    id: string
+    label: string
+    description: string
+    isDefault: boolean
+    defaultReasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+    supportedReasoningEfforts: Array<'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'>
+  }>
   skills: Array<{ id: string; name: string; label: string; description: string; path: string; scope: 'repo' | 'user' | 'system' | 'admin'; enabled: boolean }>
   collaborationModes: Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>
 }

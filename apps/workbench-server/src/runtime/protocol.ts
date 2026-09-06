@@ -106,6 +106,8 @@ export interface SendTurnRequest {
   localImages?: Array<{ path: string }>
   /** Stable product command id. This is an outbox identity, never a native Turn id. */
   clientCommandId?: string
+  /** Turn-scoped source policy. It never mutates the shared conversation default. */
+  executionProfile?: { permissionMode: RuntimePermissionMode }
   mode?: 'queue' | 'steer'
   settings?: {
     model?: string
@@ -119,6 +121,15 @@ export interface SendTurnRequest {
 }
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export interface RuntimeModelOption {
+  id: string
+  label: string
+  description: string
+  isDefault: boolean
+  defaultReasoningEffort: ReasoningEffort
+  supportedReasoningEfforts: ReasoningEffort[]
+}
 
 export type RuntimeSkillScope = 'user' | 'repo' | 'system' | 'admin'
 
@@ -141,7 +152,9 @@ export interface RuntimeSkillCatalogRequest {
 }
 
 export interface RuntimeComposerOptions {
-  models: string[]
+  /** Provider-authoritative model capabilities. UI controls must not invent
+   * reasoning combinations that the selected model does not advertise. */
+  models: RuntimeModelOption[]
   /** Provider-authoritative skills. `id` is the opaque value returned by the Composer. */
   skills: RuntimeSkillCatalogEntry[]
   collaborationModes: Array<{

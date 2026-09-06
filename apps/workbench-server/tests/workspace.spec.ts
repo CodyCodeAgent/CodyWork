@@ -109,6 +109,7 @@ describe('workspace-only server primitives', () => {
     expect(db.db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     const columns = db.db.prepare('PRAGMA table_info(channel_bindings)').all() as Array<{ name: string; notnull: number }>
     expect(columns.find(column => column.name === 'demand_id')?.notnull).toBe(0)
+    expect(columns.map(column => column.name)).toEqual(expect.arrayContaining(['permission_mode', 'notification_policy']))
     db.close()
     rmSync(root, { recursive: true, force: true })
   })

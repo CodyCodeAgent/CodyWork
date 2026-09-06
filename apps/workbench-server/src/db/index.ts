@@ -254,6 +254,8 @@ export class WorkbenchDb {
         target_id TEXT NOT NULL,
         thread_id TEXT NOT NULL,
         owner_identity TEXT NOT NULL,
+        permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+        notification_policy TEXT NOT NULL DEFAULT 'mirror-requests' CHECK (notification_policy IN ('origin-only', 'mirror-requests')),
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
         demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -413,6 +415,21 @@ export class WorkbenchDb {
     }
     const groupProfileColumns = new Set((this.db.prepare('PRAGMA table_info(channel_group_profiles)').all() as { name?: string }[]).map(column => column.name))
     if (!groupProfileColumns.has('conversation_id')) this.db.exec('ALTER TABLE channel_group_profiles ADD COLUMN conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL')
+    const channelBindingColumns = new Set((this.db.prepare('PRAGMA table_info(channel_bindings)').all() as { name?: string }[]).map(column => column.name))
+    if (!channelBindingColumns.has('permission_mode')) {
+      this.db.exec("ALTER TABLE channel_bindings ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'workspace-write'")
+      this.db.exec("UPDATE channel_bindings SET permission_mode = 'read-only' WHERE target_type = 'codywork-workspace'")
+      this.db.exec(`UPDATE channel_bindings SET permission_mode = COALESCE(
+        (SELECT channel_group_profiles.permission_mode FROM channel_group_profiles
+          WHERE channel_group_profiles.account_id = channel_bindings.account_id
+            AND channel_group_profiles.channel_conversation_id = channel_bindings.channel_conversation_id),
+        (SELECT conversations.permission_mode FROM conversations WHERE conversations.id = channel_bindings.conversation_id),
+        permission_mode
+      ) WHERE target_type = 'codywork-demand'`)
+    }
+    if (!channelBindingColumns.has('notification_policy')) {
+      this.db.exec("ALTER TABLE channel_bindings ADD COLUMN notification_policy TEXT NOT NULL DEFAULT 'mirror-requests'")
+    }
     const interactiveRequestColumns = this.db.prepare('PRAGMA table_info(channel_interactive_requests)').all() as { name?: string }[]
     if (!interactiveRequestColumns.some(column => column.name === 'request_key')) {
       // App Server request ids are process-local counters and restart from 0.
@@ -549,6 +566,8 @@ export class WorkbenchDb {
             target_id TEXT NOT NULL,
             thread_id TEXT NOT NULL,
             owner_identity TEXT NOT NULL,
+            permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+            notification_policy TEXT NOT NULL DEFAULT 'mirror-requests' CHECK (notification_policy IN ('origin-only', 'mirror-requests')),
             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
             conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -556,8 +575,8 @@ export class WorkbenchDb {
             updated_at TEXT NOT NULL,
             UNIQUE(provider, account_id, conversation_key)
           );
-          INSERT INTO channel_bindings (id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, workspace_id, demand_id, conversation_id, created_at, updated_at)
-            SELECT id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, workspace_id, demand_id, conversation_id, created_at, updated_at
+          INSERT INTO channel_bindings (id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, permission_mode, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at)
+            SELECT id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, permission_mode, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at
             FROM channel_bindings_scope_retired;
           DROP TABLE channel_bindings_scope_retired;
           DROP TABLE conversations_scope_retired;
