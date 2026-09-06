@@ -57,6 +57,7 @@ type ProductSession = {
 }
 
 const CODYWORK_DEMAND_PERMISSION_PROFILE = 'codywork_demand'
+const CODYWORK_DEFAULT_PERMISSION_CONFIG = `default_permissions="${CODYWORK_DEMAND_PERMISSION_PROFILE}"`
 const CODYWORK_DEMAND_PERMISSION_CONFIG = `permissions.${CODYWORK_DEMAND_PERMISSION_PROFILE}={filesystem={":root"="read",":tmpdir"="write",":workspace_roots"={"."="write"}},network={enabled=true,mode="full"}}`
 
 function isReasoningEffort(value: string): value is ReasoningEffort {
@@ -482,7 +483,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     // repository's common Git directory, while all other paths remain read-only.
     return {
       command: 'codex',
-      args: ['-c', CODYWORK_DEMAND_PERMISSION_CONFIG, 'app-server', '--stdio'],
+      // Codex 0.153+ requires a default whenever named permission profiles are
+      // declared. Threads and turns still pass their explicit profile (or the
+      // read-only sandbox), so this only makes process startup cross-version.
+      args: ['-c', CODYWORK_DEFAULT_PERMISSION_CONFIG, '-c', CODYWORK_DEMAND_PERMISSION_CONFIG, 'app-server', '--stdio'],
     }
   }
   private runtimeOwnerCwd(): string { return realpathSync.native(this.options.appServerCwd ?? process.cwd()) }
