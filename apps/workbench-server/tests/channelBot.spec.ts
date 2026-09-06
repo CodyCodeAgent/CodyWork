@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { ChannelInboundMessage, ChannelInboxItem } from '@codycodeagent/cody-web-core/channel'
 import { WorkbenchDb } from '../src/db/index.js'
 import { codyWorkConversationUrl, feishuProjectionBody } from '../src/services/channelBot.js'
+import { projectionCard } from '../src/services/channelFeishuRenderer.js'
 import { ChannelAccessService } from '../src/services/channelAccessService.js'
 import { ChannelAccountManager } from '../src/services/channelAccountManager.js'
 import { ChannelProjectionService } from '../src/services/channelProjection.js'
@@ -109,6 +110,15 @@ describe('CodyWork channel architecture and lifecycle', () => {
     expect(codyWorkConversationUrl('http://10.37.222.12:3001/old?debug=1', binding('binding-1'))).toBe('http://10.37.222.12:3001/?workspace=workspace-1&demand=demand-1&conversation=conversation-1')
     expect(codyWorkConversationUrl('javascript:alert(1)', binding('binding-1'))).toBe('')
     expect(feishuProjectionBody({ threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true, revision: 1, assistantText: 'Done\n\n![OK](/safe/a.png)', assistantImages: ['/safe/a.png'], error: '' })).toBe('Done\n\n🖼️ OK')
+  })
+
+  it('does not render a waiting message after an empty turn has completed', () => {
+    const card = projectionCard({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true,
+      revision: 1, assistantText: '', assistantImages: [], error: '',
+    }, 'finish silently')
+    expect(JSON.stringify(card)).toContain('本次回复已完成，Codex 未返回可显示的文本。')
+    expect(JSON.stringify(card)).not.toContain('正在等待 Codex 输出')
   })
 
   it('routes unauthorized private traffic to access approval, not Codex', async () => {
