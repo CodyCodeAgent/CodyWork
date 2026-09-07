@@ -254,18 +254,15 @@ export interface PolicyInput {
 }
 
 /**
- * Compile CodyWork's Worktree policy. An empty readableRoots list means reads
- * are unrestricted. Writable roots must always be inside the Workspace; the
- * shared runtime may narrow them further but never widen them.
+ * Normalize context metadata used for persisted hashes and execution-mode
+ * inference. This is not a CodyWork filesystem sandbox: native Codex
+ * readOnly/workspaceWrite/dangerFullAccess settings own actual access.
  */
 export function resolveEffectivePolicy(input: PolicyInput): EffectivePolicy {
   const workspacePath = canonicalPath(input.workspacePath)
   const readableRoots = [...new Set((input.readableRoots ?? []).map(canonicalPath))]
   const writableRoots = [...new Set((input.writableRoots ?? []).map(canonicalPath))]
   const deniedRoots = [...new Set((input.deniedRoots ?? []).map(canonicalPath))]
-  if (writableRoots.some(root => !isWithinRoot(workspacePath, root))) {
-    throw new Error('effective policy cannot write outside the Workspace')
-  }
   const policy = {
     readableRoots,
     writableRoots,

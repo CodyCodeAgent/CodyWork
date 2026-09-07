@@ -111,7 +111,7 @@ export class ChannelBindingService {
     const isNew = effectiveKind === 'channel.pick_new_session' || effectiveKind === 'channel.pick_new_workspace_session'
     const permissionMode = workspaceScope ? 'read-only' : action.value.permissionMode === 'workspace-write' ? 'workspace-write' : action.value.permissionMode === 'yolo' ? 'yolo' : ''
     if (!workspaceScope && !permissionMode) {
-      const next = card('选择执行权限', 'YOLO 是默认推荐项：会在当前 Demand Worktree 的固定沙箱内直接执行；Normal 会对写入或外部操作请求审批。此选择可在 CodyWork 页面后续调整。', [
+      const next = card('选择执行权限', 'YOLO 使用底层 Codex danger-full-access，拥有 CodyWork 服务账号可用的完整系统权限；Normal 使用 Codex 原生 workspace-write 与审批机制。此选择可在 CodyWork 页面后续调整。', [
         { text: 'YOLO（默认）', value: carryMode({ action: 'channel.pick_permission', inboxId, workspaceId, demandId, conversationId: string(action.value.conversationId), sessionAction: effectiveKind, permissionMode: 'yolo' }) },
         { text: 'Normal（每次审批）', value: carryMode({ action: 'channel.pick_permission', inboxId, workspaceId, demandId, conversationId: string(action.value.conversationId), sessionAction: effectiveKind, permissionMode: 'workspace-write' }) },
       ])

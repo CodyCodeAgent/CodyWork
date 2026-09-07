@@ -18,7 +18,6 @@ import {
 import {
   type CodexEvent,
 } from '@codycodeagent/cody-web-core/conversation'
-import { asRecord } from '@codycodeagent/cody-web-core/protocol'
 import { nowIso } from '../db/index.js'
 import type {
   ConversationHandle,
@@ -44,7 +43,7 @@ import type {
   WorkspaceInitializationResult,
 } from './protocol.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from './protocol.js'
-import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from './policy.js'
+import { resolveEffectivePolicy, resolveInstructionBundle } from './policy.js'
 
 type CodexOptions = { command?: string; model?: string; env?: NodeJS.ProcessEnv; appServerCwd?: string }
 type ProductSession = {
@@ -55,10 +54,6 @@ type ProductSession = {
   model: string
   reasoningEffort: ReasoningEffort | ''
 }
-
-const CODYWORK_DEMAND_PERMISSION_PROFILE = 'codywork_demand'
-const CODYWORK_DEFAULT_PERMISSION_CONFIG = `default_permissions="${CODYWORK_DEMAND_PERMISSION_PROFILE}"`
-const CODYWORK_DEMAND_PERMISSION_CONFIG = `permissions.${CODYWORK_DEMAND_PERMISSION_PROFILE}={filesystem={":root"="read",":tmpdir"="write",":workspace_roots"={"."="write"}},network={enabled=true,mode="full"}}`
 
 function isReasoningEffort(value: string): value is ReasoningEffort {
   return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value)
@@ -77,36 +72,37 @@ function approvalPolicy(mode: RuntimePermissionMode): 'never' | 'untrusted' {
 
 function turnPermissions(mode: RuntimePermissionMode): Pick<TurnInput, 'permissions' | 'sandboxPolicy'> {
   if (mode === 'read-only') return { sandboxPolicy: { type: 'readOnly', networkAccess: true } }
-  return { permissions: CODYWORK_DEMAND_PERMISSION_PROFILE }
-}
-
-function policyInstructions(context: RuntimeContext): string {
-  const reads = context.effectivePolicy.readableRoots.length
-    ? `File reads are limited to: ${context.effectivePolicy.readableRoots.join(', ')}.`
-    : 'File reads are unrestricted across users, directories, and files.'
-  const writes = context.effectivePolicy.writableRoots.length
-    ? `File writes are allowed only inside: ${context.effectivePolicy.writableRoots.join(', ')}.`
-    : 'File writes are forbidden everywhere.'
-  return `Effective CodyWork policy. ${reads} ${writes} Reading a path never grants permission to modify it.`
+  if (mode === 'yolo') return { sandboxPolicy: { type: 'dangerFullAccess' } }
+  return {
+    sandboxPolicy: {
+      type: 'workspaceWrite',
+      writableRoots: [],
+      networkAccess: true,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
+  }
 }
 
 function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, bootstrapCwd: string): ExecutionContext {
   const executionCwd = realpathSync.native(context.demandPath ?? context.workspacePath)
+  const runtimeWorkspaceRoots = [executionCwd]
   return {
     thread: {
       // Codex discovers Skills when a native Thread is created/resumed. Do not
       // point that bootstrap phase at a Workspace: a large Workspace skill
       // catalog would be implicitly injected even when the user referenced no
       // `$Skill`. The actual Turn below always receives the Demand Worktree.
-      cwd: bootstrapCwd, approvalPolicy: approvalPolicy(mode),
-      ...(mode === 'read-only' ? { sandbox: 'read-only' as const } : { permissions: CODYWORK_DEMAND_PERMISSION_PROFILE }),
-      runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
-      baseInstructions: context.instructionBundle.systemInstructions, developerInstructions: policyInstructions(context),
+      cwd: bootstrapCwd,
+      approvalPolicy: approvalPolicy(mode),
+      sandbox: mode === 'read-only' ? 'read-only' : mode === 'yolo' ? 'danger-full-access' : 'workspace-write',
+      runtimeWorkspaceRoots,
+      baseInstructions: context.instructionBundle.systemInstructions,
       experimentalRawEvents: false, ephemeral: false,
     },
     turn: {
       cwd: executionCwd,
-      runtimeWorkspaceRoots: context.effectivePolicy.writableRoots,
+      runtimeWorkspaceRoots,
       approvalPolicy: approvalPolicy(mode),
       ...turnPermissions(mode),
     },
@@ -115,13 +111,6 @@ function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, 
 
 function toRuntimeEvent(event: CodexEvent, conversationId: string): RuntimeEvent {
   return { ...event, conversationId, timestamp: event.atIso }
-}
-
-function referencedPaths(value: unknown, key = ''): string[] {
-  if (typeof value === 'string') return /path|cwd|root|file/iu.test(key) && value.startsWith('/') ? [value] : []
-  if (Array.isArray(value)) return value.flatMap(item => referencedPaths(item, key))
-  const row = asRecord(value)
-  return row ? Object.entries(row).flatMap(([childKey, child]) => referencedPaths(child, childKey)) : []
 }
 
 /** Thin CodyWork product adapter over the shared Codex runtime/session core. */
@@ -323,7 +312,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills, localImages: request.localImages }),
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
-      runtimeWorkspaceRoots: turnMode === 'read-only' ? [] : session.context.effectivePolicy.writableRoots,
+      runtimeWorkspaceRoots: [realpathSync.native(session.context.demandPath ?? session.context.workspacePath)],
       approvalPolicy: approvalPolicy(turnMode), ...turnPermissions(turnMode),
       ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
@@ -423,11 +412,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
         const session = this.sessions.get(binding.id)
         if (!session) return { action: 'deny', reason: 'CodyWork session is not attached.' }
         const mode = this.turnPermissionModes.get(this.turnKey(operation.threadId, operation.turnId)) ?? session.mode
-        const paths = referencedPaths(operation.params)
-        if (paths.some(path => session.context.effectivePolicy.deniedRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'Path is denied by CodyWork policy.' }
-        if (mode === 'read-only' && operation.method.includes('fileChange')) return { action: 'deny', reason: 'File changes are forbidden for this command.' }
-        if (operation.method.includes('fileChange') && paths.some(path => !session.context.effectivePolicy.writableRoots.some(root => isWithinRoot(root, path)))) return { action: 'deny', reason: 'File change is outside the Demand Worktree.' }
-        if (mode === 'yolo') return { action: 'allow', reason: 'CodyWork YOLO mode inside the fixed sandbox.' }
+        if (mode === 'yolo') return { action: 'allow', reason: 'Codex danger-full-access mode is enabled for this turn.' }
         return { action: 'ask' }
       } }
       this.manager = new CodexSessionManager({ host: this.host, policy })
@@ -477,17 +462,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   private appServerCommand(): { command: string; args?: string[] } {
     const command = this.options.command?.trim()
     if (command && command !== 'codex app-server --stdio') return { command }
-    // `workspace-write` deliberately protects `.git` even when it appears in
-    // writable roots. A named permission profile is the supported explicit
-    // opt-out: every runtime root is writable, including the bound baseline
-    // repository's common Git directory, while all other paths remain read-only.
-    return {
-      command: 'codex',
-      // Codex 0.153+ requires a default whenever named permission profiles are
-      // declared. Threads and turns still pass their explicit profile (or the
-      // read-only sandbox), so this only makes process startup cross-version.
-      args: ['-c', CODYWORK_DEFAULT_PERMISSION_CONFIG, '-c', CODYWORK_DEMAND_PERMISSION_CONFIG, 'app-server', '--stdio'],
-    }
+    return { command: 'codex', args: ['app-server', '--stdio'] }
   }
   private runtimeOwnerCwd(): string { return realpathSync.native(this.options.appServerCwd ?? process.cwd()) }
   private modeFromContext(context: RuntimeContext): RuntimePermissionMode { return context.effectivePolicy.approval === 'none' ? 'yolo' : context.effectivePolicy.writableRoots.length ? 'workspace-write' : 'read-only' }

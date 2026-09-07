@@ -10,7 +10,7 @@ import { CodyWorkCodexRuntime } from '../src/runtime/codex.js'
 import { CODY_WEB_CORE_VERSION } from '@codycodeagent/cody-web-core/runtime'
 
 describe('generic runtime protocol', () => {
-  it('compiles policy roots and instruction sources without widening writes', () => {
+  it('normalizes context roots without treating them as a CodyWork sandbox', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-runtime-'))
     mkdirSync(join(root, '.agents', 'skills', 'csr'), { recursive: true })
     writeFileSync(join(root, 'CONSTITUTION.md'), '# CSR')
@@ -28,7 +28,7 @@ describe('generic runtime protocol', () => {
     expect(policy.hash).toHaveLength(64)
     expect(isWithinRoot(root, join(root, 'worktrees'))).toBe(true)
     expect(resolveEffectivePolicy({ workspacePath: root, readableRoots: [join(root, '..', 'shared')], writableRoots: [] }).readableRoots[0]).toContain('shared')
-    expect(() => resolveEffectivePolicy({ workspacePath: root, writableRoots: [join(root, '..', 'escape')] })).toThrow('outside')
+    expect(resolveEffectivePolicy({ workspacePath: root, writableRoots: [join(root, '..', 'shared-write')] }).writableRoots[0]).toContain('shared-write')
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -278,6 +278,7 @@ describe('generic runtime protocol', () => {
     await runtime.setPermission(conversation, 'read-only')
     await expect(runtime.sendTurn({ conversation, prompt: 'EXPECT_READ_ONLY' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
     await runtime.setPermission(conversation, 'yolo')
+    await expect(runtime.sendTurn({ conversation, prompt: 'EXPECT_YOLO' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
 
     // Browser and channel sources may share one native Thread while choosing
     // different execution profiles. A restrictive channel command must not
@@ -292,7 +293,7 @@ describe('generic runtime protocol', () => {
       prompt: 'SOURCE_SCOPED_DEFAULT_REMAINS_WRITE',
     })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
 
-    await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT' })).rejects.toThrow('exited')
+    await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT EXPECT_YOLO' })).rejects.toThrow('exited')
     expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })
     await expect(runtime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId }))
       .rejects.toThrow('will not be restarted automatically')

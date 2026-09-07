@@ -132,10 +132,10 @@ rl.on('line', line => {
       write({ id: message.id, error: { code: -32602, message: 'legacy Codex fields are forbidden' } })
     } else if (message.params?.ephemeral !== false) {
       write({ id: message.id, error: { code: -32602, message: 'CodyWork threads must be durable' } })
-    } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length === 0) {
+    } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length !== 1) {
       write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
-    } else if (message.params?.permissions !== 'codywork_demand' || Object.hasOwn(message.params ?? {}, 'sandbox')) {
-      write({ id: message.id, error: { code: -32602, message: 'missing CodyWork permission profile' } })
+    } else if (message.params?.sandbox !== 'workspace-write' || Object.hasOwn(message.params ?? {}, 'permissions')) {
+      write({ id: message.id, error: { code: -32602, message: 'missing native Codex sandbox mode' } })
     } else {
       lastThreadCwd = String(message.params?.cwd ?? '')
       const threadId = `native-fixture-thread-${++threadSequence}`
@@ -238,13 +238,18 @@ rl.on('line', line => {
       }
     }
     const policy = message.params?.sandboxPolicy
-    const invalidWritePolicy = !prompt.includes('EXPECT_READ_ONLY') && (
-      message.params?.permissions !== 'codywork_demand'
-      || Object.hasOwn(message.params ?? {}, 'sandboxPolicy')
+    const expectedPolicy = prompt.includes('EXPECT_READ_ONLY')
+      ? 'readOnly'
+      : prompt.includes('EXPECT_YOLO') || prompt.includes('SOURCE_SCOPED_DEFAULT_REMAINS_WRITE')
+        ? 'dangerFullAccess'
+        : 'workspaceWrite'
+    const invalidWritePolicy = expectedPolicy !== 'readOnly' && (
+      policy?.type !== expectedPolicy
+      || Object.hasOwn(message.params ?? {}, 'permissions')
       || !Array.isArray(message.params?.runtimeWorkspaceRoots)
-      || message.params.runtimeWorkspaceRoots.length === 0
+      || message.params.runtimeWorkspaceRoots.length !== 1
     )
-    const invalidReadPolicy = prompt.includes('EXPECT_READ_ONLY') && (policy?.type !== 'readOnly' || policy?.networkAccess !== true)
+    const invalidReadPolicy = expectedPolicy === 'readOnly' && (policy?.type !== 'readOnly' || policy?.networkAccess !== true)
     const invalidCollaborationMode = prompt.includes('REAL') && message.params?.collaborationMode?.mode !== 'plan'
     if (invalidWritePolicy || invalidReadPolicy || invalidCollaborationMode) {
       write({ id: message.id, error: { code: -32602, message: 'invalid current Codex sandbox policy' } })

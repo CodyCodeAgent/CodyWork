@@ -30,7 +30,7 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
-  it('allows Demand conversations to write the bound repositories full Git metadata directories', async () => {
+  it('uses the Demand directory as context metadata without constructing a Git allowlist', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-git-metadata-'))
     const baseline = join(root, 'services', 'demo')
     const worktree = join(root, 'worktrees', 'publish', 'services', 'demo')
@@ -66,11 +66,9 @@ describe('conversation websocket control plane', () => {
     const conversations = new ConversationService(db, runtime)
     await conversations.create(workspaceId, demandId, 'Git publish')
 
-    expect(runtime.createdContext?.effectivePolicy.writableRoots).toEqual(expect.arrayContaining([
-      realpathSync(worktree),
-      realpathSync(join(baseline, '.git')),
-    ]))
-    expect(runtime.createdContext?.effectivePolicy.writableRoots).not.toContain(realpathSync(baseline))
+    expect(runtime.createdContext?.effectivePolicy.writableRoots).toEqual([
+      realpathSync(join(root, 'worktrees', 'publish')),
+    ])
 
     db.close()
     rmSync(root, { recursive: true, force: true })
@@ -107,10 +105,7 @@ describe('conversation websocket control plane', () => {
       demandPath: join(test.root, 'worktrees', 'verify'),
       effectivePolicy: {
         readableRoots: [],
-        writableRoots: [
-          join(canonicalRoot, 'worktrees', 'verify', 'services', 'demo'),
-          join(canonicalRoot, 'worktrees', 'verify', 'docs'),
-        ],
+        writableRoots: [join(canonicalRoot, 'worktrees', 'verify')],
       },
     })
 
@@ -309,7 +304,7 @@ describe('conversation websocket control plane', () => {
 
     expect(runtime.updatedContexts).toEqual([expect.objectContaining({
       conversationId: conversation.id,
-      writableRoots: expect.arrayContaining([realpathSync(additionalWorktree)]),
+      writableRoots: [realpathSync(join(test.root, 'worktrees', 'verify'))],
     })])
     expect(conversations.get(test.workspaceId, conversation.id).policyHash).not.toBe('')
 

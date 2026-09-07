@@ -134,6 +134,13 @@ describe('CodyWork channel architecture and lifecycle', () => {
     })
     const text = JSON.stringify(card)
     for (const expected of ['GPT 6 Astra', '推理', '高', 'YOLO', 'AI Hub', '灵活返佣审批流调整', '完成']) expect(text).toContain(expected)
+    const elements = card.elements as Array<{ tag?: string; content?: string; elements?: Array<{ content?: string }> }>
+    expect(elements[0]).toMatchObject({ tag: 'markdown', content: '完成' })
+    expect(elements.at(-1)).toMatchObject({
+      tag: 'note',
+      elements: [{ content: 'CodyWork · AI Hub · 灵活返佣审批流调整\nGPT 6 Astra · 推理 高 · YOLO\n问题：build it' }],
+    })
+    expect(text).not.toContain('运行配置')
   })
 
   it('opens a two-step /model picker and confirms the persisted selection', async () => {
