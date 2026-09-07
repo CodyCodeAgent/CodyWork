@@ -222,6 +222,7 @@ export class WorkbenchDb {
         domain TEXT NOT NULL DEFAULT 'feishu',
         enabled INTEGER NOT NULL DEFAULT 0,
         allow_all_users INTEGER NOT NULL DEFAULT 0,
+        allow_all_conversations INTEGER NOT NULL DEFAULT 0,
         allowed_user_ids_json TEXT NOT NULL DEFAULT '[]',
         allowed_conversation_ids_json TEXT NOT NULL DEFAULT '[]',
         group_mention_mode TEXT NOT NULL DEFAULT 'always',
@@ -404,6 +405,7 @@ export class WorkbenchDb {
     `)
     const channelAccountColumns = new Set((this.db.prepare('PRAGMA table_info(channel_accounts)').all() as { name?: string }[]).map(column => column.name))
     const channelAccountMigrations = [
+      ['allow_all_conversations', 'INTEGER NOT NULL DEFAULT 0'],
       ['last_close_code', 'INTEGER'],
       ['last_close_reason', 'TEXT'],
       ['last_disconnected_at', 'TEXT'],

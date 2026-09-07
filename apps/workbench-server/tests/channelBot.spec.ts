@@ -39,7 +39,7 @@ function inbox(id: string, value: ChannelInboundMessage): ChannelInboxItem {
 function routerHarness(input: { message?: ChannelInboundMessage; account?: Record<string, unknown>; binding?: CodyWorkChannelBinding | null; profile?: Record<string, unknown> | null } = {}) {
   const inbound = input.message ?? message()
   const claimed = inbox('inbox-1', inbound)
-  const account = { id: 'account-1', enabled: true, allowAllUsers: true, allowedUserIds: [], allowedConversationIds: [], groupMentionMode: 'always', ...input.account }
+  const account = { id: 'account-1', enabled: true, allowAllUsers: true, allowAllConversations: false, allowedUserIds: [], allowedConversationIds: [], groupMentionMode: 'always', ...input.account }
   const store = {
     getGroupProfile: vi.fn(() => input.profile ?? null), claimInbound: vi.fn((value: ChannelInboundMessage) => ({ item: { ...claimed, message: value }, created: true })),
     listAccounts: vi.fn(() => [account]), updateRuntime: vi.fn(), findBinding: vi.fn(() => input.binding ?? null),
@@ -130,6 +130,24 @@ describe('CodyWork channel architecture and lifecycle', () => {
     expect(test.hooks.submitInbox).not.toHaveBeenCalled()
   })
 
+  it('accepts an addressed message from any group when the group allowlist is disabled', async () => {
+    const incoming = message()
+    incoming.conversation = { id: 'group-anywhere', scope: 'group' }
+    const test = routerHarness({ message: incoming, account: { allowAllConversations: true } })
+    await test.router.onMessage(incoming)
+    expect(test.bindings.requestWorkspace).toHaveBeenCalledWith(test.claimed.id)
+    expect(test.store.updateInbox).not.toHaveBeenCalledWith(test.claimed.id, 'ignored', expect.anything())
+  })
+
+  it('still rejects a group outside the configured allowlist when unrestricted groups are disabled', async () => {
+    const incoming = message()
+    incoming.conversation = { id: 'group-denied', scope: 'group' }
+    const test = routerHarness({ message: incoming })
+    await test.router.onMessage(incoming)
+    expect(test.store.updateInbox).toHaveBeenCalledWith(test.claimed.id, 'ignored', { lastError: 'conversation_denied' })
+    expect(test.bindings.requestWorkspace).not.toHaveBeenCalled()
+  })
+
   it('normalizes a configured group root to topic identity before Inbox claim', async () => {
     const incoming = message()
     incoming.conversation = { id: 'group-1', scope: 'group' }
@@ -174,7 +192,7 @@ describe('CodyWork channel architecture and lifecycle', () => {
   it('rolls an account update back when the replacement provider cannot reconnect', async () => {
     const previous: ChannelAccountSecret = {
       id: 'account-1', provider: 'feishu', name: 'Stable', appId: 'cli_stable', appSecret: 'secret', appSecretConfigured: true, domain: 'feishu', enabled: true,
-      allowAllUsers: false, allowedUserIds: ['user-1'], allowedConversationIds: [], groupMentionMode: 'always', privateConversationMode: 'chat', botOpenId: '', botName: '',
+      allowAllUsers: false, allowAllConversations: false, allowedUserIds: ['user-1'], allowedConversationIds: [], groupMentionMode: 'always', privateConversationMode: 'chat', botOpenId: '', botName: '',
       connectionState: 'connected', lastError: '', lastCloseCode: null, lastCloseReason: '', lastDisconnectedAt: null, reconnectAttempts: 0, nextReconnectAt: null,
       connectedAt: null, lastEventAt: null, lastDeliveryAt: null, createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z',
     }

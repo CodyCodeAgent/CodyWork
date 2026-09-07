@@ -80,11 +80,23 @@ describe('CodyWork channel persistence', () => {
     const db = new WorkbenchDb(path)
     const store = new ChannelStore(db)
     const account = store.saveAccount(null, { name: 'Test Bot', appId: 'cli_test', appSecret: 'super-secret' })
-    expect(account).toMatchObject({ enabled: false, allowAllUsers: false, allowedUserIds: [], allowedConversationIds: [] })
+    expect(account).toMatchObject({ enabled: false, allowAllUsers: false, allowAllConversations: false, allowedUserIds: [], allowedConversationIds: [] })
     expect(store.getAccount(account.id).appSecret).toBe('super-secret')
     db.close()
     expect(readFileSync(path).includes(Buffer.from('super-secret'))).toBe(false)
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it('persists an explicit allow-all-groups policy independently from user access', () => {
+    const db = new WorkbenchDb(':memory:')
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, {
+      name: 'Open Group Bot', appId: 'cli_open_groups', appSecret: 'secret',
+      allowAllConversations: true, allowAllUsers: false, allowedUserIds: ['ou_admin'],
+    })
+    expect(account).toMatchObject({ allowAllConversations: true, allowAllUsers: false, allowedUserIds: ['ou_admin'] })
+    expect(store.getAccount(account.id)).toMatchObject({ allowAllConversations: true })
+    db.close()
   })
 
   it('persists Workspace search bindings without inventing a Demand target', () => {

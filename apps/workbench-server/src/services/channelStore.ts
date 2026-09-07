@@ -11,6 +11,7 @@ export type ChannelAccountInput = {
   domain?: 'feishu' | 'lark'
   enabled?: boolean
   allowAllUsers?: boolean
+  allowAllConversations?: boolean
   allowedUserIds?: string[]
   allowedConversationIds?: string[]
   groupMentionMode?: 'always' | 'bound'
@@ -26,6 +27,7 @@ export type ChannelAccount = {
   domain: 'feishu' | 'lark'
   enabled: boolean
   allowAllUsers: boolean
+  allowAllConversations: boolean
   allowedUserIds: string[]
   allowedConversationIds: string[]
   groupMentionMode: 'always' | 'bound'
@@ -50,7 +52,7 @@ export type ChannelAccountSecret = ChannelAccount & { appSecret: string }
 
 type AccountRow = {
   id: string; provider: string; name: string; app_id: string; secret_cipher: string; domain: string; enabled: number
-  allow_all_users: number; allowed_user_ids_json: string; allowed_conversation_ids_json: string
+  allow_all_users: number; allow_all_conversations: number; allowed_user_ids_json: string; allowed_conversation_ids_json: string
   group_mention_mode: string; private_conversation_mode: string; bot_open_id: string | null; bot_name: string | null
   connection_state: string; last_error: string | null; connected_at: string | null; last_event_at: string | null
   last_close_code: number | null; last_close_reason: string | null; last_disconnected_at: string | null
@@ -174,6 +176,7 @@ function toAccount(row: AccountRow): ChannelAccount {
   return {
     id: row.id, provider: 'feishu', name: row.name, appId: row.app_id, appSecretConfigured: Boolean(row.secret_cipher),
     domain: row.domain === 'lark' ? 'lark' : 'feishu', enabled: Boolean(row.enabled), allowAllUsers: Boolean(row.allow_all_users),
+    allowAllConversations: Boolean(row.allow_all_conversations),
     allowedUserIds: parseStringList(row.allowed_user_ids_json), allowedConversationIds: parseStringList(row.allowed_conversation_ids_json),
     groupMentionMode: row.group_mention_mode === 'bound' ? 'bound' : 'always', privateConversationMode: row.private_conversation_mode === 'topic' ? 'topic' : 'chat',
     botOpenId: row.bot_open_id ?? '', botName: row.bot_name ?? '', connectionState: row.connection_state,
@@ -268,18 +271,18 @@ export class ChannelStore implements ChannelOutboxStore {
       const accountId = makeId('channel')
       const secret = input.appSecret?.trim() ?? ''
       this.database.db.prepare(`INSERT INTO channel_accounts (
-        id, provider, name, app_id, secret_cipher, domain, enabled, allow_all_users, allowed_user_ids_json,
+        id, provider, name, app_id, secret_cipher, domain, enabled, allow_all_users, allow_all_conversations, allowed_user_ids_json,
         allowed_conversation_ids_json, group_mention_mode, private_conversation_mode, connection_state, created_at, updated_at
-      ) VALUES (?, 'feishu', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`)
+      ) VALUES (?, 'feishu', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`)
         .run(accountId, name, appId, sealChannelCredential(secret, accountId, this.database.path), input.domain === 'lark' ? 'lark' : 'feishu', input.enabled ? 1 : 0,
-          input.allowAllUsers ? 1 : 0, JSON.stringify(users), JSON.stringify(conversations), input.groupMentionMode === 'bound' ? 'bound' : 'always',
+          input.allowAllUsers ? 1 : 0, input.allowAllConversations ? 1 : 0, JSON.stringify(users), JSON.stringify(conversations), input.groupMentionMode === 'bound' ? 'bound' : 'always',
           input.privateConversationMode === 'topic' ? 'topic' : 'chat', now, now)
       return toAccount(this.database.db.prepare('SELECT * FROM channel_accounts WHERE id = ?').get(accountId) as AccountRow)
     }
     const current = this.getAccount(id)
     const secretCipher = input.appSecret?.trim() ? sealChannelCredential(input.appSecret.trim(), id, this.database.path)
       : (this.database.db.prepare('SELECT secret_cipher FROM channel_accounts WHERE id = ?').get(id) as { secret_cipher: string }).secret_cipher
-    this.database.db.prepare(`UPDATE channel_accounts SET name = ?, app_id = ?, secret_cipher = ?, domain = ?, enabled = ?, allow_all_users = ?,
+    this.database.db.prepare(`UPDATE channel_accounts SET name = ?, app_id = ?, secret_cipher = ?, domain = ?, enabled = ?, allow_all_users = ?, allow_all_conversations = ?,
       allowed_user_ids_json = ?, allowed_conversation_ids_json = ?, group_mention_mode = ?, private_conversation_mode = ?,
       bot_open_id = CASE WHEN app_id = ? THEN bot_open_id ELSE NULL END, bot_name = CASE WHEN app_id = ? THEN bot_name ELSE NULL END,
       connection_state = CASE WHEN app_id = ? THEN connection_state ELSE 'idle' END, last_error = NULL,
@@ -289,7 +292,7 @@ export class ChannelStore implements ChannelOutboxStore {
       reconnect_attempts = CASE WHEN app_id = ? THEN reconnect_attempts ELSE 0 END,
       next_reconnect_at = CASE WHEN app_id = ? THEN next_reconnect_at ELSE NULL END,
       updated_at = ? WHERE id = ?`)
-      .run(name, appId, secretCipher, input.domain === 'lark' ? 'lark' : 'feishu', input.enabled ? 1 : 0, input.allowAllUsers ? 1 : 0,
+      .run(name, appId, secretCipher, input.domain === 'lark' ? 'lark' : 'feishu', input.enabled ? 1 : 0, input.allowAllUsers ? 1 : 0, input.allowAllConversations ? 1 : 0,
         JSON.stringify(users), JSON.stringify(conversations), input.groupMentionMode === 'bound' ? 'bound' : 'always', input.privateConversationMode === 'topic' ? 'topic' : 'chat',
         current.appId, current.appId, current.appId, current.appId, current.appId, current.appId, current.appId, current.appId, now, id)
     return toAccount(this.database.db.prepare('SELECT * FROM channel_accounts WHERE id = ?').get(id) as AccountRow)
@@ -297,13 +300,13 @@ export class ChannelStore implements ChannelOutboxStore {
 
   restoreAccount(account: ChannelAccountSecret): void {
     const result = this.database.db.prepare(`UPDATE channel_accounts SET
-      name = ?, app_id = ?, secret_cipher = ?, domain = ?, enabled = ?, allow_all_users = ?,
+      name = ?, app_id = ?, secret_cipher = ?, domain = ?, enabled = ?, allow_all_users = ?, allow_all_conversations = ?,
       allowed_user_ids_json = ?, allowed_conversation_ids_json = ?, group_mention_mode = ?, private_conversation_mode = ?,
       bot_open_id = ?, bot_name = ?, connection_state = ?, last_error = ?, connected_at = ?, last_event_at = ?,
       last_delivery_at = ?, last_close_code = ?, last_close_reason = ?, last_disconnected_at = ?, reconnect_attempts = ?,
       next_reconnect_at = ?, updated_at = ? WHERE id = ?`)
       .run(account.name, account.appId, sealChannelCredential(account.appSecret, account.id, this.database.path), account.domain,
-        account.enabled ? 1 : 0, account.allowAllUsers ? 1 : 0, JSON.stringify(account.allowedUserIds),
+        account.enabled ? 1 : 0, account.allowAllUsers ? 1 : 0, account.allowAllConversations ? 1 : 0, JSON.stringify(account.allowedUserIds),
         JSON.stringify(account.allowedConversationIds), account.groupMentionMode, account.privateConversationMode,
         account.botOpenId || null, account.botName || null, account.connectionState, account.lastError || null,
         account.connectedAt, account.lastEventAt, account.lastDeliveryAt, account.lastCloseCode, account.lastCloseReason || null,

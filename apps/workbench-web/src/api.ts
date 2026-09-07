@@ -249,6 +249,7 @@ export interface FeishuChannelAccount {
   domain: 'feishu' | 'lark'
   enabled: boolean
   allowAllUsers: boolean
+  allowAllConversations: boolean
   allowedUserIds: string[]
   allowedConversationIds: string[]
   groupMentionMode: 'always' | 'bound'
@@ -276,6 +277,7 @@ export interface FeishuChannelAccountInput {
   domain: 'feishu' | 'lark'
   enabled: boolean
   allowAllUsers: boolean
+  allowAllConversations: boolean
   allowedUserIds: string[]
   allowedConversationIds: string[]
   groupMentionMode: 'always' | 'bound'

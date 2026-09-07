@@ -32,7 +32,8 @@
           </div>
           <label class="check"><input v-model="form.allowAllUsers" type="checkbox" /><span><strong>允许所有用户</strong><small>仅建议在受控测试环境临时开启；关闭时必须填写允许用户 ID。</small></span></label>
           <label><span>允许用户 open_id</span><textarea v-model="form.allowedUserIds" :disabled="form.allowAllUsers" rows="3" placeholder="每行一个 open_id；当前不支持 union_id" /></label>
-          <label><span>允许群聊 ID</span><textarea v-model="form.allowedConversationIds" rows="3" placeholder="每行一个 chat_id；留空表示拒绝所有群聊" /></label>
+          <label class="check"><input v-model="form.allowAllConversations" type="checkbox" /><span><strong>允许所有群聊</strong><small>机器人被加入任意群后均可使用；用户授权和 @ 触发规则仍然生效。</small></span></label>
+          <label><span>允许群聊 ID</span><textarea v-model="form.allowedConversationIds" :disabled="form.allowAllConversations" rows="3" placeholder="每行一个 chat_id；关闭“允许所有群聊”时生效" /></label>
           <label class="enable"><input v-model="form.enabled" type="checkbox" /><span><strong>启用长连接</strong><small>保存后立即验证身份并连接飞书事件流；不会重启 Codex App Server。</small></span></label>
           <div v-if="message" :class="['message', messageType]" role="status">{{ message }}</div>
           <div class="actions"><button v-if="form.id" class="danger" type="button" :disabled="busy" @click="remove">删除</button><button v-else-if="accounts.length" type="button" :disabled="busy" @click="cancelCreate">取消</button><span /><button v-if="form.id" type="button" :disabled="busy || !selected?.enabled" :title="selected?.enabled ? '重新建立飞书长连接' : '请先启用并保存机器人'" @click="reconnect">重新连接</button><button class="primary" type="submit" :disabled="busy">{{ busy ? '处理中…' : form.id ? '保存配置' : '创建机器人' }}</button></div>
@@ -48,7 +49,7 @@
           <details><summary>已绑定对话（{{ bindings.length }}）</summary><div class="bindings"><div v-for="binding in bindings" :key="binding.id"><span><strong>{{ binding.conversationTitle }}</strong><small>{{ binding.targetType === 'codywork-workspace' ? 'Workspace 只读搜索' : 'Demand Worktree' }} · {{ binding.channelScope }} · {{ binding.channelConversationId }}</small></span><code :title="`原生 Thread：${binding.threadId}`">{{ binding.threadId }}</code></div><p v-if="!bindings.length">尚无绑定。首次给机器人发消息后会出现选择卡片。</p></div></details>
         </section>
 
-        <section class="setup-guide"><div class="kicker">FEISHU SETUP</div><h3>开放平台准备</h3><ol><li>为应用启用机器人能力及消息读写权限。</li><li>事件订阅选择“使用长连接接收事件”，订阅 <code>im.message.receive_v1</code>。</li><li>卡片回调启用长连接，供绑定、审批和问题回答使用。</li><li>发布应用版本，并将机器人加入允许的测试会话。</li></ol></section>
+        <section class="setup-guide"><div class="kicker">FEISHU SETUP</div><h3>开放平台准备</h3><ol><li>为应用启用机器人能力及消息读写权限。</li><li>事件订阅选择“使用长连接接收事件”，订阅 <code>im.message.receive_v1</code>。</li><li>卡片回调启用长连接，供绑定、审批和问题回答使用。</li><li>发布应用版本，并按需配置群白名单或开启“允许所有群聊”。</li></ol></section>
       </main>
     </div>
   </div>
@@ -69,7 +70,7 @@ const messageType = ref<'ok' | 'error'>('ok')
 let detailsRequestVersion = 0
 let connectionTimer: ReturnType<typeof setTimeout> | null = null
 let connectionPolls = 0
-const form = reactive({ id: '', name: '', appId: '', appSecret: '', domain: 'feishu' as 'feishu' | 'lark', enabled: false, allowAllUsers: false, allowedUserIds: '', allowedConversationIds: '', groupMentionMode: 'always' as 'always' | 'bound', privateConversationMode: 'chat' as 'topic' | 'chat' })
+const form = reactive({ id: '', name: '', appId: '', appSecret: '', domain: 'feishu' as 'feishu' | 'lark', enabled: false, allowAllUsers: false, allowAllConversations: false, allowedUserIds: '', allowedConversationIds: '', groupMentionMode: 'always' as 'always' | 'bound', privateConversationMode: 'chat' as 'topic' | 'chat' })
 const selected = computed(() => accounts.value.find(account => account.id === selectedId.value))
 const isCreating = computed(() => !form.id)
 
@@ -78,7 +79,7 @@ function stateLabel(value: string): string { return ({ connected: '已连接', c
 function formatTime(value?: string | null): string { if (!value) return '尚无'; const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString() }
 function showError(error: unknown): void { messageType.value = 'error'; message.value = error instanceof Error ? error.message : String(error) }
 function fill(account?: FeishuChannelAccount): void {
-  Object.assign(form, account ? { id: account.id, name: account.name, appId: account.appId, appSecret: '', domain: account.domain, enabled: account.enabled, allowAllUsers: account.allowAllUsers, allowedUserIds: account.allowedUserIds.join('\n'), allowedConversationIds: account.allowedConversationIds.join('\n'), groupMentionMode: account.groupMentionMode, privateConversationMode: account.privateConversationMode } : { id: '', name: '', appId: '', appSecret: '', domain: 'feishu', enabled: false, allowAllUsers: false, allowedUserIds: '', allowedConversationIds: '', groupMentionMode: 'always', privateConversationMode: 'chat' })
+  Object.assign(form, account ? { id: account.id, name: account.name, appId: account.appId, appSecret: '', domain: account.domain, enabled: account.enabled, allowAllUsers: account.allowAllUsers, allowAllConversations: account.allowAllConversations, allowedUserIds: account.allowedUserIds.join('\n'), allowedConversationIds: account.allowedConversationIds.join('\n'), groupMentionMode: account.groupMentionMode, privateConversationMode: account.privateConversationMode } : { id: '', name: '', appId: '', appSecret: '', domain: 'feishu', enabled: false, allowAllUsers: false, allowAllConversations: false, allowedUserIds: '', allowedConversationIds: '', groupMentionMode: 'always', privateConversationMode: 'chat' })
 }
 async function load(preferredId = selectedId.value): Promise<void> {
   accounts.value = await api.listFeishuAccounts()
@@ -129,7 +130,7 @@ async function refreshDetails(): Promise<void> {
     if (requestVersion === detailsRequestVersion) detailsBusy.value = false
   }
 }
-function payload() { return { name: form.name, appId: form.appId, ...(form.appSecret ? { appSecret: form.appSecret } : {}), domain: form.domain, enabled: form.enabled, allowAllUsers: form.allowAllUsers, allowedUserIds: lines(form.allowedUserIds), allowedConversationIds: lines(form.allowedConversationIds), groupMentionMode: form.groupMentionMode, privateConversationMode: form.privateConversationMode } }
+function payload() { return { name: form.name, appId: form.appId, ...(form.appSecret ? { appSecret: form.appSecret } : {}), domain: form.domain, enabled: form.enabled, allowAllUsers: form.allowAllUsers, allowAllConversations: form.allowAllConversations, allowedUserIds: lines(form.allowedUserIds), allowedConversationIds: lines(form.allowedConversationIds), groupMentionMode: form.groupMentionMode, privateConversationMode: form.privateConversationMode } }
 async function save(): Promise<void> { busy.value = true; message.value = ''; try { const saved = form.id ? await api.updateFeishuAccount(form.id, payload()) : await api.createFeishuAccount(payload()); await load(saved.id); messageType.value = 'ok'; message.value = saved.enabled ? '配置已保存。长连接状态请以运行诊断为准。' : '配置已保存，机器人尚未启用。' } catch (error) { showError(error) } finally { busy.value = false } }
 async function reconnect(): Promise<void> {
   const accountId = form.id

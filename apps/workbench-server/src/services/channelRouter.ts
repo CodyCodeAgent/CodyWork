@@ -64,7 +64,7 @@ export class ChannelRouter {
   private allowed(account: ChannelAccount, message: ChannelInboundMessage, binding: CodyWorkChannelBinding | null): { allowed: boolean; reason: string } {
     if (message.sender.type !== 'user') return { allowed: false, reason: 'non_user' }
     if (!message.sender.id) return { allowed: false, reason: 'missing_sender' }
-    if (message.conversation.scope !== 'private' && !account.allowedConversationIds.includes(message.conversation.id)) return { allowed: false, reason: 'conversation_denied' }
+    if (message.conversation.scope !== 'private' && !account.allowAllConversations && !account.allowedConversationIds.includes(message.conversation.id)) return { allowed: false, reason: 'conversation_denied' }
     if (message.mentionsOtherRecipient) return { allowed: false, reason: 'addressed_elsewhere' }
     if (message.conversation.scope !== 'private' && account.groupMentionMode === 'always' && !message.addressedToAgent) return { allowed: false, reason: 'mention_required' }
     if (message.conversation.scope !== 'private' && account.groupMentionMode === 'bound' && !binding && !message.addressedToAgent) return { allowed: false, reason: 'mention_required' }

@@ -249,6 +249,7 @@ function channelAccountInput(body: Record<string, unknown>) {
     domain: body.domain === 'lark' ? 'lark' as const : 'feishu' as const,
     enabled: body.enabled === true,
     allowAllUsers: body.allowAllUsers === true,
+    allowAllConversations: body.allowAllConversations === true,
     allowedUserIds: stringArray(body.allowedUserIds),
     allowedConversationIds: stringArray(body.allowedConversationIds),
     groupMentionMode: body.groupMentionMode === 'bound' ? 'bound' as const : 'always' as const,

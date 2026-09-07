@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../api', () => ({ api }))
 
 function account(id: string, enabled = false) {
-  return { id, provider: 'feishu', name: `Bot ${id}`, appId: `cli_${id}`, appSecretConfigured: true, domain: 'feishu', enabled, allowAllUsers: false, allowedUserIds: ['ou_test'], allowedConversationIds: [], groupMentionMode: 'always', privateConversationMode: 'chat', botOpenId: '', botName: '', connectionState: enabled ? 'connected' : 'idle', lastError: '', lastCloseCode: null, lastCloseReason: '', lastDisconnectedAt: null, reconnectAttempts: 0, nextReconnectAt: null, connectedAt: null, lastEventAt: null, lastDeliveryAt: null, createdAt: '', updatedAt: '' }
+  return { id, provider: 'feishu', name: `Bot ${id}`, appId: `cli_${id}`, appSecretConfigured: true, domain: 'feishu', enabled, allowAllUsers: false, allowAllConversations: false, allowedUserIds: ['ou_test'], allowedConversationIds: [], groupMentionMode: 'always', privateConversationMode: 'chat', botOpenId: '', botName: '', connectionState: enabled ? 'connected' : 'idle', lastError: '', lastCloseCode: null, lastCloseReason: '', lastDisconnectedAt: null, reconnectAttempts: 0, nextReconnectAt: null, connectedAt: null, lastEventAt: null, lastDeliveryAt: null, createdAt: '', updatedAt: '' }
 }
 
 function diagnostics(id: string) {
@@ -33,6 +33,28 @@ describe('FeishuChannelSettings', () => {
     expect(wrapper.text()).toContain('允许用户 open_id')
     expect(wrapper.find('textarea[placeholder*="open_id"]').attributes('placeholder')).toContain('不支持 union_id')
     expect(api.reconnectFeishuAccount).not.toHaveBeenCalled()
+  })
+
+  it('can allow every group while keeping user authorization enabled', async () => {
+    const configured = account('groups')
+    api.listFeishuAccounts.mockResolvedValue([configured])
+    api.feishuDiagnostics.mockResolvedValue(diagnostics('groups'))
+    api.listFeishuBindings.mockResolvedValue([])
+    api.updateFeishuAccount.mockResolvedValue({ ...configured, allowAllConversations: true })
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    const allowAllGroups = wrapper.findAll('label.check').find(label => label.text().includes('允许所有群聊'))!
+    await allowAllGroups.find('input').setValue(true)
+    expect(wrapper.find('textarea[placeholder*="chat_id"]').attributes('disabled')).toBeDefined()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(api.updateFeishuAccount).toHaveBeenCalledWith('groups', expect.objectContaining({
+      allowAllConversations: true,
+      allowAllUsers: false,
+    }))
+    wrapper.unmount()
   })
 
   it('ignores stale diagnostics when accounts are switched quickly', async () => {
