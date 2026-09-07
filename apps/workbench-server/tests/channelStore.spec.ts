@@ -367,4 +367,31 @@ describe('CodyWork channel persistence', () => {
     db.close()
     rmSync(root, { recursive: true, force: true })
   })
+
+  it('reassigns an undelivered pending access request when the application owner changes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-channel-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    const store = new ChannelStore(db)
+    const account = store.saveAccount(null, {
+      name: 'Test Bot', appId: 'cli_access_reassign', appSecret: 'secret', allowAllUsers: false, allowedUserIds: ['ou_old_owner'],
+    })
+    const firstSource = store.claimInbound({ ...inbound(account.id), eventId: 'event-old', messageId: 'message-old', sender: { id: 'ou_guest', type: 'user' } }).item
+    const first = store.createAccessRequest({
+      accountId: account.id, requesterIdentity: 'ou_guest', administratorIdentity: 'ou_old_owner', sourceInboxId: firstSource.id,
+      sourceConversationId: 'chat-1', sourceScope: 'private', sourceMessageId: firstSource.message.messageId,
+      createdAtIso: '2026-09-05T00:00:00.000Z', expiresAtIso: '2026-09-12T00:00:00.000Z',
+    })
+    const secondSource = store.claimInbound({ ...inbound(account.id), eventId: 'event-new', messageId: 'message-new', sender: { id: 'ou_guest', type: 'user' } }).item
+    const reassigned = store.createAccessRequest({
+      accountId: account.id, requesterIdentity: 'ou_guest', administratorIdentity: 'ou_current_owner', sourceInboxId: secondSource.id,
+      sourceConversationId: 'chat-2', sourceScope: 'topic', sourceMessageId: secondSource.message.messageId,
+      createdAtIso: '2026-09-06T00:00:00.000Z', expiresAtIso: '2026-09-13T00:00:00.000Z',
+    })
+
+    expect(reassigned).toMatchObject({ created: false, deliveryRequired: true, request: {
+      id: first.request.id, administratorIdentity: 'ou_current_owner', sourceConversationId: 'chat-2', sourceScope: 'topic', adminRemoteMessageId: '',
+    } })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
 })

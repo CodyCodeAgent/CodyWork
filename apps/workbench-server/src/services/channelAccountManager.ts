@@ -46,6 +46,11 @@ export type ChannelAccountManagerHooks = {
 
 export type ChannelProviderFactory = (options: ConstructorParameters<typeof FeishuProvider>[0]) => FeishuProvider
 
+export type ChannelAdministratorResolution = {
+  identities: string[]
+  ownerIdentity: string
+}
+
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
@@ -95,6 +100,24 @@ export class ChannelAccountManager {
   refreshAccount(accountId: string): void {
     const runtime = this.runtimes.get(accountId)
     if (runtime) runtime.account = this.repositories.accounts.get(accountId)
+  }
+
+  async resolveAdministrators(accountId: string): Promise<ChannelAdministratorResolution> {
+    const runtime = this.runtimes.get(accountId)
+    if (!runtime) throw new Error('飞书机器人当前未连接')
+    try {
+      const application = await runtime.provider.applicationAdministrators()
+      this.repositories.audit.record(accountId, 'channel.administrators.resolved', 'channel_account', accountId, true, {
+        source: 'application', count: application.administratorIds.length, ownerConfigured: Boolean(application.ownerId),
+      })
+      return { identities: application.administratorIds, ownerIdentity: application.ownerId }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.repositories.audit.record(accountId, 'channel.administrators.resolve_failed', 'channel_account', accountId, false, {
+        source: 'application',
+      }, message)
+      throw new Error(`无法读取当前飞书应用的所有者或管理员。请开通“管理应用自身资源”权限后重试。${message ? ` ${message}` : ''}`)
+    }
   }
 
   async save(id: string | null, input: ChannelAccountInput): Promise<ChannelAccount> {

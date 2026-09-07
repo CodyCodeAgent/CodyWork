@@ -81,7 +81,7 @@ must not contain provider callbacks, routing policy or event reduction.
 | `ChannelRouter` | inbound authorization, private/group/topic routing, binding wizard and slash commands |
 | `ChannelBindingService` | Workspace/Demand/conversation selection and durable binding/group defaults |
 | `ChannelCommandAdapter` | durable Inbox payload and attachments into the shared command gateway |
-| `ChannelAccessService` | signed administrator access requests and allowlist updates |
+| `ChannelAccessService` | signed access requests to the current Feishu application's owner/administrators and allowlist updates |
 | `ChannelRequestBridge` | approval/question cards and symmetric browser/Feishu resolution |
 | `ChannelProjectionService` | canonical event observation, per-Turn card revisions and terminal convergence |
 | `ChannelDeliveryWorker` | serialized durable Outbox delivery for one account |

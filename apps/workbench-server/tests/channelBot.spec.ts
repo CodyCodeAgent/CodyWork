@@ -171,7 +171,7 @@ describe('CodyWork channel architecture and lifecycle', () => {
     const db = new WorkbenchDb(join(root, 'workspace.db'))
     try {
       const store = new ChannelStore(db)
-      const account = store.saveAccount(null, { name: 'Bot', appId: 'cli_access', appSecret: 'secret', allowAllUsers: false, allowedUserIds: ['ou_owner'] })
+      const account = store.saveAccount(null, { name: 'Bot', appId: 'cli_access', appSecret: 'secret', allowAllUsers: false, allowedUserIds: ['ou_stale_owner'] })
       const incoming = message('grant', 'access')
       incoming.accountId = account.id
       incoming.sender.id = 'ou_guest'
@@ -180,12 +180,38 @@ describe('CodyWork channel architecture and lifecycle', () => {
       const access = new ChannelAccessService(new ChannelRepositories(store), async (_accountId, delivery) => {
         deliveries.push(delivery)
         return { id: `outbox-${deliveries.length}`, remoteMessageId: delivery.kind === 'send_user_card' ? 'admin-card' : undefined } as never
-      }, vi.fn(), () => new Date('2026-09-05T00:00:00.000Z'))
+      }, async () => ({ identities: ['ou_owner'], ownerIdentity: 'ou_owner' }), vi.fn(), () => new Date('2026-09-05T00:00:00.000Z'))
       await access.request(account, incoming, source.id)
+      expect(deliveries[0]).toMatchObject({ kind: 'send_user_card', targetId: 'ou_owner' })
       const token = String(findActionValue(deliveries[0].payload.card, 'channel.access_approve')?.accessRequestToken ?? '')
       await expect(access.handleAction(account.id, { value: { action: 'channel.access_approve', accessRequestToken: `${token}x` }, actorId: 'ou_owner', remoteMessageId: 'admin-card', eventId: 'bad' })).rejects.toThrow('校验失败')
       await access.handleAction(account.id, { value: { action: 'channel.access_approve', accessRequestToken: token }, actorId: 'ou_owner', remoteMessageId: 'admin-card', eventId: 'ok' })
-      expect(store.listAccounts()).toMatchObject([{ allowedUserIds: ['ou_owner', 'ou_guest'] }])
+      expect(store.listAccounts()).toMatchObject([{ allowedUserIds: ['ou_stale_owner', 'ou_guest'] }])
+    } finally { db.close(); await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('reports a permanent administrator-card failure instead of claiming approval is pending', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'codywork-access-delivery-'))
+    const db = new WorkbenchDb(join(root, 'workspace.db'))
+    try {
+      const store = new ChannelStore(db)
+      const account = store.saveAccount(null, { name: 'Bot', appId: 'cli_access', appSecret: 'secret', allowAllUsers: false })
+      const incoming = message('request', 'access-failed')
+      incoming.accountId = account.id
+      incoming.sender.id = 'ou_guest'
+      const source = store.claimInbound(incoming).item
+      const deliveries: any[] = []
+      const access = new ChannelAccessService(new ChannelRepositories(store), async (_accountId, delivery) => {
+        deliveries.push(delivery)
+        return delivery.kind === 'send_user_card'
+          ? { id: 'admin-outbox', status: 'dead_letter', lastError: 'open_id cross app' }
+          : { id: 'feedback-outbox', status: 'sent' } as never
+      }, async () => ({ identities: ['ou_owner'], ownerIdentity: 'ou_owner' }), vi.fn())
+
+      await access.request(account, incoming, source.id)
+
+      expect(deliveries.at(-1)?.payload.text).toContain('未能送达当前应用管理员')
+      expect(store.getInbox(source.id).lastError).toBe('access_request_delivery_failed')
     } finally { db.close(); await rm(root, { recursive: true, force: true }) }
   })
 

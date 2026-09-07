@@ -324,7 +324,7 @@ export class ChannelStore implements ChannelOutboxStore {
     sourceMessageId: string
     createdAtIso: string
     expiresAtIso: string
-  }): { request: ChannelAccessRequest; created: boolean } {
+  }): { request: ChannelAccessRequest; created: boolean; deliveryRequired: boolean } {
     const id = makeId('access')
     try {
       this.database.db.exec('BEGIN IMMEDIATE')
@@ -333,8 +333,21 @@ export class ChannelStore implements ChannelOutboxStore {
       const existing = this.database.db.prepare("SELECT * FROM channel_access_requests WHERE account_id = ? AND requester_identity = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1")
         .get(input.accountId, input.requesterIdentity) as Record<string, unknown> | undefined
       if (existing) {
+        const request = toAccessRequest(existing)
+        const deliveryRequired = request.administratorIdentity !== input.administratorIdentity || !request.adminRemoteMessageId
+        if (deliveryRequired) {
+          this.database.db.prepare(`UPDATE channel_access_requests SET administrator_identity = ?, source_inbox_id = ?,
+            source_conversation_id = ?, source_scope = ?, source_message_id = ?, expires_at = ?, admin_remote_message_id = NULL, updated_at = ?
+            WHERE id = ? AND status = 'pending'`).run(
+            input.administratorIdentity, input.sourceInboxId, input.sourceConversationId, input.sourceScope,
+            input.sourceMessageId, input.expiresAtIso, input.createdAtIso, request.id,
+          )
+          const refreshed = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE id = ?').get(request.id) as Record<string, unknown>
+          this.database.db.exec('COMMIT')
+          return { request: toAccessRequest(refreshed), created: false, deliveryRequired: true }
+        }
         this.database.db.exec('COMMIT')
-        return { request: toAccessRequest(existing), created: false }
+        return { request, created: false, deliveryRequired: false }
       }
       this.database.db.prepare(`INSERT INTO channel_access_requests (
         id, account_id, requester_identity, administrator_identity, source_inbox_id, source_conversation_id,
@@ -346,7 +359,7 @@ export class ChannelStore implements ChannelOutboxStore {
       )
       const row = this.database.db.prepare('SELECT * FROM channel_access_requests WHERE id = ?').get(id) as Record<string, unknown>
       this.database.db.exec('COMMIT')
-      return { request: toAccessRequest(row), created: true }
+      return { request: toAccessRequest(row), created: true, deliveryRequired: true }
     } catch (error) {
       if (this.database.db.isTransaction) this.database.db.exec('ROLLBACK')
       throw error

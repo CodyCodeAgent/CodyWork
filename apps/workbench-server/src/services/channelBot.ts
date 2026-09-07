@@ -70,6 +70,7 @@ export class CodyWorkChannelService {
     this.access = new ChannelAccessService(
       this.repositories,
       (accountId, input) => this.accounts.enqueue(accountId, input),
+      accountId => this.accounts.resolveAdministrators(accountId),
       accountId => this.accounts.refreshAccount(accountId),
       () => this.now(),
     )

@@ -6,6 +6,7 @@ import {
   type ChannelAccount,
 } from './channelStore.js'
 import type { ChannelRepositoryPorts } from './channelRepositories.js'
+import type { ChannelAdministratorResolution } from './channelAccountManager.js'
 
 const ACCESS_REQUEST_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000
 
@@ -83,12 +84,32 @@ export class ChannelAccessService {
   constructor(
     private readonly repositories: ChannelRepositoryPorts,
     private readonly enqueue: (accountId: string, input: Parameters<ReliableChannelOutbox['enqueue']>[0]) => Promise<ChannelOutboxItem>,
+    private readonly resolveAdministrators: (accountId: string) => Promise<ChannelAdministratorResolution>,
     private readonly refreshAccount: (accountId: string) => void,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
   async request(account: ChannelAccount, message: ChannelInboundMessage, inboxId: string): Promise<void> {
-    const administratorIdentity = account.allowedUserIds[0]
+    let resolution: ChannelAdministratorResolution
+    try {
+      resolution = await this.resolveAdministrators(account.id)
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : String(error)
+      await this.enqueue(account.id, {
+        kind: 'reply_text', targetId: message.messageId,
+        payload: {
+          text: '访问申请未发出：机器人无法读取当前应用的所有者或管理员。请让应用所有者开通“管理应用自身资源”权限后重试。',
+          replyInThread: message.conversation.scope === 'topic',
+        },
+        dedupeKey: `${inboxId}:access-request-no-administrator`, terminal: true,
+      })
+      this.repositories.inbox.update(inboxId, 'ignored', { lastError: 'sender_denied_no_application_administrator' })
+      this.repositories.audit.record(account.id, 'channel.access.request_skipped', 'channel_inbox', inboxId, false, {
+        requesterIdentity: message.sender.id, sourceConversationId: message.conversation.id, reason: 'administrator_lookup_failed',
+      }, failure)
+      return
+    }
+    const administratorIdentity = resolution.identities[0]
     if (!/^ou_[A-Za-z0-9_-]+$/u.test(message.sender.id) || !/^ou_[A-Za-z0-9_-]+$/u.test(administratorIdentity ?? '')) {
       this.repositories.inbox.update(inboxId, 'ignored', { lastError: 'sender_denied_no_administrator' })
       this.repositories.audit.record(account.id, 'channel.access.request_skipped', 'channel_inbox', inboxId, false, {
@@ -109,30 +130,41 @@ export class ChannelAccessService {
       createdAtIso,
       expiresAtIso: new Date(now.getTime() + ACCESS_REQUEST_MAX_AGE_MS).toISOString(),
     })
-    if (result.created) {
+    let administratorDelivery: ChannelOutboxItem | null = null
+    if (result.deliveryRequired) {
       const secret = this.repositories.accounts.get(account.id).appSecret
-      const sent = await this.enqueue(account.id, {
+      administratorDelivery = await this.enqueue(account.id, {
         kind: 'send_user_card', targetId: administratorIdentity,
         payload: { card: accessRequestCard(result.request, signAccessRequest(result.request, secret)) },
-        dedupeKey: `access-request:${result.request.id}:administrator`, terminal: true,
+        dedupeKey: `access-request:${result.request.id}:administrator:${inboxId}`, terminal: true,
       })
-      if (sent.remoteMessageId) this.repositories.requests.updateAccessRemote(account.id, result.request.id, sent.remoteMessageId)
+      if (administratorDelivery.remoteMessageId) this.repositories.requests.updateAccessRemote(account.id, result.request.id, administratorDelivery.remoteMessageId)
     }
+    const delivered = !result.deliveryRequired || Boolean(administratorDelivery?.remoteMessageId)
+    const retrying = administratorDelivery?.status === 'retry_wait'
+    const failed = result.deliveryRequired && !delivered && !retrying
     await this.enqueue(account.id, {
       kind: 'reply_text', targetId: message.messageId,
       payload: {
-        text: result.created
-          ? '当前账号尚未加入机器人白名单，已向管理员发送访问申请。批准后请重新发送原消息。'
-          : '访问申请仍在等待管理员处理。批准后请重新发送原消息。',
+        text: failed
+          ? '访问申请已创建，但未能送达当前应用管理员。请联系应用所有者检查机器人权限后重新发送。'
+          : retrying
+            ? '访问申请已创建，机器人正在重试发送给当前应用管理员。送达并批准后请重新发送原消息。'
+            : result.deliveryRequired
+              ? '当前账号尚未加入机器人白名单，已向当前应用管理员发送访问申请。批准后请重新发送原消息。'
+              : '访问申请仍在等待当前应用管理员处理。批准后请重新发送原消息。',
         replyInThread: message.conversation.scope === 'topic',
       },
       dedupeKey: `${inboxId}:access-request-feedback`, terminal: true,
     })
-    this.repositories.inbox.update(inboxId, 'ignored', { lastError: result.created ? 'access_requested' : 'access_request_pending' })
-    this.repositories.audit.record(account.id, result.created ? 'channel.access.requested' : 'channel.access.request_reused', 'channel_access_request', result.request.id, true, {
+    const inboxError = failed ? 'access_request_delivery_failed' : retrying ? 'access_request_delivery_retrying'
+      : result.deliveryRequired ? 'access_requested' : 'access_request_pending'
+    this.repositories.inbox.update(inboxId, 'ignored', { lastError: inboxError })
+    this.repositories.audit.record(account.id, result.deliveryRequired ? 'channel.access.requested' : 'channel.access.request_reused', 'channel_access_request', result.request.id, !failed, {
       requesterIdentity: message.sender.id, administratorIdentity, sourceConversationId: message.conversation.id,
-      sourceScope: message.conversation.scope, inboxId,
-    })
+      sourceScope: message.conversation.scope, inboxId, administratorSource: 'application',
+      applicationOwnerIdentity: resolution.ownerIdentity, deliveryStatus: administratorDelivery?.status ?? 'already_sent',
+    }, failed ? administratorDelivery?.lastError ?? 'administrator card delivery failed' : '')
   }
 
   async handleAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
