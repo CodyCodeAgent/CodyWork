@@ -8,6 +8,7 @@ import { ChannelProjectionService } from './channelProjection.js'
 import { ChannelCommandAdapter } from './channelCommandAdapter.js'
 import { ChannelBindingService } from './channelBindingService.js'
 import { ChannelRepositories } from './channelRepositories.js'
+import { ChannelSessionSettingsService } from './channelSessionSettings.js'
 import { WorkspaceRegistry } from './workspaceRegistry.js'
 import {
   ChannelStore,
@@ -49,6 +50,7 @@ export class CodyWorkChannelService {
   private readonly projection: ChannelProjectionService
   private readonly commands: ChannelCommandAdapter
   private readonly bindings: ChannelBindingService
+  private readonly settings: ChannelSessionSettingsService
 
   constructor(
     private readonly database: WorkbenchDb,
@@ -57,6 +59,7 @@ export class CodyWorkChannelService {
     private readonly options: { publicOrigin?: string; now?: () => Date; providerFactory?: ChannelProviderFactory } = {},
   ) {
     this.repositories = new ChannelRepositories(new ChannelStore(database))
+    this.settings = new ChannelSessionSettingsService(database, this.repositories, conversations, workspaces)
     this.accounts = new ChannelAccountManager(this.repositories, {
       onMessage: message => this.router.onMessage(message),
       onAction: (accountId, action) => this.router.onAction(accountId, action),
@@ -101,6 +104,7 @@ export class CodyWorkChannelService {
       this.conversations,
       this.workspaces,
       this.projection,
+      this.settings,
       {
         provider: accountId => this.accounts.provider(accountId),
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
@@ -125,6 +129,7 @@ export class CodyWorkChannelService {
       this.access,
       this.requests,
       this.bindings,
+      this.settings,
       {
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
         submitInbox: (inboxId, binding) => this.commands.submitInbox(inboxId, binding),

@@ -12,7 +12,7 @@ import { listDemands } from './demands.js'
 import type { WorkspaceRegistry } from './workspaceRegistry.js'
 import type { ChannelPresentation, CodyWorkChannelBinding } from './channelStore.js'
 import type { ChannelRepositoryPorts } from './channelRepositories.js'
-import { commandFailureCard, projectionCard } from './channelFeishuRenderer.js'
+import { commandFailureCard, executionContextFromState, projectionCard } from './channelFeishuRenderer.js'
 
 const PROJECTION_THROTTLE_MS = 700
 const FEISHU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'])
@@ -238,7 +238,7 @@ export class ChannelProjectionService {
     if (!presentation) return
     const projection = projectChannelTurn(state, turnId, presentation.revision + 1)
     const prompt = string(presentation.state.prompt)
-    const card = projectionCard(projection, prompt, this.hooks.openUrl(binding))
+    const card = projectionCard(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext))
     let remoteMessageId = presentation.remoteMessageId
     if (!remoteMessageId) {
       const outboxId = string(presentation.state.outboxId)
@@ -265,7 +265,7 @@ export class ChannelProjectionService {
     if (!presentation) return
     let openUrl = ''
     try { openUrl = this.hooks.openUrl(this.repositories.bindings.get(presentation.bindingId)) } catch { /* removed binding */ }
-    const card = commandFailureCard(error, openUrl)
+    const card = commandFailureCard(error, openUrl, executionContextFromState(presentation.state.executionContext))
     let remoteMessageId = presentation.remoteMessageId
     if (!remoteMessageId) {
       const outboxId = string(presentation.state.outboxId)

@@ -10,6 +10,7 @@ import { ChannelProjectionService } from '../src/services/channelProjection.js'
 import { ChannelRepositories } from '../src/services/channelRepositories.js'
 import { ChannelRouter } from '../src/services/channelRouter.js'
 import { ChannelStore, type CodyWorkChannelBinding } from '../src/services/channelStore.js'
+import { ChannelSessionSettingsService } from '../src/services/channelSessionSettings.js'
 import { ConversationService } from '../src/services/conversations.js'
 import { WorkspaceRegistry } from '../src/services/workspaceRegistry.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
@@ -65,8 +66,16 @@ describe('CodyWork channel end-to-end pipeline', () => {
 
     class CapturingRuntime extends TestRuntimeAdapter {
       readonly permissions: string[] = []
+      readonly settings: Array<{ model?: string; reasoningEffort?: string } | undefined> = []
+      override async getComposerOptions() {
+        return {
+          models: [{ id: 'gpt-pipeline', label: 'GPT Pipeline', description: 'fixture', isDefault: true, defaultReasoningEffort: 'high' as const, supportedReasoningEfforts: ['medium', 'high'] as const }],
+          skills: [], collaborationModes: [],
+        }
+      }
       override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         this.permissions.push(request.executionProfile?.permissionMode ?? '')
+        this.settings.push(request.settings)
         return super.submitTurn(request)
       }
     }
@@ -78,6 +87,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
     const replyConversation = await conversations.create(workspaceId, demandId, 'Group reply conversation', 'feishu')
     const store = new ChannelStore(db)
     const repositories = new ChannelRepositories(store)
+    const settings = new ChannelSessionSettingsService(db, repositories, conversations, workspaces)
     const account = store.saveAccount(null, {
       name: 'Pipeline bot', appId: 'cli_pipeline', appSecret: 'test-secret', enabled: true,
       allowAllUsers: true, allowedConversationIds: ['oc-reply', 'oc-topic'], groupMentionMode: 'always',
@@ -89,7 +99,10 @@ describe('CodyWork channel end-to-end pipeline', () => {
       message, targetType: 'codywork-demand', workspaceId, demandId, conversationId: conversation.id,
       threadId: conversation.nativeId, ownerIdentity: 'ou-owner', permissionMode: 'yolo', notificationPolicy: 'mirror-requests',
     })
-    createBinding(privateMessage, privateConversation)
+    const privateBinding = createBinding(privateMessage, privateConversation)
+    await expect(settings.select(privateBinding.id, 'ou-owner', 'gpt-pipeline', 'none')).rejects.toThrow('不支持所选推理程度')
+    await settings.select(privateBinding.id, 'ou-owner', 'gpt-pipeline', 'medium')
+    expect(repositories.bindings.get(privateBinding.id)).toMatchObject({ model: 'gpt-pipeline', reasoningEffort: 'medium' })
     createBinding(replyMessage, replyConversation)
     repositories.bindings.saveGroupProfile({
       accountId: account.id, channelConversationId: 'oc-reply', conversationMode: 'reply',
@@ -121,7 +134,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
     const projection = new ChannelProjectionService(db, repositories, conversations, workspaces, requests as never, {
       enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true, openUrl: () => 'http://localhost/conversation',
     } as never)
-    const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, projection, {
+    const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, projection, settings, {
       provider: () => ({}) as never, enqueue, openUrl: () => 'http://localhost/conversation',
     })
     let bindings!: ChannelBindingService
@@ -132,7 +145,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
       openUrl: () => 'http://localhost/conversation',
     }
     bindings = new ChannelBindingService(db, repositories, conversations, workspaces, bindingHooks)
-    const router = new ChannelRouter(repositories, conversations, {} as never, requests as never, bindings, {
+    const router = new ChannelRouter(repositories, conversations, {} as never, requests as never, bindings, settings, {
       ...bindingHooks,
       detachBindingObservation: (binding: CodyWorkChannelBinding) => projection.detach(binding),
       accountState: () => 'connected', retryOutbox: vi.fn(), fail: vi.fn(),
@@ -150,9 +163,17 @@ describe('CodyWork channel end-to-end pipeline', () => {
       expect(inboxRows.map(row => row.status)).toEqual(['completed', 'completed', 'completed'])
       expect(inboxRows.every(row => Boolean(row.turn_id))).toBe(true)
       expect(runtime.permissions).toEqual(['yolo', 'yolo', 'yolo'])
+      expect(runtime.settings).toEqual([
+        { model: 'gpt-pipeline', reasoningEffort: 'medium' },
+        { model: 'gpt-pipeline', reasoningEffort: 'high' },
+        { model: 'gpt-pipeline', reasoningEffort: 'high' },
+      ])
 
       const initialCards = deliveries.filter(delivery => delivery.kind === 'reply_card')
       expect(initialCards).toHaveLength(3)
+      expect(JSON.stringify(initialCards)).toContain('GPT Pipeline')
+      expect(JSON.stringify(initialCards)).toContain('Channel pipeline')
+      expect(JSON.stringify(initialCards)).toContain('Verify channel')
       const initialByPrompt = new Map(initialCards.map(delivery => [
         JSON.stringify(delivery.payload), delivery,
       ]))

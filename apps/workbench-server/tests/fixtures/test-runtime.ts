@@ -59,6 +59,16 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     ]
   }
 
+  async getComposerOptions() {
+    return {
+      models: [{
+        id: 'gpt-test', label: 'GPT Test', description: 'deterministic test model', isDefault: true,
+        defaultReasoningEffort: 'high' as const, supportedReasoningEfforts: ['medium', 'high'] as Array<'medium' | 'high'>,
+      }],
+      skills: [], collaborationModes: [],
+    }
+  }
+
   async listSkillCatalog(request: RuntimeSkillCatalogRequest) {
     const context = [...this.contexts.values()].find(item => item.workspacePath === request.workspacePath)
     return (context?.instructionBundle.skills ?? []).map(skill => ({

@@ -34,7 +34,7 @@ function binding(id: string, patch: Partial<CodyWorkChannelBinding> = {}): CodyW
     createdAtIso: '2026-09-06T00:00:00.000Z', updatedAtIso: '2026-09-06T00:00:00.000Z',
     workspaceId: 'workspace-1', demandId: 'demand-1', conversationId: 'conversation-1',
     channelConversationId: `chat-${id}`, channelScope: 'private', channelRootId: '',
-    permissionMode: 'workspace-write', notificationPolicy: 'mirror-requests', ...patch,
+    permissionMode: 'workspace-write', model: '', reasoningEffort: '', notificationPolicy: 'mirror-requests', ...patch,
   }
 }
 
@@ -81,7 +81,7 @@ describe('CodyWork channel components', () => {
       audit: vi.fn(),
     }
     const projection = { observe: vi.fn(async () => undefined), scheduleRender: vi.fn() }
-    const adapter = new ChannelCommandAdapter({} as never, new ChannelRepositories(store as never), {} as never, {} as never, projection as never, {} as never)
+    const adapter = new ChannelCommandAdapter({} as never, new ChannelRepositories(store as never), {} as never, {} as never, projection as never, {} as never, {} as never)
     const submit = vi.spyOn(adapter, 'submitInbox').mockResolvedValue(undefined)
 
     await adapter.recoverInbox('account-1')

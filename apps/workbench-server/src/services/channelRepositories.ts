@@ -31,6 +31,7 @@ export class BindingRepository {
   groupProfile(accountId: string, channelConversationId: string) { return this.store.getGroupProfile(accountId, channelConversationId) }
   saveGroupProfile(input: Omit<ChannelGroupProfile, 'createdAtIso' | 'updatedAtIso'>) { return this.store.saveGroupProfile(input) }
   create(input: Parameters<ChannelStore['createBinding']>[0]) { return this.store.createBinding(input) }
+  updateModel(accountId: string, bindingId: string, model: string, reasoningEffort: string) { return this.store.updateBindingModel(accountId, bindingId, model, reasoningEffort) }
   delete(accountId: string, conversationKey: string) { return this.store.deleteBinding(accountId, conversationKey) }
   deleteById(accountId: string, bindingId: string) { return this.store.deleteBindingById(accountId, bindingId) }
 }
@@ -96,7 +97,7 @@ export class AuditRepository {
 }
 
 export type AccountRepositoryPort = Pick<AccountRepository, 'validateInput' | 'list' | 'get' | 'save' | 'restore' | 'delete' | 'updateRuntime'>
-export type BindingRepositoryPort = Pick<BindingRepository, 'find' | 'get' | 'list' | 'listForConversation' | 'listForDemand' | 'hasForConversation' | 'groupProfile' | 'saveGroupProfile' | 'create' | 'delete' | 'deleteById'>
+export type BindingRepositoryPort = Pick<BindingRepository, 'find' | 'get' | 'list' | 'listForConversation' | 'listForDemand' | 'hasForConversation' | 'groupProfile' | 'saveGroupProfile' | 'create' | 'updateModel' | 'delete' | 'deleteById'>
 export type InboxRepositoryPort = Pick<InboxRepository, 'claim' | 'claimAction' | 'finishAction' | 'get' | 'update' | 'pending' | 'latestFailed'>
 export type ProjectionRepositoryPort = Pick<ProjectionRepository, 'createTurnLink' | 'updateTurnLink' | 'turnByCommand' | 'turnByBinding' | 'turnByConversation' | 'activeTurns' | 'createPresentation' | 'getPresentation' | 'updatePresentation'>
 export type OutboxRepositoryPort = Pick<OutboxRepository, keyof ChannelOutboxStore | 'get' | 'retry' | 'listFailed'>

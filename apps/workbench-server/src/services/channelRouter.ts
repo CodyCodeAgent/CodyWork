@@ -14,6 +14,8 @@ import {
   type CodyWorkChannelBinding,
 } from './channelStore.js'
 import type { ChannelRepositoryPorts } from './channelRepositories.js'
+import { executionContextMarkdown } from './channelFeishuRenderer.js'
+import { channelReasoningLabel, type ChannelModelSettings, type ChannelSessionSettingsService } from './channelSessionSettings.js'
 
 type ChannelRouterHooks = {
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
@@ -58,6 +60,7 @@ export class ChannelRouter {
     private readonly access: ChannelAccessService,
     private readonly requests: ChannelRequestBridge,
     private readonly bindings: ChannelBindingService,
+    private readonly settings: ChannelSessionSettingsService,
     private readonly hooks: ChannelRouterHooks,
   ) {}
 
@@ -132,7 +135,8 @@ export class ChannelRouter {
     }
     try {
       let card: FeishuCard | null = null
-      if (kind.startsWith('channel.pick_') || kind === 'channel.group_setting_mode') card = await this.bindings.handleAction(accountId, action)
+      if (kind === 'channel.model_select' || kind === 'channel.reasoning_select') card = await this.handleModelAction(accountId, action)
+      else if (kind.startsWith('channel.pick_') || kind === 'channel.group_setting_mode') card = await this.bindings.handleAction(accountId, action)
       else if (kind === 'channel.access_approve' || kind === 'channel.access_reject') card = await this.access.handleAction(accountId, action)
       else if (kind === 'channel.approval') await this.requests.handleApprovalAction(accountId, action)
       else if (kind === 'channel.question') await this.requests.handleQuestionAction(accountId, action)
@@ -148,9 +152,47 @@ export class ChannelRouter {
     }
   }
 
+  private modelSummary(settings: ChannelModelSettings): string {
+    return executionContextMarkdown(settings).replace(/\n---\n\n$/u, '')
+  }
+
+  private async handleModelAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
+    const bindingId = string(action.value.bindingId)
+    const modelId = string(action.value.modelId)
+    const actionBinding = this.repositories.bindings.get(bindingId)
+    if (actionBinding.accountId !== accountId) throw new Error('模型配置不属于当前机器人')
+    if (string(action.value.action) === 'channel.model_select') {
+      const { model } = await this.settings.model(bindingId, action.actorId, modelId)
+      const next = selectionCard('选择推理程度', `已选择模型：**${model.label || model.id}**\n\n请选择该模型支持的推理程度。保存后只影响后续消息。`, model.supportedReasoningEfforts.map(effort => ({
+        text: `${channelReasoningLabel(effort)}${effort === model.defaultReasoningEffort ? ' · 默认' : ''}`,
+        value: { action: 'channel.reasoning_select', bindingId, modelId, reasoningEffort: effort },
+      })))
+      await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `model:${bindingId}:${modelId}`, revision: 1 })
+      return next
+    }
+    const selected = await this.settings.select(bindingId, action.actorId, modelId, string(action.value.reasoningEffort))
+    const openUrl = this.hooks.openUrl(actionBinding)
+    const next = feishuTextCard('CodyWork · 模型已更新', `${this.modelSummary(selected)}\n\n新配置会从下一条消息开始生效。`, {
+      color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
+    })
+    await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `model:${bindingId}:${modelId}:${selected.reasoningEffort}`, revision: 2, terminal: true })
+    return next
+  }
+
   private async handleCommand(binding: CodyWorkChannelBinding, inboxId: string, command: string): Promise<void> {
     const inbox = this.repositories.inbox.get(inboxId)
     const [name, ...args] = command.split(/\s+/u)
+    if (name === '/model') {
+      if (binding.ownerIdentity !== inbox.message.sender.id) throw new Error('只有此绑定的创建者可以切换模型')
+      const settings = await this.settings.resolve(binding)
+      if (!settings.models.length) throw new Error('Codex Runtime 当前没有返回可用模型')
+      const card = selectionCard('切换 CodyWork 模型', `${this.modelSummary(settings)}\n\n先选择模型，再选择该模型支持的推理程度。保存后只影响后续消息。`, settings.models.map(model => ({
+        text: `${model.label || model.id}${model.id === settings.model ? ' · 当前' : ''}`,
+        value: { action: 'channel.model_select', bindingId: binding.id, modelId: model.id },
+      })))
+      await this.hooks.enqueue(binding.accountId, { kind: 'reply_card', targetId: inbox.message.messageId, payload: { card, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:model`, terminal: true })
+      this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id }); return
+    }
     if (name === '/setting') {
       if (binding.channelScope === 'private') throw new Error('私聊没有群会话模式；可直接使用 /status 查看绑定。')
       if (binding.ownerIdentity !== inbox.message.sender.id) throw new Error('只有此群绑定的创建者可以修改设置')
@@ -214,7 +256,7 @@ export class ChannelRouter {
       this.repositories.requests.update(binding.accountId, request.id, { status: 'answered' })
       this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id }); return
     }
-    await this.hooks.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/status、/stop、/retry、/unbind、/setting（群聊）、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })
+    await this.hooks.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/model、/status、/stop、/retry、/unbind、/setting（群聊）、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })
     this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id })
   }
 }

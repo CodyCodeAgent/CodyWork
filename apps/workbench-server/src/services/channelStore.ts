@@ -63,7 +63,7 @@ type AccountRow = {
 type BindingRow = {
   id: string; provider: string; account_id: string; conversation_key: string; channel_conversation_id: string
   channel_scope: string; channel_root_id: string | null; target_type: string; target_id: string; thread_id: string
-  owner_identity: string; permission_mode: string; notification_policy: string; workspace_id: string; demand_id: string | null; conversation_id: string; conversation_title?: string | null; created_at: string; updated_at: string
+  owner_identity: string; permission_mode: string; model: string; reasoning_effort: string; notification_policy: string; workspace_id: string; demand_id: string | null; conversation_id: string; conversation_title?: string | null; created_at: string; updated_at: string
 }
 
 type InboxRow = {
@@ -187,7 +187,7 @@ function toAccount(row: AccountRow): ChannelAccount {
   }
 }
 
-function toBinding(row: BindingRow): ChannelBinding & { targetType: 'codywork-demand' | 'codywork-workspace'; workspaceId: string; demandId: string | null; conversationId: string; conversationTitle: string; channelConversationId: string; channelScope: string; channelRootId: string; permissionMode: 'read-only' | 'workspace-write' | 'yolo'; notificationPolicy: 'origin-only' | 'mirror-requests' } {
+function toBinding(row: BindingRow): ChannelBinding & { targetType: 'codywork-demand' | 'codywork-workspace'; workspaceId: string; demandId: string | null; conversationId: string; conversationTitle: string; channelConversationId: string; channelScope: string; channelRootId: string; permissionMode: 'read-only' | 'workspace-write' | 'yolo'; model: string; reasoningEffort: string; notificationPolicy: 'origin-only' | 'mirror-requests' } {
   return {
     id: row.id, provider: row.provider, accountId: row.account_id, conversationKey: row.conversation_key,
     targetType: row.target_type === 'codywork-workspace' ? 'codywork-workspace' : 'codywork-demand', targetId: row.target_id, threadId: row.thread_id, ownerIdentity: row.owner_identity,
@@ -196,6 +196,7 @@ function toBinding(row: BindingRow): ChannelBinding & { targetType: 'codywork-de
     conversationId: row.conversation_id, channelConversationId: row.channel_conversation_id, channelScope: row.channel_scope,
     channelRootId: row.channel_root_id ?? '',
     permissionMode: row.target_type === 'codywork-workspace' || row.permission_mode === 'read-only' ? 'read-only' : row.permission_mode === 'yolo' ? 'yolo' : 'workspace-write',
+    model: row.model ?? '', reasoningEffort: row.reasoning_effort ?? '',
     notificationPolicy: row.notification_policy === 'origin-only' ? 'origin-only' : 'mirror-requests',
   }
 }
@@ -511,15 +512,22 @@ export class ChannelStore implements ChannelOutboxStore {
     const targetId = input.targetType === 'codywork-workspace' ? input.workspaceId : input.demandId!
     this.database.db.prepare(`INSERT INTO channel_bindings (
       id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id,
-      target_type, target_id, thread_id, owner_identity, permission_mode, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      target_type, target_id, thread_id, owner_identity, permission_mode, model, reasoning_effort, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider, account_id, conversation_key) DO UPDATE SET target_type = excluded.target_type, target_id = excluded.target_id, thread_id = excluded.thread_id,
-      owner_identity = excluded.owner_identity, permission_mode = excluded.permission_mode, notification_policy = excluded.notification_policy, workspace_id = excluded.workspace_id, demand_id = excluded.demand_id,
+      owner_identity = excluded.owner_identity, permission_mode = excluded.permission_mode, model = '', reasoning_effort = '', notification_policy = excluded.notification_policy, workspace_id = excluded.workspace_id, demand_id = excluded.demand_id,
       conversation_id = excluded.conversation_id, updated_at = excluded.updated_at`)
       .run(id, input.message.provider, input.message.accountId, key, input.message.conversation.id, input.message.conversation.scope,
         input.message.conversation.rootId ?? null, input.targetType, targetId, input.threadId, input.ownerIdentity, input.permissionMode, input.notificationPolicy,
         input.workspaceId, input.demandId, input.conversationId, now, now)
     return this.findBinding(input.message.accountId, key)!
+  }
+
+  updateBindingModel(accountId: string, bindingId: string, model: string, reasoningEffort: string): CodyWorkChannelBinding {
+    const result = this.database.db.prepare('UPDATE channel_bindings SET model = ?, reasoning_effort = ?, updated_at = ? WHERE id = ? AND account_id = ?')
+      .run(model, reasoningEffort, nowIso(), bindingId, accountId)
+    if (result.changes === 0) throw new Error('飞书绑定不存在')
+    return this.getBinding(bindingId)
   }
 
   deleteBinding(accountId: string, conversationKey: string): boolean {

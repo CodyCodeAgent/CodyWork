@@ -20,7 +20,7 @@ function binding(id: string): CodyWorkChannelBinding {
     targetType: 'codywork-demand', targetId: 'demand-1', threadId: 'thread-1', ownerIdentity: `owner-${id}`,
     createdAtIso: '2026-09-05T00:00:00.000Z', updatedAtIso: '2026-09-05T00:00:00.000Z',
     workspaceId: 'workspace-1', demandId: 'demand-1', conversationId: 'conversation-1', channelConversationId: `chat-${id}`,
-    channelScope: 'private', channelRootId: '', permissionMode: 'workspace-write', notificationPolicy: 'mirror-requests',
+    channelScope: 'private', channelRootId: '', permissionMode: 'workspace-write', model: '', reasoningEffort: '', notificationPolicy: 'mirror-requests',
   }
 }
 
@@ -43,18 +43,21 @@ function routerHarness(input: { message?: ChannelInboundMessage; account?: Recor
   const store = {
     getGroupProfile: vi.fn(() => input.profile ?? null), claimInbound: vi.fn((value: ChannelInboundMessage) => ({ item: { ...claimed, message: value }, created: true })),
     listAccounts: vi.fn(() => [account]), updateRuntime: vi.fn(), findBinding: vi.fn(() => input.binding ?? null),
+    getInbox: vi.fn(() => claimed),
     updateInbox: vi.fn((_id: string, status: string) => ({ ...claimed, status })), audit: vi.fn(),
+    getBinding: vi.fn(() => input.binding ?? binding('binding-1')),
     claimAction: vi.fn(() => ({ id: 'action-1', created: true, status: 'action_received' })), finishAction: vi.fn(),
   }
   const access = { request: vi.fn(), handleAction: vi.fn() }
   const requests = { handleApprovalAction: vi.fn(), handleQuestionAction: vi.fn() }
   const bindings = { requestWorkspace: vi.fn(), bindConfiguredTopic: vi.fn(), bindConfiguredReply: vi.fn(), handleAction: vi.fn() }
+  const settings = { resolve: vi.fn(), model: vi.fn(), select: vi.fn() }
   const hooks = {
     enqueue: vi.fn(async () => ({ id: 'outbox-1' })), submitInbox: vi.fn(), observe: vi.fn(), detachBindingObservation: vi.fn(),
     openUrl: vi.fn(() => ''), accountState: vi.fn(() => 'connected'), retryOutbox: vi.fn(), fail: vi.fn(),
   }
-  const router = new ChannelRouter(new ChannelRepositories(store as never), {} as never, access as never, requests as never, bindings as never, hooks as never)
-  return { router, inbound, claimed, account, store, access, bindings, hooks }
+  const router = new ChannelRouter(new ChannelRepositories(store as never), {} as never, access as never, requests as never, bindings as never, settings as never, hooks as never)
+  return { router, inbound, claimed, account, store, access, bindings, settings, hooks }
 }
 
 function findActionValue(value: unknown, action: string): Record<string, unknown> | null {
@@ -73,13 +76,13 @@ describe('CodyWork channel architecture and lifecycle', () => {
   it('keeps ChannelBot as a small composition root', async () => {
     const source = await readFile(new URL('../src/services/channelBot.ts', import.meta.url), 'utf8')
     expect(source.split('\n').length).toBeLessThan(350)
-    for (const dependency of ['ChannelAccountManager', 'ChannelRouter', 'ChannelBindingService', 'ChannelCommandAdapter', 'ChannelProjectionService', 'ChannelRequestBridge']) expect(source).toContain(`new ${dependency}`)
+    for (const dependency of ['ChannelAccountManager', 'ChannelRouter', 'ChannelBindingService', 'ChannelCommandAdapter', 'ChannelProjectionService', 'ChannelRequestBridge', 'ChannelSessionSettingsService']) expect(source).toContain(`new ${dependency}`)
     expect(source).not.toContain('private async onMessage(')
     expect(source).not.toContain('private onConversationEvent(')
   })
 
   it('injects repository ports instead of the broad SQL store into workflow components', async () => {
-    for (const file of ['channelAccountManager.ts', 'channelAccessService.ts', 'channelBindingService.ts', 'channelCommandAdapter.ts', 'channelProjection.ts', 'channelRequestBridge.ts', 'channelRouter.ts']) {
+    for (const file of ['channelAccountManager.ts', 'channelAccessService.ts', 'channelBindingService.ts', 'channelCommandAdapter.ts', 'channelProjection.ts', 'channelRequestBridge.ts', 'channelRouter.ts', 'channelSessionSettings.ts']) {
       const source = await readFile(new URL(`../src/services/${file}`, import.meta.url), 'utf8')
       expect(source, file).not.toContain('private readonly store: ChannelStore')
       expect(source, file).toContain('ChannelRepositoryPorts')
@@ -119,6 +122,44 @@ describe('CodyWork channel architecture and lifecycle', () => {
     }, 'finish silently')
     expect(JSON.stringify(card)).toContain('本次回复已完成，Codex 未返回可显示的文本。')
     expect(JSON.stringify(card)).not.toContain('正在等待 Codex 输出')
+  })
+
+  it('renders the actual model, reasoning, permission, Workspace and Demand on turn cards', () => {
+    const card = projectionCard({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true,
+      revision: 1, assistantText: '完成', assistantImages: [], error: '',
+    }, 'build it', '', {
+      model: 'gpt-6-astra', modelLabel: 'GPT 6 Astra', reasoningEffort: 'high', reasoningLabel: '高',
+      permissionLabel: 'YOLO', workspaceName: 'AI Hub', demandName: '灵活返佣审批流调整',
+    })
+    const text = JSON.stringify(card)
+    for (const expected of ['GPT 6 Astra', '推理', '高', 'YOLO', 'AI Hub', '灵活返佣审批流调整', '完成']) expect(text).toContain(expected)
+  })
+
+  it('opens a two-step /model picker and confirms the persisted selection', async () => {
+    const currentBinding = binding('binding-1')
+    const incoming = message('/model', 'model-command')
+    const test = routerHarness({ message: incoming, binding: currentBinding })
+    const model = { id: 'gpt-6-astra', label: 'GPT 6 Astra', description: '', isDefault: true, defaultReasoningEffort: 'high', supportedReasoningEfforts: ['medium', 'high'] }
+    const current = {
+      models: [model], model: model.id, modelLabel: model.label, reasoningEffort: 'high', reasoningLabel: '高',
+      permissionLabel: 'Normal', workspaceName: 'AI Hub', demandName: '需求开发',
+    }
+    test.settings.resolve.mockResolvedValue(current)
+    test.settings.model.mockResolvedValue({ binding: currentBinding, model })
+    test.settings.select.mockResolvedValue({ ...current, reasoningEffort: 'medium', reasoningLabel: '中' })
+
+    await test.router.onMessage(incoming)
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls[0]?.[1])).toContain('channel.model_select')
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls[0]?.[1])).toContain('GPT 6 Astra')
+
+    await test.router.onAction('account-1', { eventId: 'pick-model', actorId: currentBinding.ownerIdentity, remoteMessageId: 'model-card', value: { action: 'channel.model_select', bindingId: currentBinding.id, modelId: model.id } })
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls.at(-1)?.[1])).toContain('channel.reasoning_select')
+
+    await test.router.onAction('account-1', { eventId: 'pick-effort', actorId: currentBinding.ownerIdentity, remoteMessageId: 'model-card', value: { action: 'channel.reasoning_select', bindingId: currentBinding.id, modelId: model.id, reasoningEffort: 'medium' } })
+    expect(test.settings.select).toHaveBeenCalledWith(currentBinding.id, currentBinding.ownerIdentity, model.id, 'medium')
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls.at(-1)?.[1])).toContain('模型已更新')
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls.at(-1)?.[1])).toContain('中')
   })
 
   it('routes unauthorized private traffic to access approval, not Codex', async () => {

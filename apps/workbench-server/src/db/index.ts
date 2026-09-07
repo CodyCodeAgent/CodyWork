@@ -256,6 +256,8 @@ export class WorkbenchDb {
         thread_id TEXT NOT NULL,
         owner_identity TEXT NOT NULL,
         permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+        model TEXT NOT NULL DEFAULT '',
+        reasoning_effort TEXT NOT NULL DEFAULT '',
         notification_policy TEXT NOT NULL DEFAULT 'mirror-requests' CHECK (notification_policy IN ('origin-only', 'mirror-requests')),
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
         demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
@@ -432,6 +434,12 @@ export class WorkbenchDb {
     if (!channelBindingColumns.has('notification_policy')) {
       this.db.exec("ALTER TABLE channel_bindings ADD COLUMN notification_policy TEXT NOT NULL DEFAULT 'mirror-requests'")
     }
+    if (!channelBindingColumns.has('model')) {
+      this.db.exec("ALTER TABLE channel_bindings ADD COLUMN model TEXT NOT NULL DEFAULT ''")
+    }
+    if (!channelBindingColumns.has('reasoning_effort')) {
+      this.db.exec("ALTER TABLE channel_bindings ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT ''")
+    }
     const interactiveRequestColumns = this.db.prepare('PRAGMA table_info(channel_interactive_requests)').all() as { name?: string }[]
     if (!interactiveRequestColumns.some(column => column.name === 'request_key')) {
       // App Server request ids are process-local counters and restart from 0.
@@ -569,6 +577,8 @@ export class WorkbenchDb {
             thread_id TEXT NOT NULL,
             owner_identity TEXT NOT NULL,
             permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+            model TEXT NOT NULL DEFAULT '',
+            reasoning_effort TEXT NOT NULL DEFAULT '',
             notification_policy TEXT NOT NULL DEFAULT 'mirror-requests' CHECK (notification_policy IN ('origin-only', 'mirror-requests')),
             workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
             demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
@@ -577,8 +587,8 @@ export class WorkbenchDb {
             updated_at TEXT NOT NULL,
             UNIQUE(provider, account_id, conversation_key)
           );
-          INSERT INTO channel_bindings (id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, permission_mode, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at)
-            SELECT id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, permission_mode, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at
+          INSERT INTO channel_bindings (id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, permission_mode, model, reasoning_effort, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at)
+            SELECT id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id, target_type, target_id, thread_id, owner_identity, permission_mode, model, reasoning_effort, notification_policy, workspace_id, demand_id, conversation_id, created_at, updated_at
             FROM channel_bindings_scope_retired;
           DROP TABLE channel_bindings_scope_retired;
           DROP TABLE conversations_scope_retired;

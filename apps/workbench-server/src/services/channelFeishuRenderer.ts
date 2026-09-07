@@ -1,5 +1,6 @@
 import { projectChannelTurn, stripMarkdownImages } from '@codycodeagent/cody-web-core/channel'
 import { feishuTextCard, type FeishuCard } from '@codycodeagent/cody-web-core/feishu'
+import type { ChannelExecutionContext } from './channelSessionSettings.js'
 
 type TurnProjection = ReturnType<typeof projectChannelTurn>
 
@@ -29,17 +30,40 @@ function emptyProjectionBody(projection: TurnProjection): string {
 }
 
 /** Pure Feishu presentation adapter; it does not own Turn or delivery state. */
-export function projectionCard(projection: TurnProjection, prompt: string, openUrl = ''): FeishuCard {
+function safeInline(value: string): string {
+  return value.replace(/[\r\n`*_~\[\]]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 160)
+}
+
+export function executionContextMarkdown(context?: ChannelExecutionContext): string {
+  if (!context) return ''
+  const scope = context.demandName ? `\n**需求**　${safeInline(context.demandName)}` : ''
+  return `**运行配置**\n**模型**　${safeInline(context.modelLabel)} · **推理**　${safeInline(context.reasoningLabel)} · **权限**　${safeInline(context.permissionLabel)}\n**Workspace**　${safeInline(context.workspaceName)}${scope}\n\n---\n\n`
+}
+
+export function executionContextFromState(value: unknown): ChannelExecutionContext | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const row = value as Record<string, unknown>
+  const required = ['model', 'modelLabel', 'reasoningEffort', 'reasoningLabel', 'permissionLabel', 'workspaceName'] as const
+  if (!required.every(key => typeof row[key] === 'string')) return undefined
+  return {
+    model: row.model as string, modelLabel: row.modelLabel as string,
+    reasoningEffort: row.reasoningEffort as ChannelExecutionContext['reasoningEffort'], reasoningLabel: row.reasoningLabel as string,
+    permissionLabel: row.permissionLabel as string, workspaceName: row.workspaceName as string,
+    ...(typeof row.demandName === 'string' && row.demandName ? { demandName: row.demandName } : {}),
+  }
+}
+
+export function projectionCard(projection: TurnProjection, prompt: string, openUrl = '', context?: ChannelExecutionContext): FeishuCard {
   const body = feishuProjectionBody(projection) || emptyProjectionBody(projection)
-  return feishuTextCard(`CodyWork · ${statusLabel(projection.status)}`, body, {
+  return feishuTextCard(`CodyWork · ${statusLabel(projection.status)}`, `${executionContextMarkdown(context)}${body}`, {
     color: statusColor(projection.status),
     ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
     note: `问题：${prompt.slice(0, 180)}${prompt.length > 180 ? '…' : ''}`,
   })
 }
 
-export function commandFailureCard(error: string, openUrl = ''): FeishuCard {
-  return feishuTextCard('CodyWork · 提交失败', `**${error}**\n\n消息未被静默重发。请发送 \`/retry\` 明确重试。`, {
+export function commandFailureCard(error: string, openUrl = '', context?: ChannelExecutionContext): FeishuCard {
+  return feishuTextCard('CodyWork · 提交失败', `${executionContextMarkdown(context)}**${error}**\n\n消息未被静默重发。请发送 \`/retry\` 明确重试。`, {
     color: 'red',
     ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
   })

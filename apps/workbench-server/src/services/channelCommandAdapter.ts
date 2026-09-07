@@ -9,6 +9,7 @@ import { listDemands } from './demands.js'
 import type { WorkspaceRegistry } from './workspaceRegistry.js'
 import type { CodyWorkChannelBinding } from './channelStore.js'
 import type { ChannelRepositoryPorts } from './channelRepositories.js'
+import type { ChannelSessionSettingsService } from './channelSessionSettings.js'
 
 type CodyWorkInboundMessage = ChannelInboundMessage & {
   sourceMessageId?: string
@@ -29,6 +30,7 @@ export class ChannelCommandAdapter {
     private readonly gateway: ConversationCommandGateway,
     private readonly workspaces: WorkspaceRegistry,
     private readonly projection: ChannelProjectionService,
+    private readonly settings: ChannelSessionSettingsService,
     private readonly hooks: ChannelCommandAdapterHooks,
   ) {}
 
@@ -55,18 +57,20 @@ export class ChannelCommandAdapter {
       }
     }
     const prompt = [inbox.message.text, paths.length ? `\n附件路径：\n${paths.map(path => `- ${path}`).join('\n')}` : ''].join('').trim()
+    const resolvedSettings = await this.settings.resolve(binding)
+    const { models: _models, ...executionContext } = resolvedSettings
     const commandId = channelCommandId(inbox.message)
     const turnLinkId = this.repositories.projections.createTurnLink({ inboxId, bindingId: binding.id, clientCommandId: commandId })
-    const presentation = this.repositories.projections.createPresentation({ accountId: inbox.message.accountId, bindingId: binding.id, turnLinkId, purpose: 'turn', state: { prompt } })
+    const presentation = this.repositories.projections.createPresentation({ accountId: inbox.message.accountId, bindingId: binding.id, turnLinkId, purpose: 'turn', state: { prompt, executionContext } })
     this.repositories.inbox.update(inboxId, 'submitting', { bindingId: binding.id, clientCommandId: commandId })
     await this.projection.observe(binding)
     const initial = projectionCard({
       threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0,
-    }, prompt, this.hooks.openUrl(binding))
+    }, prompt, this.hooks.openUrl(binding), executionContext)
     const sent = await this.hooks.enqueue(inbox.message.accountId, {
       kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
     })
-    this.repositories.projections.updatePresentation(presentation.id, { remoteMessageId: sent.remoteMessageId, status: sent.status, state: { prompt, outboxId: sent.id } })
+    this.repositories.projections.updatePresentation(presentation.id, { remoteMessageId: sent.remoteMessageId, status: sent.status, state: { prompt, executionContext, outboxId: sent.id } })
     try {
       await this.gateway.submitCommand({
         id: commandId,
@@ -79,6 +83,9 @@ export class ChannelCommandAdapter {
         prompt,
         submitMode: 'queue',
         executionProfile: { permissionMode: binding.permissionMode },
+        ...(executionContext.model && executionContext.reasoningEffort ? { settings: {
+          model: executionContext.model, reasoningEffort: executionContext.reasoningEffort,
+        } } : {}),
         localImages,
       })
       this.repositories.inbox.update(inboxId, 'submitted', { clientCommandId: commandId })
