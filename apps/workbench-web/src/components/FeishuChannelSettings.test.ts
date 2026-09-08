@@ -185,7 +185,7 @@ describe('FeishuChannelSettings', () => {
 
     await wrapper.find('details').trigger('toggle')
     expect(wrapper.text()).toContain('成本归属排查')
-    expect(wrapper.text()).toContain('Workspace 只读搜索')
+    expect(wrapper.text()).toContain('Workspace 会话')
   })
 
   it('creates a second bot from a persistent new-bot action without changing the existing one', async () => {

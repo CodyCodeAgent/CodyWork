@@ -208,7 +208,7 @@ export class ChannelRouter {
     if (name === '/status') {
       const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
       const openUrl = this.hooks.openUrl(binding)
-      const scope = binding.targetType === 'codywork-workspace' ? 'Workspace 只读搜索（可运行命令，不可写文件）' : 'Demand Worktree'
+      const scope = binding.targetType === 'codywork-workspace' ? 'Workspace 会话' : 'Demand Worktree'
       await this.hooks.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: `已绑定：${conversation.title}\n范围：${scope}\nThread：${binding.threadId}\n连接：${this.hooks.accountState(binding.accountId)}${openUrl ? `\n在 CodyWork 中打开：${openUrl}` : ''}` }, dedupeKey: `${inbox.id}:status`, terminal: true })
       this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id }); return
     }

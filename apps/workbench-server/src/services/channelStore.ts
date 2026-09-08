@@ -195,7 +195,7 @@ function toBinding(row: BindingRow): ChannelBinding & { targetType: 'codywork-de
     conversationTitle: row.conversation_title ?? '未命名会话',
     conversationId: row.conversation_id, channelConversationId: row.channel_conversation_id, channelScope: row.channel_scope,
     channelRootId: row.channel_root_id ?? '',
-    permissionMode: row.target_type === 'codywork-workspace' || row.permission_mode === 'read-only' ? 'read-only' : row.permission_mode === 'yolo' ? 'yolo' : 'workspace-write',
+    permissionMode: row.permission_mode === 'read-only' ? 'read-only' : row.permission_mode === 'yolo' ? 'yolo' : 'workspace-write',
     model: row.model ?? '', reasoningEffort: row.reasoning_effort ?? '',
     notificationPolicy: row.notification_policy === 'origin-only' ? 'origin-only' : 'mirror-requests',
   }
@@ -489,8 +489,8 @@ export class ChannelStore implements ChannelOutboxStore {
   }
 
   saveGroupProfile(input: Omit<ChannelGroupProfile, 'createdAtIso' | 'updatedAtIso'>): ChannelGroupProfile {
-    if (input.targetType === 'codywork-workspace' && (input.demandId || input.permissionMode !== 'read-only')) throw new Error('Workspace 群机器人只能使用只读权限')
-    if (input.targetType === 'codywork-demand' && (!input.demandId || input.permissionMode === 'read-only')) throw new Error('Demand 群机器人需要需求与可写权限')
+    if (input.targetType === 'codywork-workspace' && input.demandId) throw new Error('Workspace 群机器人不能关联 Demand')
+    if (input.targetType === 'codywork-demand' && !input.demandId) throw new Error('Demand 群机器人缺少需求')
     const now = nowIso()
     this.database.db.prepare(`INSERT INTO channel_group_profiles (
       account_id, channel_conversation_id, conversation_mode, target_type, workspace_id, demand_id, conversation_id, permission_mode, owner_identity, created_at, updated_at
@@ -507,8 +507,6 @@ export class ChannelStore implements ChannelOutboxStore {
     const key = channelConversationKey(input.message); const now = nowIso(); const id = makeId('binding')
     if (input.targetType === 'codywork-demand' && !input.demandId) throw new Error('Demand 绑定缺少需求')
     if (input.targetType === 'codywork-workspace' && input.demandId) throw new Error('Workspace 绑定不能关联 Demand')
-    if (input.targetType === 'codywork-workspace' && input.permissionMode !== 'read-only') throw new Error('Workspace 绑定固定为只读')
-    if (input.targetType === 'codywork-demand' && input.permissionMode === 'read-only') throw new Error('Demand 绑定需要开发权限')
     const targetId = input.targetType === 'codywork-workspace' ? input.workspaceId : input.demandId!
     this.database.db.prepare(`INSERT INTO channel_bindings (
       id, provider, account_id, conversation_key, channel_conversation_id, channel_scope, channel_root_id,

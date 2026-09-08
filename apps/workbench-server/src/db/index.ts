@@ -150,7 +150,7 @@ export class WorkbenchDb {
         instruction_hash TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL AND permission_mode = 'read-only')),
+        CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL)),
         UNIQUE(native_id)
       );
       CREATE TABLE IF NOT EXISTS conversation_audits (
@@ -284,8 +284,8 @@ export class WorkbenchDb {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         PRIMARY KEY(account_id, channel_conversation_id),
-        CHECK ((target_type = 'codywork-demand' AND demand_id IS NOT NULL AND permission_mode IN ('workspace-write', 'yolo'))
-          OR (target_type = 'codywork-workspace' AND demand_id IS NULL AND permission_mode = 'read-only'))
+        CHECK ((target_type = 'codywork-demand' AND demand_id IS NOT NULL)
+          OR (target_type = 'codywork-workspace' AND demand_id IS NULL))
       );
       CREATE INDEX IF NOT EXISTS channel_group_profiles_workspace ON channel_group_profiles(workspace_id, demand_id);
       CREATE TABLE IF NOT EXISTS channel_inbox (
@@ -422,7 +422,7 @@ export class WorkbenchDb {
     const channelBindingColumns = new Set((this.db.prepare('PRAGMA table_info(channel_bindings)').all() as { name?: string }[]).map(column => column.name))
     if (!channelBindingColumns.has('permission_mode')) {
       this.db.exec("ALTER TABLE channel_bindings ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'workspace-write'")
-      this.db.exec("UPDATE channel_bindings SET permission_mode = 'read-only' WHERE target_type = 'codywork-workspace'")
+      this.db.exec("UPDATE channel_bindings SET permission_mode = 'yolo' WHERE target_type = 'codywork-workspace'")
       this.db.exec(`UPDATE channel_bindings SET permission_mode = COALESCE(
         (SELECT channel_group_profiles.permission_mode FROM channel_group_profiles
           WHERE channel_group_profiles.account_id = channel_bindings.account_id
@@ -536,8 +536,8 @@ export class WorkbenchDb {
     const conversationDemand = scopedConversationColumns.find(column => column.name === 'demand_id')
     const bindingDemand = scopedBindingColumns.find(column => column.name === 'demand_id')
     if (!scopedConversationColumns.some(column => column.name === 'scope') || conversationDemand?.notnull === 1 || bindingDemand?.notnull === 1) {
-      // Workspace search sessions are real read-only conversations, not hidden
-      // synthetic Demands. Rebuild the two parent tables once so demand_id can
+      // Workspace sessions are real conversations, not hidden synthetic
+      // Demands. Rebuild the two parent tables once so demand_id can
       // be null while preserving every existing native Thread and channel row.
       this.db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;')
       try {
@@ -559,7 +559,7 @@ export class WorkbenchDb {
             instruction_hash TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL AND permission_mode = 'read-only'))
+            CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL))
           );
           INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at)
             SELECT id, 'demand', demand_id, workspace_id, native_id, title, 'browser', status, permission_mode, policy_hash, instruction_hash, created_at, updated_at
@@ -607,6 +607,79 @@ export class WorkbenchDb {
     const conversationOriginColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name?: string }[]
     if (!conversationOriginColumns.some(column => column.name === 'created_via')) {
       this.db.exec("ALTER TABLE conversations ADD COLUMN created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu'));")
+    }
+    const conversationSchema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversations'").get() as { sql?: string } | undefined
+    const groupProfileSchema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channel_group_profiles'").get() as { sql?: string } | undefined
+    const workspacePermissionLocked = conversationSchema?.sql?.includes("scope = 'workspace' AND demand_id IS NULL AND permission_mode = 'read-only'")
+      || groupProfileSchema?.sql?.includes("target_type = 'codywork-workspace' AND demand_id IS NULL AND permission_mode = 'read-only'")
+    if (workspacePermissionLocked) {
+      // Older releases encoded Workspace read-only mode in SQLite CHECK
+      // constraints. Rebuild both scoped tables and upgrade existing Workspace
+      // conversations/bindings to the new YOLO default without changing their
+      // native Thread identities.
+      this.db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;')
+      try {
+        this.db.exec(`
+          BEGIN IMMEDIATE;
+          ALTER TABLE channel_group_profiles RENAME TO channel_group_profiles_permission_retired;
+          ALTER TABLE conversations RENAME TO conversations_permission_retired;
+          CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL DEFAULT 'demand' CHECK (scope IN ('demand', 'workspace')),
+            demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            native_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
+            status TEXT NOT NULL DEFAULT 'idle',
+            permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+            policy_hash TEXT NOT NULL,
+            instruction_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL)),
+            UNIQUE(native_id)
+          );
+          INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at)
+            SELECT id, scope, demand_id, workspace_id, native_id, title, created_via, status,
+              CASE WHEN scope = 'workspace' THEN 'yolo' ELSE permission_mode END,
+              policy_hash, instruction_hash, created_at, updated_at
+            FROM conversations_permission_retired;
+          CREATE TABLE channel_group_profiles (
+            account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+            channel_conversation_id TEXT NOT NULL,
+            conversation_mode TEXT NOT NULL CHECK (conversation_mode IN ('reply', 'topic')),
+            target_type TEXT NOT NULL CHECK (target_type IN ('codywork-demand', 'codywork-workspace')),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+            conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+            permission_mode TEXT NOT NULL CHECK (permission_mode IN ('read-only', 'workspace-write', 'yolo')),
+            owner_identity TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(account_id, channel_conversation_id),
+            CHECK ((target_type = 'codywork-demand' AND demand_id IS NOT NULL)
+              OR (target_type = 'codywork-workspace' AND demand_id IS NULL))
+          );
+          INSERT INTO channel_group_profiles (account_id, channel_conversation_id, conversation_mode, target_type, workspace_id, demand_id, conversation_id, permission_mode, owner_identity, created_at, updated_at)
+            SELECT account_id, channel_conversation_id, conversation_mode, target_type, workspace_id, demand_id, conversation_id,
+              CASE WHEN target_type = 'codywork-workspace' THEN 'yolo' ELSE permission_mode END,
+              owner_identity, created_at, updated_at
+            FROM channel_group_profiles_permission_retired;
+          UPDATE channel_bindings SET permission_mode = 'yolo' WHERE target_type = 'codywork-workspace';
+          DROP TABLE channel_group_profiles_permission_retired;
+          DROP TABLE conversations_permission_retired;
+          CREATE INDEX channel_group_profiles_workspace ON channel_group_profiles(workspace_id, demand_id);
+          COMMIT;
+        `)
+      } catch (error) {
+        if (this.db.isTransaction) this.db.exec('ROLLBACK;')
+        throw error
+      } finally {
+        this.db.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;')
+      }
+      const violations = this.db.prepare('PRAGMA foreign_key_check').all()
+      if (violations.length) throw new Error('Workspace permission migration left invalid foreign keys')
     }
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
     if (runtimeColumns.some(column => column.name !== 'id' && column.name !== 'codex_command' && column.name !== 'updated_at')) {

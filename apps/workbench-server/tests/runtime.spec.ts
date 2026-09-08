@@ -71,14 +71,17 @@ describe('generic runtime protocol', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('indexes Workspace knowledge and adds explicit non-writing guidance for search sessions', () => {
+  it('indexes Workspace knowledge and guides unrestricted sessions to applicable AGENTS files', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-workspace-search-'))
     mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'AGENTS.md'), '# Workspace rules\nFollow root policy.')
     writeFileSync(join(root, 'docs', 'operations.md'), '# Operations handbook\nDo not inline the whole document.')
-    const bundle = resolveInstructionBundle({ workspacePath: root, workspaceSearch: true })
-    expect(bundle.systemInstructions).toContain('Workspace 级只读搜索会话')
-    expect(bundle.systemInstructions).toContain('文件读取不受 Workspace、用户或目录边界限制')
-    expect(bundle.systemInstructions).toContain('严禁在任何位置创建、修改、移动或删除文件')
+    const bundle = resolveInstructionBundle({ workspacePath: root, workspaceSession: true })
+    expect(bundle.systemInstructions).toContain('Workspace 级会话')
+    expect(bundle.systemInstructions).toContain('运行命令、Git 与其他 CLI')
+    expect(bundle.systemInstructions).toContain('Follow root policy.')
+    expect(bundle.systemInstructions).toContain('从 Workspace 根到目标目录逐级查找并读取适用的 AGENTS.md')
+    expect(bundle.systemInstructions).not.toContain('严禁在任何位置创建、修改、移动或删除文件')
     expect(bundle.systemInstructions).toContain('docs/operations.md')
     expect(bundle.systemInstructions).not.toContain('Do not inline the whole document.')
     rmSync(root, { recursive: true, force: true })

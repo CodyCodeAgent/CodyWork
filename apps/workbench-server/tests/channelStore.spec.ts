@@ -99,24 +99,24 @@ describe('CodyWork channel persistence', () => {
     db.close()
   })
 
-  it('persists Workspace search bindings without inventing a Demand target', () => {
+  it('persists writable Workspace bindings without inventing a Demand target', () => {
     const db = new WorkbenchDb(':memory:')
     const store = new ChannelStore(db)
     const account = store.saveAccount(null, { name: 'Search Bot', appId: 'cli_search', appSecret: 'secret' })
     const now = new Date().toISOString()
     db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run('workspace-search', 'Search', '/tmp/channel-search-workspace', now, now)
-    db.db.prepare("INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, 'workspace', NULL, ?, ?, ?, 'idle', 'read-only', ?, ?, ?, ?)")
-      .run('conversation-search', 'workspace-search', 'thread-search', 'Read-only search', 'policy', 'instructions', now, now)
+    db.db.prepare("INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, title, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at) VALUES (?, 'workspace', NULL, ?, ?, ?, 'idle', 'yolo', ?, ?, ?, ?)")
+      .run('conversation-search', 'workspace-search', 'thread-search', 'Workspace session', 'policy', 'instructions', now, now)
 
     const created = store.createBinding({
       message: inbound(account.id), targetType: 'codywork-workspace', workspaceId: 'workspace-search', demandId: null,
-      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1', permissionMode: 'read-only', notificationPolicy: 'mirror-requests',
+      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1', permissionMode: 'yolo', notificationPolicy: 'mirror-requests',
     })
-    expect(created).toMatchObject({ targetType: 'codywork-workspace', targetId: 'workspace-search', demandId: null, conversationId: 'conversation-search' })
+    expect(created).toMatchObject({ targetType: 'codywork-workspace', targetId: 'workspace-search', demandId: null, conversationId: 'conversation-search', permissionMode: 'yolo' })
     expect(() => store.createBinding({
       message: inbound(account.id, 'bad-event', 'bad-message'), targetType: 'codywork-workspace', workspaceId: 'workspace-search', demandId: 'fake-demand',
-      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1', permissionMode: 'read-only', notificationPolicy: 'mirror-requests',
+      conversationId: 'conversation-search', threadId: 'thread-search', ownerIdentity: 'user-1', permissionMode: 'yolo', notificationPolicy: 'mirror-requests',
     })).toThrow('不能关联 Demand')
     db.close()
   })

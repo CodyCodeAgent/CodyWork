@@ -134,7 +134,7 @@ rl.on('line', line => {
       write({ id: message.id, error: { code: -32602, message: 'CodyWork threads must be durable' } })
     } else if (!Array.isArray(message.params?.runtimeWorkspaceRoots) || message.params.runtimeWorkspaceRoots.length !== 1) {
       write({ id: message.id, error: { code: -32602, message: 'missing runtime workspace roots' } })
-    } else if (message.params?.sandbox !== 'workspace-write' || Object.hasOwn(message.params ?? {}, 'permissions')) {
+    } else if (!['read-only', 'workspace-write', 'danger-full-access'].includes(message.params?.sandbox) || Object.hasOwn(message.params ?? {}, 'permissions')) {
       write({ id: message.id, error: { code: -32602, message: 'missing native Codex sandbox mode' } })
     } else {
       lastThreadCwd = String(message.params?.cwd ?? '')

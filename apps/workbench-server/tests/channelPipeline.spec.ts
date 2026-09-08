@@ -42,6 +42,47 @@ function inbound(accountId: string, text: string, conversationId: string, scope:
 }
 
 describe('CodyWork channel end-to-end pipeline', () => {
+  it('offers YOLO and Normal for Workspace bindings and creates an unrestricted YOLO session', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-channel-workspace-binding-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspaceId = makeId('ws')
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
+      .run(workspaceId, 'Workspace binding', root, now, now)
+    const store = new ChannelStore(db)
+    const repositories = new ChannelRepositories(store)
+    const account = store.saveAccount(null, { name: 'Workspace bot', appId: 'cli_workspace_binding', appSecret: 'test-secret' })
+    const claimed = repositories.inbox.claim(inbound(account.id, 'WORKSPACE_BINDING_E2E', 'ou-private')).item
+    repositories.inbox.update(claimed.id, 'waiting_binding')
+    const conversations = new ConversationService(db, new TestRuntimeAdapter())
+    const submitted: CodyWorkChannelBinding[] = []
+    const enqueued: Array<Record<string, unknown>> = []
+    const service = new ChannelBindingService(db, repositories, conversations, new WorkspaceRegistry(db), {
+      enqueue: async (_accountId, input) => { enqueued.push(input as unknown as Record<string, unknown>); return { id: makeId('outbox'), remoteMessageId: 'remote-card' } as never },
+      submitInbox: async (_inboxId, binding) => { submitted.push(binding) },
+      observe: async () => undefined,
+      openUrl: () => 'http://localhost/workspace-session',
+    })
+    const action = (value: Record<string, unknown>) => ({ value: { inboxId: claimed.id, workspaceId, ...value }, actorId: 'ou-owner', remoteMessageId: 'remote-card', eventId: makeId('action') }) as never
+
+    const sessions = await service.handleAction(account.id, action({ action: 'channel.pick_workspace_scope' }))
+    expect(JSON.stringify(sessions)).toContain('+ 新建 Workspace 会话')
+    const permissions = await service.handleAction(account.id, action({ action: 'channel.pick_new_workspace_session' }))
+    expect(JSON.stringify(permissions)).toContain('YOLO（默认）')
+    expect(JSON.stringify(permissions)).toContain('Normal（每次审批）')
+    await service.handleAction(account.id, action({
+      action: 'channel.pick_permission', sessionAction: 'channel.pick_new_workspace_session', permissionMode: 'yolo', conversationId: '',
+    }))
+
+    expect(submitted).toHaveLength(1)
+    expect(submitted[0]).toMatchObject({ targetType: 'codywork-workspace', demandId: null, permissionMode: 'yolo' })
+    expect(conversations.get(workspaceId, submitted[0]!.conversationId)).toMatchObject({ scope: 'workspace', permissionMode: 'yolo', createdVia: 'feishu' })
+    expect(enqueued.length).toBeGreaterThanOrEqual(3)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('converges private, flat-group reply and group-topic messages through one durable pipeline', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-channel-pipeline-'))
     const baseline = join(root, 'services', 'demo')

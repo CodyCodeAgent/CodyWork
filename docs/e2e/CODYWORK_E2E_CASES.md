@@ -398,12 +398,12 @@
 2. 保持“允许所有用户”关闭且允许用户为空，尝试启用，确认被拒绝；再填写测试用户 ID 或明确开启测试环境的“允许所有用户”，启用机器人。
 3. 保持“允许所有用户”关闭。先关闭“允许所有群聊”，分别由未授权测试用户在私聊发送消息、在允许群明确 @机器人、在允许群不 @机器人、在未允许群 @机器人，以及在允许群同时提及机器人和其他接收者。确认未允许群被拒绝；再开启“允许所有群聊”，确认群 ID 输入被禁用、刷新后开关保持，并从此前未允许群重新 @机器人。检查当前飞书应用所有者（或应用管理员）私聊收到访问申请卡，确认审批目标使用当前 App 的 Open ID，而不是“允许用户”白名单首项；依次验证非管理员点击、篡改后的按钮值、拒绝、重复申请、过期申请和允许访问。允许后让该用户重新发送原消息。
 4. 在飞书私聊发送一条带唯一标识的消息，依次选择 Workspace、“Demand Worktree”和现有会话；确认绑定卡原位收敛并自动提交首条消息，再完成一次“新建会话”的绑定路径。
-5. 解绑后再发送一条唯一消息，选择同一 Workspace 下的“Workspace 只读搜索”，分别验证绑定已有会话和新建只读会话。在该会话中运行一条只读命令和一条网络查询，再请求创建测试文件。
+5. 解绑后再发送一条唯一消息，选择同一 Workspace 下的“Workspace 会话”，分别验证绑定已有会话和新建会话；两条路径都应继续选择 YOLO 或 Normal。在该会话中运行命令、网络查询并创建一个唯一测试文件。
 6. 在已绑定私聊连续进行三轮问答，同时在 CodyWork 浏览器打开该会话，核对双方使用同一个原生 Thread 和相同顺序。
-7. 发送一条飞书富文本消息，其中包含文字和测试图片；再发送一个测试文件。让 Codex 在 Markdown 回复中引用一张位于 Demand Worktree 内的无敏感 PNG/JPEG 图片。Workspace 只读绑定对附件必须明确拒绝，不得为了保存附件写入 Workspace。
+7. 发送一条飞书富文本消息，其中包含文字和测试图片；再发送一个测试文件。让 Codex 在 Markdown 回复中引用一张位于 Demand Worktree 内的无敏感 PNG/JPEG 图片。再对 Workspace 绑定发送测试附件，确认安全下载到 Workspace 的 `docs/.channel-attachments/` 并可被同一会话读取。
 8. 触发一次工具审批和一次 `requestUserInput`，分别从飞书处理、从浏览器处理，观察另一端卡片收敛。
 9. 创建只含授权测试成员的话题群，将 chat_id 加入白名单；分别发送未 @ 的根消息、结构化 @机器人 的根消息、该根消息下的话题回复，以及同时提及其他接收者的消息。再在普通群重复最小 @ 验证。
-10. 发送 `/model`，确认配置卡先展示当前模型、推理程度、权限、Workspace 和 Demand（Workspace 只读会话不伪造 Demand）。选择一个非当前模型，再从第二张卡中选择该模型明确支持的推理程度；确认成功卡给出清晰反馈。发送唯一消息，核对执行中与终态卡正文不再出现醒目的“运行配置”区块，实际配置以卡片最底部的灰色小字展示，顺序为 `CodyWork · Workspace · Demand`、`模型 · 推理 · 权限`、`问题`；没有 Demand 时不显示空占位。确认 Codex Turn 确实使用所选模型与推理程度。刷新或重启服务后再次发送，确认选择仍然保持。由非绑定创建者尝试修改，确认被明确拒绝。
+10. 发送 `/model`，确认配置卡先展示当前模型、推理程度、权限、Workspace 和 Demand（Workspace 会话不伪造 Demand）。选择一个非当前模型，再从第二张卡中选择该模型明确支持的推理程度；确认成功卡给出清晰反馈。发送唯一消息，核对执行中与终态卡正文不再出现醒目的“运行配置”区块，实际配置以卡片最底部的灰色小字展示，顺序为 `CodyWork · Workspace · Demand`、`模型 · 推理 · 权限`、`问题`；没有 Demand 时不显示空占位。确认 Codex Turn 确实使用所选模型与推理程度。刷新或重启服务后再次发送，确认选择仍然保持。由非绑定创建者尝试修改，确认被明确拒绝。
 11. 在执行中发送第二条消息验证排队；执行 `/status`、`/stop`、`/unbind`，并构造一次提交或投递失败后显式 `/retry`。
 12. 临时断开并恢复飞书长连接，再显式重启 CodyWork 服务；在没有浏览器会话 WebSocket 的待机状态下从飞书继续发送一轮，然后重新打开浏览器核对历史。
 13. 确认浏览器聊天内容区不显示常驻的飞书绑定横幅；点击会话列表中的机器人按钮，确认弹窗展示机器人、会话范围、连接状态、脱敏后的绑定用户、原生 Thread 和投递状态，并可通过关闭按钮、遮罩及 `Esc` 退出。点击飞书卡片的“在 CodyWork 中打开”，确认 URL 对 Demand 绑定精确恢复 Workspace、Demand 和 Conversation，对 Workspace 绑定精确恢复 Workspace 和 Conversation 且不伪造 Demand。再从弹窗复制会话链接并执行一次 UI 解绑；下一条飞书消息重新绑定到同一会话，确认首条消息仍只提交一次。
@@ -424,30 +424,32 @@
 - 飞书长连接自动重连且不依赖浏览器 WebSocket；连接问题不触发 Codex App Server 重启。服务重启后，已确认提交的 Turn 继续投影，提交状态不确定的命令标记失败并提示手动重试。
 - Outbox 在外部调用前持久化为 `sending`，使用稳定幂等键、租约、指数退避和死信；进程中断后过期租约可恢复，卡片更新按 revision 收敛，旧 revision 不覆盖终态。
 - 设置页能清楚区分连接状态、最近活动、最近一次断开事实、绑定、执行队列、Inbox 和 Outbox；失败投递可人工重试。卡片深链精确打开绑定会话；浏览器内容区不常驻绑定横幅，机器人按钮提供至少 44px 点击区域并按需打开绑定详情弹窗，绑定用户只以脱敏形式展示。浏览器控制台与服务端无未处理异常或重试风暴。
-- Workspace 绑定不依赖任何虚构 Demand；已有会话和新建会话都固定为 `read-only`。只读命令与网络访问可用，所有文件写入都由 Codex 原生 `readOnly` 拒绝，页面选项不能将其升级为可写。
+- Workspace 绑定不依赖任何虚构 Demand；已有会话和新建会话都可选择 YOLO 或 Normal，默认推荐 YOLO。实际 Turn 使用绑定保存的权限，支持命令、Git、网络、文件读写和附件；CodyWork 不再叠加 Workspace 文件白名单。
 
 清理：解绑测试会话，删除测试群，删除专用测试账号配置和一次性附件；保留正式 Workspace、Demand、原生 Thread 和业务仓库不动。
 
-## E2E-021 Workspace 只读搜索会话
+## E2E-021 Workspace 会话
 
-前置条件：使用一次性 Workspace，其中包含一个可识别的代码文件、一份 `docs/` 知识文档和一个可调用 Skill；在 Workspace 内记录测试前文件清单与内容摘要。
+前置条件：使用一次性 Workspace，其中包含根 `AGENTS.md`、一个带子目录 `AGENTS.md` 的测试 Repo、一个可识别的代码文件、一份 `docs/` 知识文档和一个可调用 Skill；准备本地 bare remote 供 Git 推送验证。
 
 步骤：
 
-1. 从左侧导航进入“只读搜索”，确认空 Workspace 会自动创建第一个搜索会话。
+1. 从左侧导航进入“Workspace 会话”，确认空 Workspace 会自动创建第一个会话且默认权限为 YOLO。
 2. 新建第二个会话，分别重命名和切换两个会话；复制当前 URL，刷新并在新 Tab 直接打开。
 3. 询问代码文件中的唯一标识，再询问知识文档中的唯一事实；使用 `$` 引用测试 Skill 发送一轮。
-4. 让 Codex 运行 `pwd`、一条只读代码搜索命令和一条无敏感网络查询。
-5. 让 Codex 在 Workspace 根目录创建一个唯一名测试文件，再尝试把会话权限改为 Worktree 写入或 YOLO。
-6. 停止并重启 CodyWork 服务，从专属 URL 恢复同一会话，再次执行写入尝试。
-7. 删除两个 Workspace 会话，包括删除最后一个会话，然后重新进入“只读搜索”。
+4. 让 Codex 运行 `pwd`、代码搜索、无敏感网络查询和一个已登录的测试 CLI 状态命令。
+5. 让 Codex 在 Workspace 根目录创建测试文件，再修改测试 Repo 文件、提交并推送到 bare remote；核对操作前读取了根及 Repo 目录链上的 `AGENTS.md`。
+6. 依次切换 Normal、只读和 YOLO：Normal 验证原生审批，read-only 验证写入被 Codex 沙箱拒绝，YOLO 再次成功写入。
+7. 上传测试图片与文件，确认消息可发送、文件可被读取；停止并重启 CodyWork 服务，从专属 URL 恢复同一会话，再执行一次 YOLO 写入。
+8. 删除两个 Workspace 会话，包括删除最后一个会话，然后重新进入“Workspace 会话”。
 
 关键断言：
 
-- Workspace 搜索会话是一级会话，URL 只包含 Workspace 和 Conversation，不包含伪造的 Demand。刷新、新 Tab 和服务重启后恢复同一原生 Codex Thread。
+- Workspace 会话是一级会话，URL 只包含 Workspace 和 Conversation，不包含伪造的 Demand。刷新、新 Tab 和服务重启后恢复同一原生 Codex Thread及已保存权限。
 - 会话可读整个 Workspace，能根据 Workspace knowledge catalog 按需读取知识，支持多轮和 `$Skill`，不把全部知识或 Skill 默认塞入上下文。
-- 命令执行和网络访问正常；任何文件写入都失败，且测试前后 Workspace 文件清单和内容不变。
-- Composer 只展示 Workspace 只读权限；即使绕过 UI 调用 API，也不能升级为 `workspace-write` 或 `yolo`。服务重启后仍保持该边界。
+- 新会话默认 YOLO；Composer 同时提供只读、Normal 和 YOLO，切换立即持久化。YOLO 使用底层 `dangerFullAccess`，Normal 使用底层 `workspaceWrite` 与审批，只读使用底层 `readOnly`；CodyWork 不再额外限制 Workspace 文件、Git、CLI 或网络。
+- 根 `AGENTS.md` 在创建会话时注入；操作具体 Repo 前按目录链读取更深层 `AGENTS.md`，不会无差别把所有 Service 规则塞入初始上下文。
+- Workspace 附件可安全落到 `docs/.channel-attachments/`；文件名清理、大小限制和图片输入行为与 Demand 通道一致。
 - Workspace 会话不要求 Demand 专属的保底数量；删除最后一个后回到稳定空态，再进入时创建新会话。
 - 消息顺序、optimistic 气泡、工具卡片、Worked 终态和 WebSocket 重连语义与 Demand 会话共享同一套 Core 链路，无重复实现和重复消息。
 

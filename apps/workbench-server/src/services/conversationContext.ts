@@ -59,26 +59,26 @@ export class ConversationContextResolver {
     }, mode)
   }
 
-  workspaceContext(workspaceId: string): RuntimeContext {
+  workspaceContext(workspaceId: string, mode: ConversationPermissionMode = 'yolo'): RuntimeContext {
     const workspacePath = this.workspacePath(workspaceId)
-    const bundle = resolveInstructionBundle({ workspacePath, workspaceSearch: true })
-    return {
+    const bundle = resolveInstructionBundle({ workspacePath, workspaceSession: true })
+    return withPermission({
       workspacePath,
       instructionBundle: bundle,
       effectivePolicy: resolveEffectivePolicy({
         workspacePath,
         readableRoots: [],
-        writableRoots: [],
+        writableRoots: [workspacePath],
         shell: 'full',
         approval: 'workbench',
       }),
-    }
+    }, mode)
   }
 
   forRow(row: ConversationRow): RuntimeContext {
-    if (row.scope === 'workspace') return this.workspaceContext(row.workspace_id)
+    if (row.scope === 'workspace') return this.workspaceContext(row.workspace_id, row.permission_mode)
     if (!row.demand_id) throw new Error('需求会话缺少 Demand')
-    return this.demandContext(this.demand(row.workspace_id, row.demand_id), 'workspace-write')
+    return this.demandContext(this.demand(row.workspace_id, row.demand_id), row.permission_mode)
   }
 
   workspacePath(workspaceId: string): string {

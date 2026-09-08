@@ -74,7 +74,7 @@ describe('conversation websocket control plane', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('creates first-class Workspace sessions that can run commands but can never gain file-write permission', async () => {
+  it('creates first-class Workspace sessions in YOLO and supports every native Codex permission mode', async () => {
     class WorkspaceRuntime extends TestRuntimeAdapter {
       createdContexts: Parameters<TestRuntimeAdapter['createConversation']>[0]['context'][] = []
       override async createConversation(request: Parameters<TestRuntimeAdapter['createConversation']>[0]) {
@@ -83,22 +83,25 @@ describe('conversation websocket control plane', () => {
       }
     }
     const test = await fixture()
+    writeFileSync(join(test.root, 'AGENTS.md'), '# Workspace rules\nRead service rules before changing a service.')
     writeFileSync(join(test.root, 'docs', 'search-guide.md'), '# Search guide\nUse indexed knowledge.')
     const runtime = new WorkspaceRuntime()
     const conversations = new ConversationService(test.db, runtime)
     const conversation = await conversations.createWorkspace(test.workspaceId, 'Workspace research')
 
-    expect(conversation).toMatchObject({ scope: 'workspace', demandId: null, permissionMode: 'read-only', title: 'Workspace research', createdVia: 'browser' })
+    expect(conversation).toMatchObject({ scope: 'workspace', demandId: null, permissionMode: 'yolo', title: 'Workspace research', createdVia: 'browser' })
     const feishuConversation = await conversations.create(test.workspaceId, test.demandId, 'Feishu session', 'feishu')
     expect(feishuConversation.createdVia).toBe('feishu')
     expect(conversations.listWorkspace(test.workspaceId)).toEqual([expect.objectContaining({ id: conversation.id })])
     expect(conversations.list(test.workspaceId, test.demandId)).toEqual([expect.objectContaining({ id: feishuConversation.id, createdVia: 'feishu' })])
     expect(runtime.createdContexts[0]).toMatchObject({
       workspacePath: test.root,
-      effectivePolicy: { readableRoots: [], writableRoots: [], shell: 'full', approval: 'workbench' },
+      effectivePolicy: { readableRoots: [], writableRoots: [realpathSync.native(test.root)], shell: 'full', approval: 'none' },
     })
     expect(runtime.createdContexts[0]?.demandPath).toBeUndefined()
-    expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('Workspace 级只读搜索会话')
+    expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('Workspace 级会话')
+    expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('Read service rules before changing a service.')
+    expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('从 Workspace 根到目标目录逐级查找并读取适用的 AGENTS.md')
     expect(runtime.createdContexts[0]?.instructionBundle.systemInstructions).toContain('docs/search-guide.md')
     const canonicalRoot = realpathSync.native(test.root)
     expect(runtime.createdContexts[1]).toMatchObject({
@@ -109,9 +112,11 @@ describe('conversation websocket control plane', () => {
       },
     })
 
-    await expect(conversations.send(test.workspaceId, conversation.id, 'run a read-only query')).resolves.toMatchObject({ accepted: true })
-    await expect(conversations.setPermission(test.workspaceId, conversation.id, 'workspace-write')).rejects.toThrow('固定为只读')
-    expect(conversations.get(test.workspaceId, conversation.id).permissionMode).toBe('read-only')
+    await expect(conversations.send(test.workspaceId, conversation.id, 'run a workspace command')).resolves.toMatchObject({ accepted: true })
+    await expect(conversations.setPermission(test.workspaceId, conversation.id, 'workspace-write')).resolves.toMatchObject({ permissionMode: 'workspace-write' })
+    await expect(conversations.setPermission(test.workspaceId, conversation.id, 'read-only')).resolves.toMatchObject({ permissionMode: 'read-only' })
+    await expect(conversations.setPermission(test.workspaceId, conversation.id, 'yolo')).resolves.toMatchObject({ permissionMode: 'yolo' })
+    expect(conversations.get(test.workspaceId, conversation.id).permissionMode).toBe('yolo')
     await expect(conversations.remove(test.workspaceId, conversation.id)).resolves.toEqual({ deleted: true })
 
     test.db.close()

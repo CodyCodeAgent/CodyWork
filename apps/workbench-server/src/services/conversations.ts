@@ -179,7 +179,7 @@ export class ConversationService implements ConversationCommandGateway {
   }
 
   async createWorkspace(workspaceId: string, title?: string, createdVia: ConversationCreatedVia = 'browser'): Promise<ConversationView> {
-    const context = this.contexts.workspaceContext(workspaceId)
+    const context = this.contexts.workspaceContext(workspaceId, 'yolo')
     const id = makeId('conversation')
     const handle = await this.runtime.createConversation({ conversationId: id, context })
     const now = nowIso()
@@ -189,10 +189,10 @@ export class ConversationService implements ConversationCommandGateway {
       demand_id: null,
       workspace_id: workspaceId,
       native_id: handle.nativeId,
-      title: title?.trim() || 'Workspace 搜索',
+      title: title?.trim() || 'Workspace 会话',
       created_via: createdVia,
       status: 'idle',
-      permission_mode: 'read-only',
+      permission_mode: 'yolo',
       policy_hash: context.effectivePolicy.hash,
       instruction_hash: context.instructionBundle.sha256,
       created_at: now,
@@ -302,9 +302,6 @@ export class ConversationService implements ConversationCommandGateway {
     if (!composerHasContent({ text, skills: requestedSkills, images: localImages })) throw new Error('消息不能为空')
     const commandId = command.id?.trim().slice(0, 200) || makeId('command')
     const permissionMode = command.executionProfile?.permissionMode ?? row.permission_mode
-    if (row.scope === 'workspace' && permissionMode !== 'read-only') {
-      throw new Error('Workspace 会话固定为只读；命令不能提升会话权限')
-    }
     const context = this.contexts.forRow(row)
     const selectedSkills = await this.runtime.resolveSkills(context, requestedSkills)
     const runtimeSettings: RuntimeTurnSettings = {
@@ -338,9 +335,6 @@ export class ConversationService implements ConversationCommandGateway {
 
   async setPermission(workspaceId: string, conversationId: string, mode: ConversationPermissionMode): Promise<ConversationView> {
     const row = this.requireConversation(workspaceId, conversationId)
-    if (row.scope === 'workspace' && mode !== 'read-only') {
-      throw new Error('Workspace 会话固定为只读；需要修改代码时请进入 Demand Worktree')
-    }
     await this.ensureHandle(row)
     await this.runtime.setPermission(this.handleFor(row), mode)
     this.repository.updatePermission(conversationId, mode)

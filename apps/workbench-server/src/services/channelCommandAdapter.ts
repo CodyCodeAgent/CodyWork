@@ -45,11 +45,10 @@ export class ChannelCommandAdapter {
     const sourceMessageId = channelMessage.sourceMessageId || inbox.message.messageId
     const replyMessageId = channelMessage.replyMessageId || inbox.message.messageId
     if (inbox.message.attachments.length) {
-      if (binding.targetType === 'codywork-workspace') throw new Error('Workspace 只读搜索会话暂不接收附件；请发送文字，或在 Demand 会话中处理附件')
       const workspace = this.workspaces.get(binding.workspaceId)
-      const demand = listDemands(this.database, workspace).find(item => item.id === binding.demandId)
-      if (!demand) throw new Error('绑定的需求不存在')
-      const root = resolve(demand.path, 'docs', '.channel-attachments', sourceMessageId)
+      const demand = binding.targetType === 'codywork-demand' ? listDemands(this.database, workspace).find(item => item.id === binding.demandId) : null
+      if (binding.targetType === 'codywork-demand' && !demand) throw new Error('绑定的需求不存在')
+      const root = resolve(demand?.path ?? workspace.path, 'docs', '.channel-attachments', sourceMessageId)
       for (const attachment of inbox.message.attachments) {
         const downloaded = await provider.downloadAttachment(sourceMessageId, attachment, root)
         if (attachment.type === 'image') localImages.push({ path: downloaded.path })

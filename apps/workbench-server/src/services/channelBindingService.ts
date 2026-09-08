@@ -78,8 +78,8 @@ export class ChannelBindingService {
       const workspaceId = string(action.value.workspaceId)
       const workspace = this.workspaces.get(workspaceId)
       const actions = listDemands(this.database, workspace).map(demand => ({ text: demand.name, value: carryMode({ action: 'channel.pick_demand', inboxId, workspaceId, demandId: demand.id }) }))
-      actions.unshift({ text: 'Workspace 只读搜索', value: carryMode({ action: 'channel.pick_workspace_scope', inboxId, workspaceId, demandId: '' }) })
-      const next = card('选择 CodyWork 运行范围', `Workspace：**${workspace.name}**\n\nWorkspace 搜索会话可读代码、知识库并运行查询命令，但不能修改任何文件；开发任务请选择下方 Demand。`, actions)
+      actions.unshift({ text: 'Workspace 会话', value: carryMode({ action: 'channel.pick_workspace_scope', inboxId, workspaceId, demandId: '' }) })
+      const next = card('选择 CodyWork 运行范围', `Workspace：**${workspace.name}**\n\nWorkspace 会话直接在 Workspace 根目录运行；如需隔离开发分支，也可以选择下方 Demand。`, actions)
       await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `${inbox.id}:pick-scope:${workspaceId}`, revision: 1 })
       return next
     }
@@ -88,8 +88,8 @@ export class ChannelBindingService {
     if (kind === 'channel.pick_workspace_scope') {
       const workspace = this.workspaces.get(workspaceId)
       const actions = this.conversations.listWorkspace(workspaceId).map(session => ({ text: session.title, value: carryMode({ action: 'channel.pick_workspace_session', inboxId, workspaceId, demandId: '', conversationId: session.id }) }))
-      actions.unshift({ text: '+ 新建只读搜索会话', value: carryMode({ action: 'channel.pick_new_workspace_session', inboxId, workspaceId, demandId: '', conversationId: '' }) })
-      const next = card('选择 Workspace 搜索会话', `Workspace：**${workspace.name}**\n\n飞书与浏览器将共享同一个只读 Codex Thread。可运行查询命令和联网，但文件写入会被沙箱阻止。`, actions)
+      actions.unshift({ text: '+ 新建 Workspace 会话', value: carryMode({ action: 'channel.pick_new_workspace_session', inboxId, workspaceId, demandId: '', conversationId: '' }) })
+      const next = card('选择 Workspace 会话', `Workspace：**${workspace.name}**\n\n飞书与浏览器将共享同一个原生 Codex Thread。`, actions)
       await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `${inbox.id}:pick-workspace-session:${workspaceId}`, revision: 2 })
       return next
     }
@@ -109,8 +109,8 @@ export class ChannelBindingService {
     if (!workspaceKinds.has(effectiveKind) && !demandKinds.has(effectiveKind)) throw new Error('未知绑定步骤')
     const workspaceScope = workspaceKinds.has(effectiveKind)
     const isNew = effectiveKind === 'channel.pick_new_session' || effectiveKind === 'channel.pick_new_workspace_session'
-    const permissionMode = workspaceScope ? 'read-only' : action.value.permissionMode === 'workspace-write' ? 'workspace-write' : action.value.permissionMode === 'yolo' ? 'yolo' : ''
-    if (!workspaceScope && !permissionMode) {
+    const permissionMode = action.value.permissionMode === 'workspace-write' ? 'workspace-write' : action.value.permissionMode === 'yolo' ? 'yolo' : ''
+    if (!permissionMode) {
       const next = card('选择执行权限', 'YOLO 使用底层 Codex danger-full-access，拥有 CodyWork 服务账号可用的完整系统权限；Normal 使用 Codex 原生 workspace-write 与审批机制。此选择可在 CodyWork 页面后续调整。', [
         { text: 'YOLO（默认）', value: carryMode({ action: 'channel.pick_permission', inboxId, workspaceId, demandId, conversationId: string(action.value.conversationId), sessionAction: effectiveKind, permissionMode: 'yolo' }) },
         { text: 'Normal（每次审批）', value: carryMode({ action: 'channel.pick_permission', inboxId, workspaceId, demandId, conversationId: string(action.value.conversationId), sessionAction: effectiveKind, permissionMode: 'workspace-write' }) },
@@ -119,9 +119,9 @@ export class ChannelBindingService {
       return next
     }
     const conversation = isNew
-      ? workspaceScope ? await this.conversations.createWorkspace(workspaceId, '飞书只读搜索', 'feishu') : await this.conversations.create(workspaceId, demandId, '飞书会话', 'feishu')
+      ? workspaceScope ? await this.conversations.createWorkspace(workspaceId, '飞书 Workspace 会话', 'feishu') : await this.conversations.create(workspaceId, demandId, '飞书会话', 'feishu')
       : this.conversations.get(workspaceId, string(action.value.conversationId))
-    if (workspaceScope && conversation.scope !== 'workspace') throw new Error('所选会话不是 Workspace 搜索会话')
+    if (workspaceScope && conversation.scope !== 'workspace') throw new Error('所选会话不是 Workspace 会话')
     if (!workspaceScope && (conversation.scope !== 'demand' || conversation.demandId !== demandId)) throw new Error('所选会话不属于当前 Demand')
     const binding = this.repositories.bindings.create({
       message: groupMode === 'topic' ? asTopic(inbox.message) : inbox.message,
@@ -137,7 +137,7 @@ export class ChannelBindingService {
     this.repositories.inbox.update(inbox.id, 'ready', { bindingId: binding.id })
     await this.hooks.observe(binding, { emptyHistory: isNew })
     const openUrl = this.hooks.openUrl(binding)
-    const scopeNote = workspaceScope ? 'Workspace 只读搜索；可运行查询命令，但不能修改文件。' : permissionMode === 'yolo' ? 'Demand Worktree 开发会话；YOLO 已启用。' : 'Demand Worktree 开发会话；Normal 审批模式。'
+    const scopeNote = `${workspaceScope ? 'Workspace 会话' : 'Demand Worktree 开发会话'}；${permissionMode === 'yolo' ? 'YOLO 已启用。' : 'Normal 审批模式。'}`
     const groupNote = groupMode === 'topic' ? '\n\n此群后续每条根消息都会创建独立会话。发送 `/setting` 可调整。' : groupMode === 'reply' ? '\n\n此群后续消息将共享本会话并回复原消息。发送 `/setting` 可调整。' : ''
     const next = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。${scopeNote}${groupNote}\n\n接下来在本对话发送的消息会进入同一个 Codex Thread。`, { color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}) })
     await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
@@ -149,7 +149,7 @@ export class ChannelBindingService {
   async bindConfiguredTopic(inboxId: string, profile: ChannelGroupProfile): Promise<void> {
     const inbox = this.repositories.inbox.get(inboxId)
     const workspaceScope = profile.targetType === 'codywork-workspace'
-    const conversation = workspaceScope ? await this.conversations.createWorkspace(profile.workspaceId, '飞书话题搜索', 'feishu') : await this.conversations.create(profile.workspaceId, profile.demandId!, '飞书话题', 'feishu')
+    const conversation = workspaceScope ? await this.conversations.createWorkspace(profile.workspaceId, '飞书 Workspace 话题', 'feishu') : await this.conversations.create(profile.workspaceId, profile.demandId!, '飞书话题', 'feishu')
     const binding = this.repositories.bindings.create({ message: inbox.message, targetType: profile.targetType, workspaceId: profile.workspaceId, demandId: profile.demandId, conversationId: conversation.id, threadId: conversation.nativeId, ownerIdentity: profile.ownerIdentity, permissionMode: profile.permissionMode, notificationPolicy: 'mirror-requests' })
     this.repositories.inbox.update(inbox.id, 'ready', { bindingId: binding.id })
     await this.hooks.observe(binding, { emptyHistory: true })

@@ -114,6 +114,48 @@ describe('workspace-only server primitives', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('upgrades legacy Workspace conversations from forced read-only to the YOLO default', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-workspace-permission-'))
+    const path = join(root, 'workspace.db')
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_opened_at TEXT NOT NULL);
+      CREATE TABLE demands (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name TEXT NOT NULL, branch_name TEXT NOT NULL, worktree_key TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL DEFAULT 'demand' CHECK (scope IN ('demand', 'workspace')),
+        demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        native_id TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
+        status TEXT NOT NULL DEFAULT 'idle',
+        permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+        policy_hash TEXT NOT NULL,
+        instruction_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL AND permission_mode = 'read-only'))
+      );
+      INSERT INTO workspaces VALUES ('ws-workspace', 'Legacy Workspace', '/tmp/legacy-workspace-session', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+      INSERT INTO conversations VALUES ('conversation-workspace', 'workspace', NULL, 'ws-workspace', 'thread-workspace', 'Legacy search', 'browser', 'idle', 'read-only', 'policy', 'instructions', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+    `)
+    legacy.close()
+
+    const db = new WorkbenchDb(path)
+    expect(db.db.prepare('SELECT scope, demand_id, permission_mode FROM conversations WHERE id = ?').get('conversation-workspace')).toEqual({
+      scope: 'workspace', demand_id: null, permission_mode: 'yolo',
+    })
+    const conversationSql = db.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversations'").get() as { sql: string }
+    const profileSql = db.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channel_group_profiles'").get() as { sql: string }
+    expect(conversationSql.sql).not.toContain("permission_mode = 'read-only'")
+    expect(profileSql.sql).not.toContain("permission_mode = 'read-only'")
+    expect(db.db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('accepts an empty local folder without creating a competing scaffold', () => {
     const root = mkdtempSync(join(tmpdir(), 'workspace-only-'))
     const folder = join(root, 'empty')

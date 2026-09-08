@@ -142,14 +142,14 @@ function demandStartupSource(): RuntimeInstructionSource {
   return { kind: 'platform', label: 'CodyWork demand startup', sha256: hash(content), content }
 }
 
-function workspaceSearchStartupSource(): RuntimeInstructionSource {
+function workspaceSessionStartupSource(): RuntimeInstructionSource {
   const content = [
-    '这是一个 Workspace 级只读搜索会话。文件读取不受 Workspace、用户或目录边界限制；你可以检索知识库与代码、读取全局 Skill 及其依赖、运行不会修改文件系统的查询命令，并可联网获取任务所需信息。',
-    '严禁在任何位置创建、修改、移动或删除文件；如果用户要求开发或落盘修改，请明确建议其进入对应 Demand Worktree 会话。不要将只读限制误解为“不能运行命令”。',
+    '这是一个 Workspace 级会话。它直接使用底层 Codex 的当前执行权限，可以读取、创建和修改文件，运行命令、Git 与其他 CLI，并可联网获取任务所需信息；不要额外施加 CodyWork 目录白名单。',
+    'Workspace 根 AGENTS.md 已由本指令包注入。准备在某个仓库或子目录执行实质操作前，必须从 Workspace 根到目标目录逐级查找并读取适用的 AGENTS.md；目录层级更深的规则覆盖上层冲突规则。不要一次性扫描所有 Service 的 AGENTS.md，只读取本次任务实际涉及的目录链。',
     '',
-    '优先根据 Workspace knowledge catalog 定位少量相关文档，再按需读取代码或运行查询。Skill 默认不注入；仅在用户使用 `$Skill` 显式引用时加载对应 Skill。',
+    '优先根据 Workspace knowledge catalog 定位少量相关文档，再按需读取代码或运行命令。Skill 默认不注入；仅在用户使用 `$Skill` 显式引用时加载对应 Skill。',
   ].join('\n')
-  return { kind: 'platform', label: 'CodyWork workspace search startup', sha256: hash(content), content }
+  return { kind: 'platform', label: 'CodyWork workspace session startup', sha256: hash(content), content }
 }
 
 function skillEntries(root: string): InstructionBundle['skills'] {
@@ -193,7 +193,7 @@ function instructionText(sources: RuntimeInstructionSource[]): string {
 export interface InstructionBundleInput {
   workspacePath: string
   demandPath?: string
-  workspaceSearch?: boolean
+  workspaceSession?: boolean
   platformInstructions?: string
   charterPath?: string
   repositoryPaths?: string[]
@@ -221,8 +221,8 @@ export function resolveInstructionBundle(input: InstructionBundleInput): Instruc
     sources.push(...demandDocumentSources(input.demandPath))
     const knowledgeCatalog = workspaceKnowledgeCatalogSource(workspacePath)
     if (knowledgeCatalog) sources.push(knowledgeCatalog)
-  } else if (input.workspaceSearch) {
-    sources.push(workspaceSearchStartupSource())
+  } else if (input.workspaceSession) {
+    sources.push(workspaceSessionStartupSource())
     const knowledgeCatalog = workspaceKnowledgeCatalogSource(workspacePath)
     if (knowledgeCatalog) sources.push(knowledgeCatalog)
   }
