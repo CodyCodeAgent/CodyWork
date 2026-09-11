@@ -6,6 +6,7 @@ function action(patch: Partial<QuickAction> = {}): QuickAction {
   return {
     id: 'action-1', workspaceId: 'workspace-1', name: '检查实现', prompt: '检查实现', enabled: true,
     sortOrder: 0, skillIds: [], skills: [], missingSkillIds: [], scenes: ['demand-development'],
+    revision: 1, lastEditedVia: 'settings', sourceConversationId: null, sourceTurnId: null,
     createdAt: '', updatedAt: '', ...patch,
   }
 }

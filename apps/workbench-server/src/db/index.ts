@@ -68,6 +68,10 @@ export interface QuickActionRow {
   prompt: string
   enabled: number
   sort_order: number
+  revision: number
+  last_edited_via: 'settings' | 'agent'
+  source_conversation_id: string | null
+  source_turn_id: string | null
   created_at: string
   updated_at: string
 }
@@ -178,6 +182,10 @@ export class WorkbenchDb {
         prompt TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1,
         sort_order INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 1,
+        last_edited_via TEXT NOT NULL DEFAULT 'settings' CHECK (last_edited_via IN ('settings', 'agent')),
+        source_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        source_turn_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(workspace_id, name)
@@ -405,6 +413,16 @@ export class WorkbenchDb {
       );
       CREATE INDEX IF NOT EXISTS channel_audit_recent ON channel_audit_events(account_id, created_at DESC);
     `)
+    const quickActionColumns = new Set((this.db.prepare('PRAGMA table_info(quick_actions)').all() as { name?: string }[]).map(column => column.name))
+    const quickActionMigrations = [
+      ['revision', 'INTEGER NOT NULL DEFAULT 1'],
+      ['last_edited_via', "TEXT NOT NULL DEFAULT 'settings'"],
+      ['source_conversation_id', 'TEXT REFERENCES conversations(id) ON DELETE SET NULL'],
+      ['source_turn_id', 'TEXT'],
+    ] as const
+    for (const [column, definition] of quickActionMigrations) {
+      if (!quickActionColumns.has(column)) this.db.exec(`ALTER TABLE quick_actions ADD COLUMN ${column} ${definition}`)
+    }
     const channelAccountColumns = new Set((this.db.prepare('PRAGMA table_info(channel_accounts)').all() as { name?: string }[]).map(column => column.name))
     const channelAccountMigrations = [
       ['allow_all_conversations', 'INTEGER NOT NULL DEFAULT 0'],

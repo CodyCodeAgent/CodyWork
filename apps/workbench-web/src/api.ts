@@ -91,6 +91,10 @@ export interface QuickAction {
   skills: Array<{ id: string; name: string; status: 'available' | 'missing' | 'unavailable' }>
   missingSkillIds: string[]
   scenes: QuickActionScene[]
+  revision: number
+  lastEditedVia: 'settings' | 'agent'
+  sourceConversationId: string | null
+  sourceTurnId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -233,6 +237,13 @@ export interface ConversationImageUpload {
   mimeType: string
   size: number
   url: string
+}
+
+export interface ConversationShareResult {
+  documentId: string
+  url: string
+  title: string
+  messageCount: number
 }
 
 export interface RuntimeSettings {
@@ -407,6 +418,8 @@ export const api = {
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>
     request<{ events: ConversationEvent[]; watermark: number }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
+  shareConversationToFeishu: (workspaceId: string, conversationId: string, input: { accountId: string; title?: string }) =>
+    request<ConversationShareResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/share/feishu`, input),
   uploadConversationImage: (workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }) =>
     request<ConversationImageUpload>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/images`, input),
   sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }, imageIds: string[] = []) =>

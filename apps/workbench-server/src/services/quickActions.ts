@@ -27,8 +27,18 @@ export interface QuickActionView {
   skills: Array<{ id: string; name: string; status: 'available' | 'missing' | 'unavailable' }>
   missingSkillIds: string[]
   scenes: QuickActionScene[]
+  revision: number
+  lastEditedVia: 'settings' | 'agent'
+  sourceConversationId: string | null
+  sourceTurnId: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface QuickActionMutationSource {
+  via: 'settings' | 'agent'
+  conversationId?: string
+  turnId?: string
 }
 
 function requireAction(db: WorkbenchDb, workspace: WorkspaceRow, id: string): QuickActionRow {
@@ -69,6 +79,10 @@ function validateSelectedSkills(available: Map<string, CurrentSkill>, skillIds: 
   }
 }
 
+function sameMembers(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every(value => right.includes(value))
+}
+
 function toView(db: WorkbenchDb, currentSkills: Map<string, CurrentSkill>, row: QuickActionRow): QuickActionView {
   const skillIds = (db.db.prepare('SELECT skill_id FROM quick_action_skills WHERE quick_action_id = ? ORDER BY skill_id').all(row.id) as { skill_id: string }[]).map(item => item.skill_id)
   const scenes = (db.db.prepare('SELECT scene FROM quick_action_scenes WHERE quick_action_id = ? ORDER BY scene').all(row.id) as { scene: QuickActionScene }[]).map(item => item.scene)
@@ -91,6 +105,10 @@ function toView(db: WorkbenchDb, currentSkills: Map<string, CurrentSkill>, row: 
     skills,
     missingSkillIds: skills.filter(skill => skill.status !== 'available').map(skill => skill.id),
     scenes,
+    revision: row.revision,
+    lastEditedVia: row.last_edited_via,
+    sourceConversationId: row.source_conversation_id,
+    sourceTurnId: row.source_turn_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -102,7 +120,7 @@ export function listQuickActions(db: WorkbenchDb, workspace: WorkspaceRow, skill
   return rows.map(row => toView(db, currentSkills, row))
 }
 
-export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[], input: QuickActionInput): QuickActionView {
+export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[], input: QuickActionInput, source: QuickActionMutationSource = { via: 'settings' }): QuickActionView {
   const normalized = normalize(input)
   const currentSkills = currentSkillMap(skills)
   validateSelectedSkills(currentSkills, normalized.skillIds)
@@ -113,8 +131,8 @@ export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skil
   const now = nowIso()
   db.db.exec('BEGIN')
   try {
-    db.db.prepare('INSERT INTO quick_actions (id, workspace_id, name, prompt, enabled, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, workspace.id, normalized.name, normalized.prompt, normalized.enabled ? 1 : 0, nextOrder, now, now)
+    db.db.prepare('INSERT INTO quick_actions (id, workspace_id, name, prompt, enabled, sort_order, revision, last_edited_via, source_conversation_id, source_turn_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)')
+      .run(id, workspace.id, normalized.name, normalized.prompt, normalized.enabled ? 1 : 0, nextOrder, source.via, source.conversationId ?? null, source.turnId ?? null, now, now)
     const insertSkill = db.db.prepare('INSERT INTO quick_action_skills (quick_action_id, skill_id) VALUES (?, ?)')
     for (const skillId of normalized.skillIds) insertSkill.run(id, skillId)
     const insertScene = db.db.prepare('INSERT INTO quick_action_scenes (quick_action_id, scene) VALUES (?, ?)')
@@ -127,18 +145,26 @@ export function createQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skil
   return toView(db, currentSkills, requireAction(db, workspace, id))
 }
 
-export function updateQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[], id: string, input: QuickActionInput): QuickActionView {
+export function updateQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skills: CurrentSkill[], id: string, input: QuickActionInput, source: QuickActionMutationSource = { via: 'settings' }): QuickActionView {
   const current = requireAction(db, workspace, id)
   const normalized = normalize(input)
   const currentSkills = currentSkillMap(skills)
   validateSelectedSkills(currentSkills, normalized.skillIds)
+  const currentView = toView(db, currentSkills, current)
+  if (
+    currentView.name === normalized.name
+    && currentView.prompt === normalized.prompt
+    && currentView.enabled === normalized.enabled
+    && sameMembers(currentView.skillIds, normalized.skillIds)
+    && sameMembers(currentView.scenes, normalized.scenes)
+  ) return currentView
   const duplicate = db.db.prepare('SELECT id FROM quick_actions WHERE workspace_id = ? AND name = ? AND id <> ?').get(workspace.id, normalized.name, id)
   if (duplicate) throw new Error('同名快捷指令已存在')
   const now = nowIso()
   db.db.exec('BEGIN')
   try {
-    db.db.prepare('UPDATE quick_actions SET name = ?, prompt = ?, enabled = ?, updated_at = ? WHERE id = ? AND workspace_id = ?')
-      .run(normalized.name, normalized.prompt, normalized.enabled ? 1 : 0, now, id, workspace.id)
+    db.db.prepare('UPDATE quick_actions SET name = ?, prompt = ?, enabled = ?, revision = revision + 1, last_edited_via = ?, source_conversation_id = ?, source_turn_id = ?, updated_at = ? WHERE id = ? AND workspace_id = ?')
+      .run(normalized.name, normalized.prompt, normalized.enabled ? 1 : 0, source.via, source.conversationId ?? null, source.turnId ?? null, now, id, workspace.id)
     db.db.prepare('DELETE FROM quick_action_skills WHERE quick_action_id = ?').run(id)
     db.db.prepare('DELETE FROM quick_action_scenes WHERE quick_action_id = ?').run(id)
     const insertSkill = db.db.prepare('INSERT INTO quick_action_skills (quick_action_id, skill_id) VALUES (?, ?)')
@@ -150,7 +176,17 @@ export function updateQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, skil
     db.db.exec('ROLLBACK')
     throw error
   }
-  return toView(db, currentSkills, { ...current, name: normalized.name, prompt: normalized.prompt, enabled: normalized.enabled ? 1 : 0, updated_at: now })
+  return toView(db, currentSkills, {
+    ...current,
+    name: normalized.name,
+    prompt: normalized.prompt,
+    enabled: normalized.enabled ? 1 : 0,
+    revision: current.revision + 1,
+    last_edited_via: source.via,
+    source_conversation_id: source.conversationId ?? null,
+    source_turn_id: source.turnId ?? null,
+    updated_at: now,
+  })
 }
 
 export function deleteQuickAction(db: WorkbenchDb, workspace: WorkspaceRow, id: string): { deleted: true } {

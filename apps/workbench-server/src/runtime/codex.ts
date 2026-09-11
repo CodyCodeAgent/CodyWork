@@ -4,6 +4,8 @@ import {
   CODY_WEB_CORE_VERSION,
   createAppServerHost,
   type AppServerHost,
+  type ServerRequest,
+  type ServerRequestReply,
 } from '@codycodeagent/cody-web-core/runtime'
 import {
   buildTurnUserInput,
@@ -44,8 +46,10 @@ import type {
 } from './protocol.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from './protocol.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from './policy.js'
+import { QUICK_ACTION_DYNAMIC_TOOLS, QUICK_ACTION_TOOL_NAMESPACE, type AgentQuickActionCall } from '../services/agentQuickActions.js'
 
-type CodexOptions = { command?: string; model?: string; env?: NodeJS.ProcessEnv; appServerCwd?: string }
+type ProductToolHandler = (call: AgentQuickActionCall) => Promise<unknown>
+type CodexOptions = { command?: string; model?: string; env?: NodeJS.ProcessEnv; appServerCwd?: string; productToolHandler?: ProductToolHandler }
 type ProductSession = {
   handle: ConversationHandle
   binding: ThreadBinding
@@ -84,7 +88,7 @@ function turnPermissions(mode: RuntimePermissionMode): Pick<TurnInput, 'permissi
   }
 }
 
-function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, bootstrapCwd: string): ExecutionContext {
+function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, bootstrapCwd: string, productToolsEnabled: boolean): ExecutionContext {
   const executionCwd = realpathSync.native(context.demandPath ?? context.workspacePath)
   const runtimeWorkspaceRoots = [executionCwd]
   return {
@@ -98,6 +102,7 @@ function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, 
       sandbox: mode === 'read-only' ? 'read-only' : mode === 'yolo' ? 'danger-full-access' : 'workspace-write',
       runtimeWorkspaceRoots,
       baseInstructions: context.instructionBundle.systemInstructions,
+      ...(productToolsEnabled && context.demandPath ? { dynamicTools: QUICK_ACTION_DYNAMIC_TOOLS } : {}),
       experimentalRawEvents: false, ephemeral: false,
     },
     turn: {
@@ -161,7 +166,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const manager = await this.ensureRuntime()
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
-    const binding = await manager.create(id, executionContext(request.context, mode, this.runtimeOwnerCwd()))
+    const binding = await manager.create(id, executionContext(request.context, mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
     return this.attach(id, binding, request.context, mode)
   }
 
@@ -170,7 +175,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
     const binding = { id, threadId: request.nativeId }
-    await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd()))
+    await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
     return this.attach(id, binding, request.context, mode)
   }
 
@@ -188,7 +193,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     if (!session) {
       const mode = this.modeFromContext(request.context)
       const binding = { id: request.conversationId, threadId: request.nativeId }
-      await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd()))
+      await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
       this.attach(request.conversationId, binding, request.context, mode)
       session = this.sessions.get(request.conversationId)
     }
@@ -290,13 +295,13 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   async setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void> {
     const session = this.require(conversation)
     session.mode = mode
-    this.requireManager().setContext(session.handle.id, executionContext(session.context, mode, this.runtimeOwnerCwd()))
+    this.requireManager().setContext(session.handle.id, executionContext(session.context, mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
   }
 
   async updateContext(conversation: ConversationHandle, context: RuntimeContext): Promise<void> {
     const session = this.require(conversation)
     session.context = context
-    this.requireManager().setContext(session.handle.id, executionContext(context, session.mode, this.runtimeOwnerCwd()))
+    this.requireManager().setContext(session.handle.id, executionContext(context, session.mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
   }
 
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
@@ -406,6 +411,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
         cwd: this.runtimeOwnerCwd(),
         ...(this.options.env ? { env: this.options.env } : {}),
         initializeParams: { clientInfo: { name: 'codywork', title: 'CodyWork', version: '0.6.3' }, capabilities: { experimentalApi: true, requestAttestation: false } },
+        onServerRequest: request => this.handleProductToolRequest(request),
       })
       this.catalog = new CodexSessionCatalog(this.host)
       const policy: ExecutionPolicyProvider = { evaluate: (operation, binding) => {
@@ -442,6 +448,28 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     this.sessions.set(id, { handle, binding, context, mode, model: this.options.model ?? '', reasoningEffort: '' })
     this.sessionIdByThreadId.set(binding.threadId, id)
     return handle
+  }
+
+  private async handleProductToolRequest(request: ServerRequest): Promise<ServerRequestReply | null> {
+    if (request.method !== 'item/tool/call' || !this.options.productToolHandler) return null
+    const params = request.params !== null && typeof request.params === 'object' && !Array.isArray(request.params)
+      ? request.params as Record<string, unknown>
+      : {}
+    const threadId = typeof params.threadId === 'string' ? params.threadId : ''
+    const turnId = typeof params.turnId === 'string' ? params.turnId : ''
+    const namespace = typeof params.namespace === 'string' ? params.namespace : ''
+    const tool = typeof params.tool === 'string' ? params.tool : ''
+    const conversationId = this.sessionIdByThreadId.get(threadId)
+    const response = (success: boolean, payload: unknown): ServerRequestReply => ({
+      result: { success, contentItems: [{ type: 'inputText', text: JSON.stringify(payload) }] },
+    })
+    if (namespace !== QUICK_ACTION_TOOL_NAMESPACE) return response(false, { error: `CodyWork 不支持动态工具命名空间：${namespace || '(empty)'}` })
+    if (!conversationId || !threadId || !turnId || !tool) return response(false, { error: '动态工具调用缺少当前会话或 Turn 标识' })
+    try {
+      return response(true, await this.options.productToolHandler({ conversationId, threadId, turnId, tool, arguments: params.arguments }))
+    } catch (error) {
+      return response(false, { error: error instanceof Error ? error.message : String(error) })
+    }
   }
 
   private listen(conversationId: string, listener: (event: RuntimeEvent) => void): () => void {

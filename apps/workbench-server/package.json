@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.38.8",
+    "@larksuiteoapi/node-sdk": "1.73.2",
     "ws": "^8.21.0"
   },
   "devDependencies": {

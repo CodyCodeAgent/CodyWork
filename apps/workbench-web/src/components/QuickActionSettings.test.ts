@@ -29,7 +29,8 @@ describe('QuickActionSettings', () => {
         id: 'action-1', workspaceId: 'workspace-1', name: '检查实现', prompt: '检查代码', enabled: true, sortOrder: 0,
         skillIds: ['/skills/global-review/SKILL.md'],
         skills: [{ id: '/skills/global-review/SKILL.md', name: 'global-review', status: 'missing' }],
-        missingSkillIds: ['/skills/global-review/SKILL.md'], scenes: ['demand-development'], createdAt: '', updatedAt: '',
+        missingSkillIds: ['/skills/global-review/SKILL.md'], scenes: ['demand-development'], revision: 1,
+        lastEditedVia: 'settings', sourceConversationId: null, sourceTurnId: null, createdAt: '', updatedAt: '',
       }],
       skills: [skill], selectedId: 'action-1', saving: false, message: '',
     } })
@@ -37,5 +38,18 @@ describe('QuickActionSettings', () => {
     await wrapper.get('[role="alert"] button').trigger('click')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('save')?.[0]?.[0]).toEqual(expect.objectContaining({ skillIds: [] }))
+  })
+
+  it('shows that an agent-authored command is traceable to its source conversation', async () => {
+    const wrapper = mount(QuickActionSettings, { props: {
+      actions: [{
+        id: 'agent-action', workspaceId: 'workspace-1', name: 'AI 检查', prompt: '检查当前需求', enabled: true, sortOrder: 0,
+        skillIds: [], skills: [], missingSkillIds: [], scenes: ['demand-development'], revision: 3,
+        lastEditedVia: 'agent', sourceConversationId: 'conversation-1', sourceTurnId: 'turn-3', createdAt: '', updatedAt: '',
+      }],
+      skills: [], selectedId: 'agent-action', saving: false, message: '',
+    } })
+    expect(wrapper.get('.editor-meta').text()).toBe('v3 · 由需求会话内 AI 更新')
+    expect(wrapper.get('.editor-meta').attributes('title')).toContain('conversation-1')
   })
 })

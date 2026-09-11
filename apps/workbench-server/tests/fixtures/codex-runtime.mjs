@@ -22,6 +22,7 @@ let turnSequence = Number(restoredState?.turnSequence ?? 0)
 let threadSequence = Number(restoredState?.threadSequence ?? 0)
 let lastThreadCwd = ''
 const threadHistories = new Map(restoredState?.threadHistories ?? [['native-fixture-thread', catalogHistory]])
+const threadDynamicTools = new Map()
 const pendingTurns = new Map()
 let initialized = false
 const fixtureSkills = [{
@@ -87,6 +88,26 @@ function emitTurn(threadId, prompt, turnCwd = '') {
     write({ id: 800 + turnSequence, method: 'item/tool/requestUserInput', params: { threadId, turnId, itemId, questions: [{ id: 'q1', header: 'Fixture', question: '继续吗？', isOther: false, isSecret: false, options: null }], isBlocking: true } })
     return
   }
+  if (prompt.includes('DYNAMIC_QUICK_ACTION')) {
+    const namespace = (threadDynamicTools.get(threadId) ?? []).find(tool => tool?.type === 'namespace' && tool?.name === 'codywork_quick_actions')
+    if (!namespace?.tools?.some(tool => tool?.name === 'save')) {
+      notify('turn/completed', { threadId, turnId, turn: { id: turnId, status: 'failed', error: { message: 'missing CodyWork dynamic tools' } } })
+      return
+    }
+    write({
+      id: 700 + turnSequence,
+      method: 'item/tool/call',
+      params: {
+        threadId,
+        turnId,
+        callId: `call-${turnSequence}`,
+        namespace: 'codywork_quick_actions',
+        tool: 'save',
+        arguments: { name: 'Fixture shortcut', prompt: 'Run fixture verification.' },
+      },
+    })
+    return
+  }
   const text = prompt.includes('SERVER_CWD') ? process.cwd()
     : prompt.includes('THREAD_CWD') ? lastThreadCwd
       : prompt.includes('TURN_CWD') ? turnCwd
@@ -140,12 +161,14 @@ rl.on('line', line => {
       lastThreadCwd = String(message.params?.cwd ?? '')
       const threadId = `native-fixture-thread-${++threadSequence}`
       threadHistories.set(threadId, [])
+      threadDynamicTools.set(threadId, message.params?.dynamicTools ?? [])
       persistState()
       write({ id: message.id, result: { thread: { id: threadId } } })
     }
   }
   else if (message.method === 'thread/resume') {
     const threadId = message.params?.threadId ?? 'native-fixture-thread'
+    if (Array.isArray(message.params?.dynamicTools)) threadDynamicTools.set(threadId, message.params.dynamicTools)
     if (!threadHistories.has(threadId)) {
       threadHistories.set(threadId, [])
       persistState()
@@ -262,6 +285,15 @@ rl.on('line', line => {
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
     else setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })
+  else if (message.id === 700 + turnSequence) {
+    const turnId = `turn-${turnSequence}`
+    const pending = pendingTurns.get(turnId) ?? { threadId: 'native-fixture-thread', prompt: 'DYNAMIC_QUICK_ACTION', itemId: `item-${turnSequence}` }
+    const text = String(message.result?.contentItems?.[0]?.text ?? '')
+    notify('item/agentMessage/delta', { threadId: pending.threadId, turnId, itemId: pending.itemId, delta: text })
+    notify('item/completed', { threadId: pending.threadId, turnId, item: { id: pending.itemId, type: 'agentMessage', text } })
+    notify('turn/completed', { threadId: pending.threadId, turnId, turn: { id: turnId, status: 'completed' } })
+    recordTurn(pending.threadId, turnId, pending.itemId, pending.prompt, text)
+  }
   else if (message.id === 900 + turnSequence) {
     write({ id: message.id, result: { decision: 'approved' } })
     const turnId = `turn-${turnSequence}`

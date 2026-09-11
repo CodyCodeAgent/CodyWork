@@ -20,6 +20,9 @@ importers:
       '@codycodeagent/cody-web-core':
         specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.38.8
         version: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#264f74f6dab8aaa7fba8a9a532f4d1fb02735417(vue@3.5.39(typescript@6.0.3))
+      '@larksuiteoapi/node-sdk':
+        specifier: 1.73.2
+        version: 1.73.2
       ws:
         specifier: ^8.21.0
         version: 8.21.0

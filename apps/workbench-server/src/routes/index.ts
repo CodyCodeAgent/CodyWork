@@ -24,6 +24,7 @@ import { ConversationImageUploads } from '../services/imageUploads.js'
 import { createQuickAction, deleteQuickAction, listQuickActions, updateQuickAction } from '../services/quickActions.js'
 import type { QuickActionInput } from '../services/quickActions.js'
 import { CodyWorkChannelService } from '../services/channelBot.js'
+import { AgentQuickActionTools } from '../services/agentQuickActions.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -277,7 +278,14 @@ function createDefaultRuntime(db?: WorkbenchDb) {
   const saved = db ? runtimeSettingsRow(db) : undefined
   const command = saved?.codex_command?.trim() || process.env.CODY_CODEX_COMMAND?.trim() || 'codex app-server --stdio'
   const model = process.env.CODY_CODEX_MODEL?.trim()
-  return new CodyWorkCodexRuntime({ command, ...(model ? { model } : {}) })
+  let runtime: CodyWorkCodexRuntime
+  const quickActionTools = db ? new AgentQuickActionTools(db, workspace => listSkills(runtime, workspace)) : null
+  runtime = new CodyWorkCodexRuntime({
+    command,
+    ...(model ? { model } : {}),
+    ...(quickActionTools ? { productToolHandler: call => quickActionTools.handle(call) } : {}),
+  })
+  return runtime
 }
 
 async function awaitInitialization(path: string) {
@@ -616,6 +624,20 @@ function buildRoutes(ctx: AppContext) {
     const conversationId = requiredParam(c, 'conversationId')
     conversationService(ctx).get(workspace.id, conversationId)
     return channelService(ctx).listConversationBindings(conversationId)
+  })
+
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/share/feishu', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const accountId = typeof c.body.accountId === 'string' ? c.body.accountId.trim() : ''
+    if (!accountId) throw new Error('请选择用于创建文档的飞书机器人')
+    const title = typeof c.body.title === 'string' ? c.body.title.trim() : undefined
+    if (title && title.length > 200) throw new Error('飞书文档名称不能超过 200 个字符')
+    return channelService(ctx).shareConversation({
+      workspaceId: workspace.id,
+      conversationId: requiredParam(c, 'conversationId'),
+      accountId,
+      title,
+    })
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/images', (c) => {

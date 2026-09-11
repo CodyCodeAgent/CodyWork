@@ -10,6 +10,12 @@ import { ChannelBindingService } from './channelBindingService.js'
 import { ChannelRepositories } from './channelRepositories.js'
 import { ChannelSessionSettingsService } from './channelSessionSettings.js'
 import { WorkspaceRegistry } from './workspaceRegistry.js'
+import { getDemand } from './demands.js'
+import {
+  buildConversationShareDocument,
+  FeishuConversationDocumentPublisher,
+  type ConversationDocumentPublisher,
+} from './conversationSharing.js'
 import {
   ChannelStore,
   type ChannelAccount,
@@ -56,7 +62,12 @@ export class CodyWorkChannelService {
     private readonly database: WorkbenchDb,
     private readonly conversations: ConversationService,
     private readonly workspaces: WorkspaceRegistry,
-    private readonly options: { publicOrigin?: string; now?: () => Date; providerFactory?: ChannelProviderFactory } = {},
+    private readonly options: {
+      publicOrigin?: string
+      now?: () => Date
+      providerFactory?: ChannelProviderFactory
+      documentPublisher?: ConversationDocumentPublisher
+    } = {},
   ) {
     this.repositories = new ChannelRepositories(new ChannelStore(database))
     this.settings = new ChannelSessionSettingsService(database, this.repositories, conversations, workspaces)
@@ -219,6 +230,39 @@ export class CodyWorkChannelService {
 
   retryOutbox(accountId: string, outboxId: string): void {
     this.accounts.retryOutbox(accountId, outboxId)
+  }
+
+  async shareConversation(input: { workspaceId: string; conversationId: string; accountId: string; title?: string }) {
+    const workspace = this.workspaces.get(input.workspaceId)
+    const conversation = this.conversations.get(workspace.id, input.conversationId)
+    const account = this.repositories.accounts.get(input.accountId)
+    if (!account.enabled) throw new Error('请选择已启用的飞书机器人')
+    const demand = conversation.demandId ? getDemand(this.database, workspace, conversation.demandId) : null
+    const snapshot = await this.conversations.historyCanonical(workspace.id, conversation.id)
+    const document = buildConversationShareDocument({
+      workspaceName: workspace.name,
+      demandName: demand?.name,
+      conversationTitle: conversation.title,
+      events: snapshot.events,
+      exportedAt: this.now(),
+      title: input.title,
+    })
+    try {
+      const published = await (this.options.documentPublisher ?? new FeishuConversationDocumentPublisher()).publish(account, document)
+      this.repositories.audit.record(account.id, 'conversation.document.shared', 'conversation', conversation.id, true, {
+        workspaceId: workspace.id,
+        demandId: conversation.demandId,
+        documentId: published.documentId,
+        messageCount: document.messageCount,
+      })
+      return { ...published, title: document.title, messageCount: document.messageCount }
+    } catch (error) {
+      this.repositories.audit.record(account.id, 'conversation.document.share_failed', 'conversation', conversation.id, false, {
+        workspaceId: workspace.id,
+        demandId: conversation.demandId,
+      }, error instanceof Error ? error.message : String(error))
+      throw error
+    }
   }
 
 }

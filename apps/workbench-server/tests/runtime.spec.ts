@@ -108,7 +108,15 @@ describe('generic runtime protocol', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const appServerCwd = mkdtempSync(join(tmpdir(), 'cody-app-server-owner-'))
     const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
-    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd })
+    const productToolCalls: Array<{ conversationId: string; threadId: string; turnId: string; tool: string; arguments: unknown }> = []
+    const runtime = new CodyWorkCodexRuntime({
+      command: `${process.execPath} ${fixture}`,
+      appServerCwd,
+      productToolHandler: async (call) => {
+        productToolCalls.push(call)
+        return { saved: true, name: 'Fixture shortcut' }
+      },
+    })
     expect((await runtime.getInfo()).runtimeVersion).toBe(`cody-web-core/${CODY_WEB_CORE_VERSION}`)
     expect(runtime.diagnostics()).toBeNull()
     const context = {
@@ -222,6 +230,14 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
+    const dynamicToolResult = await runtime.sendTurn({ conversation, prompt: 'DYNAMIC_QUICK_ACTION' })
+    expect(JSON.parse(dynamicToolResult.finalText)).toEqual({ saved: true, name: 'Fixture shortcut' })
+    expect(productToolCalls).toEqual([expect.objectContaining({
+      conversationId: conversation.id,
+      threadId: conversation.nativeId,
+      tool: 'save',
+      arguments: { name: 'Fixture shortcut', prompt: 'Run fixture verification.' },
+    })])
     const queuedFirst = runtime.submitTurn({ conversation, prompt: 'queued first', mode: 'queue' })
     const queuedSecond = runtime.submitTurn({ conversation, prompt: 'queued second', mode: 'queue' })
     const [queuedFirstResult, queuedSecondResult] = await Promise.all([queuedFirst.completed, queuedSecond.completed])

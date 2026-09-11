@@ -138,6 +138,7 @@ function demandStartupSource(): RuntimeInstructionSource {
     '这是一个隔离 Demand 中的新会话。开始第一个实质任务前，先使用本指令包中的 Demand 文档、Workspace/Repo 规则理解当前状态；再根据 Workspace knowledge catalog 选择并读取与任务相关的少量知识文档。不要要求用户重复 Worktree、分支、已选 Repo 或已沉淀的进展，也不要单独输出空泛的“我已阅读上下文”回复。',
     '',
     'Skill 默认不注入；仅在用户使用 `$Skill` 显式引用时加载对应 Skill。',
+    '当前会话可使用 `codywork_quick_actions` 产品工具管理 Workspace 快捷指令。只有用户明确要求创建、保存、更新，或说“把……沉淀成快捷指令”时才能调用 `save`；沉淀时只保存并确认，不要立即执行被沉淀的指令内容。仅表达“这个 Prompt 好用”时应先询问，不得擅自写入。未指定名称时从指令内容提炼简短名称；更新前先用 `list` 获取 actionId 和 revision，并作为 expectedRevision 提交，未提及的 Skill 和启用状态保持不变。指令内容引用 Skill 时用 `find_skills` 查找唯一标识，并作为结构化默认 Skill 保存，不要只拼进 Prompt。',
   ].join('\n')
   return { kind: 'platform', label: 'CodyWork demand startup', sha256: hash(content), content }
 }

@@ -50,7 +50,7 @@
         <header class="topbar chat-topbar">
           <div v-if="selectedDemand"><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
           <div v-else><button class="back-link" @click="returnToWorkspace">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 Codex</strong><span>默认 YOLO，可切换只读或 Normal；支持文件、Git、CLI 与全局 Skill</span></div></div>
-          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" @settle="settleConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand" class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div>
+          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" title="将当前会话导出为飞书文档" @click="openConversationShare">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" @settle="settleConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand" class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div>
         </header>
         <div class="chat-layout">
           <aside :class="['conversation-sidebar', { collapsed: conversationSidebarCollapsed }]">
@@ -98,6 +98,7 @@
     <WorkspaceSetupDialog :visible="showCreateWorkspace" @close="showCreateWorkspace = false" @completed="workspaceCreated" />
     <SkillInstallDialog :visible="showSkillInstallDialog" :job="skillJob" :pausing="pausingSkillInstall" @close="showSkillInstallDialog = false" @pause="pauseSkillInstall" />
     <ConversationChannelDialog :visible="Boolean(channelDialogConversation)" :conversation="channelDialogConversation" :bindings="channelDialogBindings" :loading="channelDialogLoading" :error="channelDialogError" :message="channelBindingMessage" :unbinding-id="unbindingChannelId" @close="closeChannelBindingDialog" @copy="copyChannelConversationLink" @unbind="unbindChannel" />
+    <ConversationShareDialog :visible="showConversationShare" :title="conversationShareTitle" :account-id="conversationShareAccountId" :accounts="conversationShareAccounts" :sharing="sharingConversation" :error="conversationShareError" :result="conversationShareResult" @close="closeConversationShare" @share="shareConversation" @copy="copyConversationShareLink" @update:title="conversationShareTitle = $event" @update:account-id="conversationShareAccountId = $event" />
     <div v-if="showCreateDemand" class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-demand-title"><div class="modal-head"><div><div class="eyebrow">NEW DEMAND</div><h2 id="create-demand-title">创建隔离需求</h2></div><button class="icon-button" aria-label="关闭创建需求弹窗" @click="showCreateDemand = false">×</button></div><label>需求名</label><input v-model="demandName" class="input" placeholder="例如：统一 AI 工作对话" /><label>分支名</label><input v-model="demandBranch" class="input" placeholder="可选，默认按需求名生成" /><fieldset class="demand-repository-fieldset"><legend>开发 Repo</legend><label class="sr-only" for="demand-repository-search">搜索开发 Repo</label><div class="demand-repository-search"><input id="demand-repository-search" v-model="demandRepositoryQuery" class="input" type="search" autocomplete="off" placeholder="按名称、路径或分支搜索…" aria-describedby="demand-repository-search-summary" /><button v-if="demandRepositoryQuery" class="repo-search-clear" type="button" aria-label="清除 Repo 搜索" @click="demandRepositoryQuery = ''">清除</button></div><p id="demand-repository-search-summary" class="demand-repository-summary" role="status">{{ demandRepositorySearchSummary }}</p><div class="repo-picker"><label v-for="repo in filteredDemandCreationRepositories" :key="repo.id" class="repo-option"><input v-model="selectedRepositoryIds" type="checkbox" :value="repo.id" /><span><strong>{{ repo.name }}</strong><small>{{ repo.path }}</small></span><code v-if="repo.defaultRef" class="demand-repository-ref">{{ repo.defaultRef }}</code></label><p v-if="filteredDemandCreationRepositories.length === 0" class="repo-picker-empty">没有匹配的 Repo。可尝试名称、目录路径或分支名。</p></div></fieldset><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showCreateDemand = false">取消</button><button class="btn primary" :disabled="creating || !demandName.trim() || selectedRepositoryIds.length === 0" @click="createDemand">创建并进入</button></div></section></div>
     <div v-if="showAddRepository" class="modal-backdrop"><section class="modal-card"><div class="modal-head"><div><div class="eyebrow">REPOSITORY</div><h2>添加开发 Repo</h2></div><button class="icon-button" @click="showAddRepository = false">×</button></div><div class="mode-tabs"><button :class="{ active: repositorySource === 'folder' }" @click="repositorySource = 'folder'">本地目录</button><button :class="{ active: repositorySource === 'git' }" @click="repositorySource = 'git'">Git clone</button></div><label>显示名称</label><input v-model="repositoryName" class="input" placeholder="可选" /><template v-if="repositorySource === 'folder'"><label>仓库目录</label><input v-model="repositoryPath" class="input" placeholder="/Users/you/projects/repository" /><p class="field-help">该 Git 仓库会复制到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><template v-else><label>Git URL</label><input v-model="repositoryUrl" class="input" placeholder="git@github.com:org/repository.git" /><p class="field-help">仓库会克隆到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showAddRepository = false">取消</button><button class="btn primary" :disabled="creating || (repositorySource === 'folder' ? !repositoryPath.trim() : !repositoryUrl.trim())" @click="addRepository">{{ creating ? '正在添加…' : '添加 Repo' }}</button></div></section></div>
     <AddDemandRepositoryDialog v-if="selectedDemand" :visible="showAddDemandRepository" :demand="selectedDemand" :repositories="availableDemandRepositories" :selected-repository-id="selectedDemandRepositoryId" :adding="addingDemandRepository" :error="demandRepositoryError" @close="closeAddDemandRepository" @add="addDemandRepository" @update:selected-repository-id="selectedDemandRepositoryId = $event" />
@@ -142,6 +143,7 @@ import SettingsOverview from './components/SettingsOverview.vue'
 import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
 import SkillInstallDialog from './components/SkillInstallDialog.vue'
 import ConversationChannelDialog from './components/ConversationChannelDialog.vue'
+import ConversationShareDialog from './components/ConversationShareDialog.vue'
 import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepositories'
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
@@ -156,10 +158,12 @@ import {
   type ConversationImageUpload,
   type ConversationEvent,
   type ConversationPermissionMode,
+  type ConversationShareResult,
   type ComposerOptions,
   type DashboardSnapshot,
   type Demand,
   type FeishuChannelBinding,
+  type FeishuChannelAccount,
   type KnowledgeDocument,
   type QuickAction,
   type QuickActionInput,
@@ -226,6 +230,13 @@ const channelDialogBindings = ref<FeishuChannelBinding[]>([])
 const channelDialogLoading = ref(false)
 const channelDialogError = ref('')
 const unbindingChannelId = ref('')
+const showConversationShare = ref(false)
+const conversationShareTitle = ref('')
+const conversationShareAccountId = ref('')
+const conversationShareAccounts = ref<FeishuChannelAccount[]>([])
+const sharingConversation = ref(false)
+const conversationShareError = ref('')
+const conversationShareResult = ref<ConversationShareResult | null>(null)
 let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: number | null = null
 let quickActionFeedbackTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
@@ -975,6 +986,56 @@ async function copyChannelConversationLink(): Promise<void> {
   }).toString()
   try { await copyText(url); channelBindingMessage.value = '会话链接已复制。' } catch { channelBindingMessage.value = '复制失败，请从浏览器地址栏复制。' }
 }
+async function openConversationShare(): Promise<void> {
+  const conversation = selectedConversation.value
+  if (!workspace.value || !conversation) return
+  showConversationShare.value = true
+  conversationShareTitle.value = `【会话分享】${selectedDemand.value ? `${selectedDemand.value.name} - ` : ''}${conversation.title}`
+  conversationShareAccountId.value = ''
+  conversationShareAccounts.value = []
+  conversationShareResult.value = null
+  conversationShareError.value = ''
+  try {
+    const accounts = await api.listFeishuAccounts()
+    if (!showConversationShare.value || selectedConversation.value?.id !== conversation.id) return
+    conversationShareAccounts.value = accounts
+    const enabled = accounts.filter(account => account.enabled && account.appSecretConfigured)
+    const boundAccountId = conversationChannelBindings.value.find(binding => enabled.some(account => account.id === binding.accountId))?.accountId
+    conversationShareAccountId.value = boundAccountId
+      ?? enabled.find(account => account.connectionState === 'connected')?.id
+      ?? enabled[0]?.id
+      ?? ''
+  } catch (cause) {
+    conversationShareError.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+function closeConversationShare(): void {
+  if (sharingConversation.value) return
+  showConversationShare.value = false
+  conversationShareError.value = ''
+  conversationShareResult.value = null
+}
+async function shareConversation(): Promise<void> {
+  const activeWorkspace = workspace.value
+  const conversation = selectedConversation.value
+  if (!activeWorkspace || !conversation || sharingConversation.value || !conversationShareAccountId.value) return
+  sharingConversation.value = true
+  conversationShareError.value = ''
+  try {
+    const result = await api.shareConversationToFeishu(activeWorkspace.id, conversation.id, {
+      accountId: conversationShareAccountId.value,
+      title: conversationShareTitle.value.trim(),
+    })
+    if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) conversationShareResult.value = result
+  } catch (cause) {
+    conversationShareError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sharingConversation.value = false
+  }
+}
+async function copyConversationShareLink(url: string): Promise<void> {
+  try { await copyText(url) } catch { conversationShareError.value = '复制失败，请点击“打开飞书文档”后从地址栏复制。' }
+}
 async function unbindChannel(binding: FeishuChannelBinding): Promise<void> {
   if (unbindingChannelId.value || !confirm('解除飞书与当前会话的绑定？不会删除 Demand、Codex Thread 或任何工作成果。')) return
   unbindingChannelId.value = binding.id
@@ -1228,6 +1289,9 @@ async function copyDemandLink(demand: Demand): Promise<void> {
 async function resolveTimelineApproval(requestId: string, decision: 'accept' | 'decline'): Promise<void> { if (!workspace.value || !selectedConversation.value) return; await api.resolveApproval(workspace.value.id, selectedConversation.value.id, requestId, decision === 'accept' ? 'allowed-once' : 'rejected') }
 async function resolveTimelineQuestion(requestId: string, answer: Record<string, { answers: string[] }>): Promise<void> { if (!workspace.value || !selectedConversation.value) return; await api.answerQuestion(workspace.value.id, selectedConversation.value.id, requestId, answer) }
 watch(() => conversationState.value.appliedEventIds.length, () => { void scrollToBottom() })
+watch(() => conversationState.value.activeTurnId, (activeTurnId, previousTurnId) => {
+  if (previousTurnId && !activeTurnId && selectedDemand.value) void loadQuickActions()
+})
 let dashboardTimer: number | null = null
 onMounted(() => { void loadWorkspaces(); window.addEventListener('popstate', () => { void restoreRoute() }); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
 onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
