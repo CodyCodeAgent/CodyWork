@@ -48,4 +48,8 @@ CodyWork 内嵌一个 Channel Host。它把飞书消息接入现有的 Workspace
 
 ## 飞书开放平台
 
-应用需要机器人能力、消息读写和资源权限；事件订阅使用长连接并订阅 `im.message.receive_v1`；卡片回调同样通过长连接接收 `card.action.trigger`。完成配置后必须发布应用版本，未发布的权限或订阅不会对租户生效。
+CodyWork 不提供逐项勾选权限。新建和已有机器人都使用同一份固定完整权限模板，包含应用自查、机器人身份、群聊/私聊消息、资源附件、交互卡片，以及会话分享所需的云文档创建、编辑、读取、Markdown 转换、访问权限设置和失败文档清理权限。会话分享使用精确 scope：`docx:document:create`、`docx:document:write_only`、`docx:document:readonly`、`docx:document.block:convert`、`docs:permission.setting:write_only` 和 `space:document:delete`，不以宽泛的 `drive:drive` 代替。
+
+在“设置 → 飞书机器人”填写 App ID 后，点击“一次性申请全部权限”会打开飞书开放平台批量申请页，并预填整份固定模板。平台侧仍需要人工确认、发布应用版本并完成租户管理员授权；App Secret 本身不能绕过这些平台安全步骤。CodyWork 会通过 `application.scope.list` 回读当前租户授权，显示“权限完整”、具体缺失项或检查失败。刷新诊断会重新检查，适用于修复已存在的机器人。
+
+事件订阅使用长连接并订阅 `im.message.receive_v1`；卡片回调同样通过长连接接收 `card.action.trigger`。未发布的权限或订阅不会对租户生效。若分享会话时仍缺文档权限，错误会直接指向完整权限修复入口，而不是只显示 HTTP 400。

@@ -26,6 +26,16 @@
             <label><span>App ID</span><input v-model.trim="form.appId" required autocomplete="off" placeholder="cli_…" /></label>
             <label><span>App Secret</span><input v-model="form.appSecret" :required="!form.id" type="password" autocomplete="new-password" :placeholder="form.id ? '留空保持原 Secret' : '仅写入加密存储'" /></label>
           </div>
+          <section class="permission-template">
+            <div class="permission-template-head">
+              <div><strong>固定完整权限</strong><small>所有 CodyWork 机器人统一使用完整权限模板，不提供删减选项。</small></div>
+              <span :class="['permission-state', permissionStatus?.state || 'unchecked']">{{ permissionStateLabel }}</span>
+            </div>
+            <p v-if="permissionStatus?.state === 'incomplete'" class="permission-warning">还缺少 {{ missingPermissionLabels.join('、') || '待管理员授权的权限' }}。权限加入应用后仍需发布版本并完成租户授权。</p>
+            <p v-else-if="permissionStatus?.state === 'unavailable'" class="permission-warning">{{ permissionStatus.error || '暂时无法读取租户授权状态。' }}</p>
+            <details v-if="permissionTemplate.requiredScopes.length"><summary>查看固定权限清单（{{ permissionTemplate.requiredScopes.length }}）</summary><div class="permission-scopes"><span v-for="scope in permissionTemplate.requiredScopes" :key="scope.name" :title="scope.name">{{ scope.label }}</span></div></details>
+            <div class="permission-actions"><span>保存后自动检查租户授权状态。</span><a v-if="permissionAuthorizationUrl" :href="permissionAuthorizationUrl" target="_blank" rel="noopener noreferrer">一次性申请全部权限 ↗</a><em v-else>填写有效 App ID 后可申请</em></div>
+          </section>
           <div class="policy-grid">
             <label><span>私聊隔离</span><select v-model="form.privateConversationMode"><option value="topic">每条根消息独立绑定</option><option value="chat">整个私聊共享绑定</option></select></label>
             <label><span>群聊触发</span><select v-model="form.groupMentionMode"><option value="always">每次必须 @机器人</option><option value="bound">已绑定群可直接发</option></select></label>
@@ -40,7 +50,7 @@
         </form>
 
         <section v-if="diagnostics" class="diagnostics">
-          <div class="section-head"><div><div class="kicker">DIAGNOSTICS</div><h3>运行诊断</h3></div><button type="button" :disabled="detailsBusy" @click="refreshDetails">{{ detailsBusy ? '刷新中…' : '刷新' }}</button></div>
+          <div class="section-head"><div><div class="kicker">DIAGNOSTICS</div><h3>运行诊断</h3></div><button type="button" :disabled="detailsBusy" @click="refreshDetails(true)">{{ detailsBusy ? '刷新中…' : '刷新' }}</button></div>
           <div class="metrics"><article><small>绑定</small><strong>{{ diagnostics.bindings }}</strong></article><article><small>执行队列</small><strong>{{ diagnostics.inbox.queued }}</strong></article><article><small>待绑定</small><strong>{{ diagnostics.inbox.waiting }}</strong></article><article><small>入站失败</small><strong>{{ diagnostics.inbox.failed }}</strong></article><article><small>待投递</small><strong>{{ diagnostics.outbox.pending }}</strong></article><article><small>死信</small><strong>{{ diagnostics.outbox.deadLetter }}</strong></article></div>
           <div class="runtime-facts"><span><small>最近连接</small>{{ formatTime(selected?.connectedAt) }}</span><span><small>最近事件</small>{{ formatTime(selected?.lastEventAt) }}</span><span><small>最近投递</small>{{ formatTime(selected?.lastDeliveryAt) }}</span><span><small>观察会话</small>{{ diagnostics.runtime.observedConversations }} / {{ diagnostics.bindings }}</span><span><small>重连次数</small>{{ selected?.reconnectAttempts ?? 0 }}</span><span><small>下次重连</small>{{ formatTime(selected?.nextReconnectAt) }}</span></div>
           <div v-if="selected?.lastDisconnectedAt" class="disconnect-fact"><strong>最近断开</strong><span>{{ formatTime(selected.lastDisconnectedAt) }} · 关闭码 {{ selected.lastCloseCode ?? 'SDK 未提供' }}</span><p>{{ selected.lastCloseReason || '未提供关闭原因' }}</p></div>
@@ -49,7 +59,7 @@
           <details><summary>已绑定对话（{{ bindings.length }}）</summary><div class="bindings"><div v-for="binding in bindings" :key="binding.id"><span><strong>{{ binding.conversationTitle }}</strong><small>{{ binding.targetType === 'codywork-workspace' ? 'Workspace 会话' : 'Demand Worktree' }} · {{ binding.channelScope }} · {{ binding.channelConversationId }}</small></span><code :title="`原生 Thread：${binding.threadId}`">{{ binding.threadId }}</code></div><p v-if="!bindings.length">尚无绑定。首次给机器人发消息后会出现选择卡片。</p></div></details>
         </section>
 
-        <section class="setup-guide"><div class="kicker">FEISHU SETUP</div><h3>开放平台准备</h3><ol><li>为应用启用机器人能力及消息读写权限。</li><li>开通“管理应用自身资源”权限，供访问申请自动识别当前应用所有者和管理员。</li><li>事件订阅选择“使用长连接接收事件”，订阅 <code>im.message.receive_v1</code>。</li><li>卡片回调启用长连接，供绑定、审批和问题回答使用。</li><li>发布应用版本，并按需配置群白名单或开启“允许所有群聊”。</li></ol></section>
+        <section class="setup-guide"><div class="kicker">FEISHU SETUP</div><h3>开放平台准备</h3><ol><li>点击“一次性申请全部权限”，将固定完整权限加入应用。</li><li>为应用启用机器人能力；事件订阅选择“使用长连接接收事件”，订阅 <code>im.message.receive_v1</code>。</li><li>卡片回调启用长连接，供绑定、审批和问题回答使用。</li><li>发布应用版本并完成租户管理员授权；未发布的权限不会生效。</li><li>回到本页刷新诊断，确认显示“权限完整”，再启用长连接。</li></ol></section>
       </main>
     </div>
   </div>
@@ -57,11 +67,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { api, type FeishuChannelAccount, type FeishuChannelBinding, type FeishuChannelDiagnostics } from '../api'
+import { api, type FeishuChannelAccount, type FeishuChannelBinding, type FeishuChannelDiagnostics, type FeishuPermissionStatus, type FeishuPermissionTemplate } from '../api'
 
 const accounts = ref<FeishuChannelAccount[]>([])
 const selectedId = ref('')
 const diagnostics = ref<FeishuChannelDiagnostics | null>(null)
+const permissionTemplate = ref<FeishuPermissionTemplate>({ requiredScopes: [] })
+const permissionStatus = ref<FeishuPermissionStatus | null>(null)
 const bindings = ref<FeishuChannelBinding[]>([])
 const busy = ref(false)
 const detailsBusy = ref(false)
@@ -73,6 +85,18 @@ let connectionPolls = 0
 const form = reactive({ id: '', name: '', appId: '', appSecret: '', domain: 'feishu' as 'feishu' | 'lark', enabled: false, allowAllUsers: false, allowAllConversations: false, allowedUserIds: '', allowedConversationIds: '', groupMentionMode: 'always' as 'always' | 'bound', privateConversationMode: 'chat' as 'topic' | 'chat' })
 const selected = computed(() => accounts.value.find(account => account.id === selectedId.value))
 const isCreating = computed(() => !form.id)
+const permissionStateLabel = computed(() => ({ complete: '权限完整', incomplete: '权限未完整', unavailable: '检查失败' } as Record<string, string>)[permissionStatus.value?.state || ''] || (form.id ? '待检查' : '创建时统一申请'))
+const missingPermissionLabels = computed(() => {
+  const missing = new Set([...(permissionStatus.value?.missingScopes ?? []), ...(permissionStatus.value?.pendingScopes ?? [])])
+  return permissionTemplate.value.requiredScopes.filter(scope => missing.has(scope.name)).map(scope => scope.label)
+})
+const permissionAuthorizationUrl = computed(() => {
+  if (permissionStatus.value?.authorizationUrl) return permissionStatus.value.authorizationUrl
+  if (!/^cli_[A-Za-z0-9_-]+$/u.test(form.appId)) return ''
+  const host = form.domain === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn'
+  const scopes = permissionTemplate.value.requiredScopes.map(scope => scope.name).join(',')
+  return scopes ? `${host}/page/scope-apply?clientID=${encodeURIComponent(form.appId)}&scopes=${encodeURIComponent(scopes)}` : ''
+})
 
 function lines(value: string): string[] { return [...new Set(value.split(/[\n,]/u).map(item => item.trim()).filter(Boolean))] }
 function stateLabel(value: string): string { return ({ connected: '已连接', connecting: '连接中', reconnecting: '重连中', failed: '连接失败', idle: '未连接' } as Record<string, string>)[value] ?? value }
@@ -85,16 +109,17 @@ async function load(preferredId = selectedId.value): Promise<void> {
   accounts.value = await api.listFeishuAccounts()
   selectedId.value = accounts.value.some(account => account.id === preferredId) ? preferredId : accounts.value[0]?.id ?? ''
   fill(selected.value)
-  await refreshDetails()
+  await refreshDetails(true)
   scheduleConnectionRefresh(selectedId.value, true)
 }
 async function select(id: string): Promise<void> {
   selectedId.value = id
   diagnostics.value = null
+  permissionStatus.value = null
   bindings.value = []
   fill(selected.value)
   message.value = ''
-  await refreshDetails()
+  await refreshDetails(true)
   scheduleConnectionRefresh(id, true)
 }
 function newAccount(): void {
@@ -102,6 +127,7 @@ function newAccount(): void {
   detailsBusy.value = false
   selectedId.value = ''
   diagnostics.value = null
+  permissionStatus.value = null
   bindings.value = []
   message.value = ''
   fill()
@@ -111,16 +137,21 @@ function cancelCreate(): void {
   if (!fallback) return
   void select(fallback.id)
 }
-async function refreshDetails(): Promise<void> {
+async function refreshDetails(includePermissions = false): Promise<void> {
   const accountId = selectedId.value
   const requestVersion = ++detailsRequestVersion
-  if (!accountId) { diagnostics.value = null; bindings.value = []; detailsBusy.value = false; return }
+  if (!accountId) { diagnostics.value = null; permissionStatus.value = null; bindings.value = []; detailsBusy.value = false; return }
   detailsBusy.value = true
   try {
-    const [nextDiagnostics, nextBindings] = await Promise.all([api.feishuDiagnostics(accountId), api.listFeishuBindings(accountId)])
+    const [nextDiagnostics, nextBindings, nextPermissions] = await Promise.all([
+      api.feishuDiagnostics(accountId),
+      api.listFeishuBindings(accountId),
+      includePermissions ? api.feishuPermissions(accountId) : Promise.resolve(permissionStatus.value),
+    ])
     if (requestVersion !== detailsRequestVersion || selectedId.value !== accountId) return
     diagnostics.value = nextDiagnostics
     bindings.value = nextBindings
+    if (includePermissions) permissionStatus.value = nextPermissions
   } catch (error) {
     if (requestVersion !== detailsRequestVersion || selectedId.value !== accountId) return
     diagnostics.value = null
@@ -183,10 +214,10 @@ function scheduleConnectionRefresh(accountId: string, reset = false): void {
     })()
   }, delay)
 }
-onMounted(() => { void load().catch(showError) })
+onMounted(() => { void (async () => { permissionTemplate.value = await api.feishuPermissionTemplate(); await load() })().catch(showError) })
 onUnmounted(() => { if (connectionTimer) clearTimeout(connectionTimer) })
 </script>
 
 <style scoped>
-.channel-settings{max-width:1180px;margin:0 auto;padding:30px 34px 70px;color:#202535}.channel-intro,.editor-head,.section-head,.actions{display:flex;align-items:center;justify-content:space-between;gap:20px}.channel-intro{margin-bottom:18px;padding:22px 24px;border:1px solid #dde4ee;border-radius:16px;background:#fff}.channel-intro h2,.editor h3{margin:4px 0 6px}.channel-intro p,.editor-head p{margin:0;color:#788397;font-size:12px;line-height:1.6}.kicker{color:#8995aa;font-size:10px;font-weight:800;letter-spacing:.18em}.channel-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px}.account-list,.editor>form,.diagnostics,.setup-guide{border:1px solid #dfe5ee;border-radius:16px;background:#fff}.account-list{align-self:start;padding:8px}.account-list-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;color:#818ca0;font-size:11px;font-weight:700;letter-spacing:.08em}.account-list-head strong{display:grid;min-width:22px;height:22px;place-items:center;border-radius:999px;background:#f0f2f7;color:#616c80;font-size:10px}.account-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:13px 12px;border:0;border-radius:11px;background:transparent;text-align:left}.account-row.active{background:#eef1ff}.account-draft{margin-bottom:4px;outline:1px dashed #7777ec;outline-offset:-1px}.account-row strong,.account-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-row small{margin-top:4px;color:#8a94a5}.account-row em{font-size:10px;font-style:normal;color:#657086}.state-dot{width:8px;height:8px;border-radius:50%;background:#aab2bf}.state-dot.connected{background:#32b77b}.state-dot.failed{background:#df5c68}.state-dot.connecting,.state-dot.reconnecting{background:#e6a238}.empty{padding:18px;color:#8a94a5;font-size:12px;line-height:1.6}.editor{display:grid;gap:16px}.editor>form,.diagnostics,.setup-guide{padding:24px}.connection-pill{padding:6px 10px;border-radius:999px;background:#f0f3f7;color:#657086;font-size:11px}.connection-pill.connected{background:#e8f8f0;color:#23845b}.connection-pill.failed{background:#fff0f1;color:#b13b47}.field-grid,.policy-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}.policy-grid{margin-top:14px}label{display:grid;gap:7px;margin-top:14px;color:#586276;font-size:12px}input,select,textarea,button{font:inherit}input:not([type=checkbox]),select,textarea{box-sizing:border-box;width:100%;padding:10px 12px;border:1px solid #ccd5e2;border-radius:9px;background:#fff;color:#202535}textarea{resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.check,.enable{grid-template-columns:18px minmax(0,1fr);align-items:start;padding:13px;border:1px solid #e4e8ef;border-radius:10px}.check strong,.check small,.enable strong,.enable small{display:block}.check small,.enable small{margin-top:3px;color:#8993a4}.enable{background:#f7f8ff}.actions{margin-top:20px}.actions span{flex:1}button{padding:9px 13px;border:1px solid #ced6e2;border-radius:9px;background:#fff;color:#3c4659;cursor:pointer}button:disabled{cursor:not-allowed;opacity:.58}.primary{border-color:#5959eb;background:#5b5bf0;color:#fff}.danger{color:#b53c48}.message{margin-top:14px;padding:10px 12px;border-radius:9px;font-size:12px}.message.ok{background:#eaf8f1;color:#217b56}.message.error,.last-error{background:#fff0f1;color:#a93441}.metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin:16px 0}.metrics article{padding:12px;border-radius:10px;background:#f5f7fa}.metrics small,.metrics strong{display:block}.metrics strong{margin-top:5px;font-size:20px}.runtime-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px}.runtime-facts span{padding:10px 12px;border:1px solid #e5e9f0;border-radius:9px;color:#3f495b;font-size:11px}.runtime-facts small{display:block;margin-bottom:4px;color:#8993a4}.disconnect-fact{margin:-4px 0 14px;padding:10px 12px;border:1px solid #f0d6aa;border-radius:9px;background:#fff9ed;color:#74501b;font-size:11px}.disconnect-fact strong,.disconnect-fact span{display:block}.disconnect-fact span{margin-top:4px}.disconnect-fact p{margin:5px 0 0;overflow-wrap:anywhere}.last-error{padding:10px;border-radius:9px;font-size:12px}details{margin-top:14px}.bindings,.failed-deliveries{display:grid;gap:7px;margin-top:10px}.bindings>div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px;background:#f7f8fa;border-radius:8px}.bindings>div>span{min-width:0}.bindings strong,.bindings small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bindings small{margin-top:3px;color:#8a94a5;font-size:10px}.bindings code{flex:0 1 42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#657086}.failed-deliveries article{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:11px;border:1px solid #f0d4d7;border-radius:9px;background:#fff8f8}.failed-deliveries strong,.failed-deliveries small{display:block}.failed-deliveries small{margin-top:3px;color:#8b6670}.failed-deliveries p{max-width:620px;margin:7px 0 0;color:#a93441;font-size:11px;word-break:break-word}.setup-guide ol{margin:14px 0 0;padding-left:20px;color:#647086;font-size:12px;line-height:1.9}@media(max-width:900px){.channel-layout{grid-template-columns:1fr}.field-grid,.policy-grid{grid-template-columns:1fr}.metrics,.runtime-facts{grid-template-columns:repeat(2,1fr)}}
+.channel-settings{max-width:1180px;margin:0 auto;padding:30px 34px 70px;color:#202535}.channel-intro,.editor-head,.section-head,.actions{display:flex;align-items:center;justify-content:space-between;gap:20px}.channel-intro{margin-bottom:18px;padding:22px 24px;border:1px solid #dde4ee;border-radius:16px;background:#fff}.channel-intro h2,.editor h3{margin:4px 0 6px}.channel-intro p,.editor-head p{margin:0;color:#788397;font-size:12px;line-height:1.6}.kicker{color:#8995aa;font-size:10px;font-weight:800;letter-spacing:.18em}.channel-layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px}.account-list,.editor>form,.diagnostics,.setup-guide{border:1px solid #dfe5ee;border-radius:16px;background:#fff}.account-list{align-self:start;padding:8px}.account-list-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;color:#818ca0;font-size:11px;font-weight:700;letter-spacing:.08em}.account-list-head strong{display:grid;min-width:22px;height:22px;place-items:center;border-radius:999px;background:#f0f2f7;color:#616c80;font-size:10px}.account-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:13px 12px;border:0;border-radius:11px;background:transparent;text-align:left}.account-row.active{background:#eef1ff}.account-draft{margin-bottom:4px;outline:1px dashed #7777ec;outline-offset:-1px}.account-row strong,.account-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.account-row small{margin-top:4px;color:#8a94a5}.account-row em{font-size:10px;font-style:normal;color:#657086}.state-dot{width:8px;height:8px;border-radius:50%;background:#aab2bf}.state-dot.connected{background:#32b77b}.state-dot.failed{background:#df5c68}.state-dot.connecting,.state-dot.reconnecting{background:#e6a238}.empty{padding:18px;color:#8a94a5;font-size:12px;line-height:1.6}.editor{display:grid;gap:16px}.editor>form,.diagnostics,.setup-guide{padding:24px}.connection-pill{padding:6px 10px;border-radius:999px;background:#f0f3f7;color:#657086;font-size:11px}.connection-pill.connected{background:#e8f8f0;color:#23845b}.connection-pill.failed{background:#fff0f1;color:#b13b47}.field-grid,.policy-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}.policy-grid{margin-top:14px}label{display:grid;gap:7px;margin-top:14px;color:#586276;font-size:12px}input,select,textarea,button{font:inherit}input:not([type=checkbox]),select,textarea{box-sizing:border-box;width:100%;padding:10px 12px;border:1px solid #ccd5e2;border-radius:9px;background:#fff;color:#202535}textarea{resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.permission-template{margin-top:18px;padding:14px;border:1px solid #dfe3ff;border-radius:11px;background:#f8f8ff}.permission-template-head,.permission-actions{display:flex;align-items:center;justify-content:space-between;gap:14px}.permission-template-head strong,.permission-template-head small{display:block}.permission-template-head small{margin-top:4px;color:#7e879b;font-size:11px}.permission-state{flex:none;padding:5px 9px;border-radius:999px;background:#eef0f5;color:#626d80;font-size:10px;font-weight:700}.permission-state.complete{background:#e6f7ef;color:#21805a}.permission-state.incomplete{background:#fff1db;color:#9a6413}.permission-state.unavailable{background:#fff0f1;color:#a93441}.permission-warning{margin:12px 0 0;padding:9px 10px;border-radius:8px;background:#fff4e5;color:#8e5b14;font-size:11px;line-height:1.6}.permission-template details{margin-top:11px;color:#657086;font-size:11px}.permission-scopes{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.permission-scopes span{padding:5px 7px;border:1px solid #e0e4ef;border-radius:7px;background:#fff;color:#596478}.permission-actions{margin-top:12px;color:#7d8798;font-size:11px}.permission-actions a{padding:7px 10px;border-radius:8px;background:#5b5bf0;color:#fff;text-decoration:none;font-weight:700}.permission-actions em{font-style:normal}.check,.enable{grid-template-columns:18px minmax(0,1fr);align-items:start;padding:13px;border:1px solid #e4e8ef;border-radius:10px}.check strong,.check small,.enable strong,.enable small{display:block}.check small,.enable small{margin-top:3px;color:#8993a4}.enable{background:#f7f8ff}.actions{margin-top:20px}.actions span{flex:1}button{padding:9px 13px;border:1px solid #ced6e2;border-radius:9px;background:#fff;color:#3c4659;cursor:pointer}button:disabled{cursor:not-allowed;opacity:.58}.primary{border-color:#5959eb;background:#5b5bf0;color:#fff}.danger{color:#b53c48}.message{margin-top:14px;padding:10px 12px;border-radius:9px;font-size:12px}.message.ok{background:#eaf8f1;color:#217b56}.message.error,.last-error{background:#fff0f1;color:#a93441}.metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin:16px 0}.metrics article{padding:12px;border-radius:10px;background:#f5f7fa}.metrics small,.metrics strong{display:block}.metrics strong{margin-top:5px;font-size:20px}.runtime-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px}.runtime-facts span{padding:10px 12px;border:1px solid #e5e9f0;border-radius:9px;color:#3f495b;font-size:11px}.runtime-facts small{display:block;margin-bottom:4px;color:#8993a4}.disconnect-fact{margin:-4px 0 14px;padding:10px 12px;border:1px solid #f0d6aa;border-radius:9px;background:#fff9ed;color:#74501b;font-size:11px}.disconnect-fact strong,.disconnect-fact span{display:block}.disconnect-fact span{margin-top:4px}.disconnect-fact p{margin:5px 0 0;overflow-wrap:anywhere}.last-error{padding:10px;border-radius:9px;font-size:12px}details{margin-top:14px}.bindings,.failed-deliveries{display:grid;gap:7px;margin-top:10px}.bindings>div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px;background:#f7f8fa;border-radius:8px}.bindings>div>span{min-width:0}.bindings strong,.bindings small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bindings small{margin-top:3px;color:#8a94a5;font-size:10px}.bindings code{flex:0 1 42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#657086}.failed-deliveries article{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:11px;border:1px solid #f0d4d7;border-radius:9px;background:#fff8f8}.failed-deliveries strong,.failed-deliveries small{display:block}.failed-deliveries small{margin-top:3px;color:#8b6670}.failed-deliveries p{max-width:620px;margin:7px 0 0;color:#a93441;font-size:11px;word-break:break-word}.setup-guide ol{margin:14px 0 0;padding-left:20px;color:#647086;font-size:12px;line-height:1.9}@media(max-width:900px){.channel-layout{grid-template-columns:1fr}.field-grid,.policy-grid{grid-template-columns:1fr}.metrics,.runtime-facts{grid-template-columns:repeat(2,1fr)}.permission-template-head,.permission-actions{align-items:flex-start;flex-direction:column}}
 </style>

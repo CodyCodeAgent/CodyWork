@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FeishuChannelSettings from './FeishuChannelSettings.vue'
 
 const api = vi.hoisted(() => ({
   listFeishuAccounts: vi.fn(), createFeishuAccount: vi.fn(), updateFeishuAccount: vi.fn(), deleteFeishuAccount: vi.fn(),
   reconnectFeishuAccount: vi.fn(), feishuDiagnostics: vi.fn(), listFeishuBindings: vi.fn(), retryFeishuOutbox: vi.fn(),
+  feishuPermissionTemplate: vi.fn(), feishuPermissions: vi.fn(),
 }))
 
 vi.mock('../api', () => ({ api }))
@@ -18,9 +19,52 @@ function diagnostics(id: string) {
   return { account: account(id), bindings: id === 'second' ? 2 : 1, runtime: { observedConversations: id === 'second' ? 2 : 1 }, inbox: { waiting: 0, failed: 0, submitted: 0, queued: 0 }, outbox: { pending: 0, deadLetter: 0, failures: [] } }
 }
 
+const requiredScopes = [
+  { name: 'im:message:send_as_bot', label: '以机器人身份发送消息' },
+  { name: 'docx:document:create', label: '创建飞书文档' },
+  { name: 'docx:document:write_only', label: '编辑飞书文档' },
+  { name: 'docx:document:readonly', label: '读取飞书文档' },
+  { name: 'docx:document.block:convert', label: '将 Markdown 转换为文档块' },
+  { name: 'docs:permission.setting:write_only', label: '设置云文档访问权限' },
+  { name: 'space:document:delete', label: '清理创建失败的云文档' },
+]
+
+function permissions(id: string, state: 'complete' | 'incomplete' = 'complete') {
+  const missingScopes = state === 'incomplete' ? ['docs:permission.setting:write_only', 'space:document:delete'] : []
+  return {
+    state,
+    requiredScopes,
+    grantedScopes: requiredScopes.map(scope => scope.name).filter(name => !missingScopes.includes(name)),
+    pendingScopes: [], missingScopes,
+    authorizationUrl: `https://open.feishu.cn/page/scope-apply?clientID=cli_${id}&scopes=all`,
+    checkedAt: '2026-09-13T00:00:00.000Z', error: '',
+  }
+}
+
+beforeEach(() => {
+  api.feishuPermissionTemplate.mockResolvedValue({ requiredScopes })
+  api.feishuPermissions.mockImplementation((id: string) => Promise.resolve(permissions(id)))
+})
+
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); vi.restoreAllMocks() })
 
 describe('FeishuChannelSettings', () => {
+  it('uses one fixed complete permission template and surfaces missing grants without selectors', async () => {
+    api.listFeishuAccounts.mockResolvedValue([account('permissions')])
+    api.feishuDiagnostics.mockResolvedValue(diagnostics('permissions'))
+    api.listFeishuBindings.mockResolvedValue([])
+    api.feishuPermissions.mockResolvedValue(permissions('permissions', 'incomplete'))
+    const wrapper = mount(FeishuChannelSettings)
+    await flushPromises()
+
+    const panel = wrapper.find('.permission-template')
+    expect(panel.text()).toContain('固定完整权限')
+    expect(panel.text()).toContain('权限未完整')
+    expect(panel.text()).toContain('设置云文档访问权限、清理创建失败的云文档')
+    expect(panel.findAll('input[type="checkbox"]')).toHaveLength(0)
+    expect(panel.find('a').attributes('href')).toBe('https://open.feishu.cn/page/scope-apply?clientID=cli_permissions&scopes=all')
+  })
+
   it('disables reconnect for disabled accounts and documents open_id-only allowlists', async () => {
     api.listFeishuAccounts.mockResolvedValue([account('disabled')])
     api.feishuDiagnostics.mockResolvedValue(diagnostics('disabled'))

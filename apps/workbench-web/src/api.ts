@@ -335,6 +335,25 @@ export interface FeishuChannelDiagnostics {
   outbox: { pending: number; deadLetter: number; failures: FeishuFailedDelivery[] }
 }
 
+export interface FeishuRequiredScope {
+  name: string
+  label: string
+}
+
+export interface FeishuPermissionTemplate {
+  requiredScopes: FeishuRequiredScope[]
+}
+
+export interface FeishuPermissionStatus extends FeishuPermissionTemplate {
+  state: 'complete' | 'incomplete' | 'unavailable'
+  grantedScopes: string[]
+  pendingScopes: string[]
+  missingScopes: string[]
+  authorizationUrl: string
+  checkedAt: string
+  error: string
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, cache: 'no-store' }
   if (body !== undefined) {
@@ -349,11 +368,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   listFeishuAccounts: () => request<FeishuChannelAccount[]>('GET', '/api/channels/feishu/accounts'),
+  feishuPermissionTemplate: () => request<FeishuPermissionTemplate>('GET', '/api/channels/feishu/permission-template'),
   createFeishuAccount: (input: FeishuChannelAccountInput) => request<FeishuChannelAccount>('POST', '/api/channels/feishu/accounts', input),
   updateFeishuAccount: (id: string, input: FeishuChannelAccountInput) => request<FeishuChannelAccount>('PATCH', `/api/channels/feishu/accounts/${encodeURIComponent(id)}`, input),
   deleteFeishuAccount: (id: string) => request<{ deleted: true }>('DELETE', `/api/channels/feishu/accounts/${encodeURIComponent(id)}`),
   reconnectFeishuAccount: (id: string) => request<{ reconnected: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/reconnect`),
   feishuDiagnostics: (id: string) => request<FeishuChannelDiagnostics>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/diagnostics`),
+  feishuPermissions: (id: string) => request<FeishuPermissionStatus>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/permissions`),
   listFeishuBindings: (id: string) => request<FeishuChannelBinding[]>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/bindings`),
   listConversationChannelBindings: (workspaceId: string, conversationId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/channel-bindings`),
   listDemandChannelBindings: (workspaceId: string, demandId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/channel-bindings`),

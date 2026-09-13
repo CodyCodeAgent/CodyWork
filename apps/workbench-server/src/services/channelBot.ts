@@ -17,6 +17,11 @@ import {
   type ConversationDocumentPublisher,
 } from './conversationSharing.js'
 import {
+  FeishuPermissionInspector,
+  feishuPermissionTemplate,
+  type FeishuPermissionStatus,
+} from './feishuPermissions.js'
+import {
   ChannelStore,
   type ChannelAccount,
   type ChannelAccountInput,
@@ -67,6 +72,7 @@ export class CodyWorkChannelService {
       now?: () => Date
       providerFactory?: ChannelProviderFactory
       documentPublisher?: ConversationDocumentPublisher
+      permissionInspector?: { inspect(account: import('./channelStore.js').ChannelAccountSecret): Promise<FeishuPermissionStatus> }
     } = {},
   ) {
     this.repositories = new ChannelRepositories(new ChannelStore(database))
@@ -164,6 +170,13 @@ export class CodyWorkChannelService {
   }
 
   listAccounts(): ChannelAccount[] { return this.repositories.accounts.list() }
+
+  permissionTemplate() { return feishuPermissionTemplate() }
+
+  async permissions(accountId: string) {
+    const account = this.repositories.accounts.get(accountId)
+    return (this.options.permissionInspector ?? new FeishuPermissionInspector()).inspect(account)
+  }
 
   listBindings(accountId: string) { return this.repositories.bindings.list(accountId) }
 

@@ -302,6 +302,8 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/channels/feishu/accounts', () => channelService(ctx).listAccounts())
 
+  add('GET', '/api/channels/feishu/permission-template', () => channelService(ctx).permissionTemplate())
+
   add('POST', '/api/channels/feishu/accounts', async (c) => channelService(ctx).saveAccount(null, channelAccountInput(c.body)))
 
   add('PATCH', '/api/channels/feishu/accounts/:accountId', async (c) => channelService(ctx).saveAccount(requiredParam(c, 'accountId'), channelAccountInput(c.body)))
@@ -317,6 +319,8 @@ function buildRoutes(ctx: AppContext) {
   })
 
   add('GET', '/api/channels/feishu/accounts/:accountId/diagnostics', (c) => channelService(ctx).diagnostics(requiredParam(c, 'accountId')))
+
+  add('GET', '/api/channels/feishu/accounts/:accountId/permissions', (c) => channelService(ctx).permissions(requiredParam(c, 'accountId')))
 
   add('GET', '/api/channels/feishu/accounts/:accountId/bindings', (c) => channelService(ctx).listBindings(requiredParam(c, 'accountId')))
 

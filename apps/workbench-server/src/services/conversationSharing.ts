@@ -6,6 +6,7 @@ import {
   type CodexEvent,
 } from '@codycodeagent/cody-web-core/conversation'
 import type { ChannelAccountSecret } from './channelStore.js'
+import { feishuApiError } from './feishuPermissions.js'
 
 export type ConversationShareEntry = {
   role: 'user' | 'assistant'
@@ -76,9 +77,17 @@ function batchesForDescendantInsert(blocks: FeishuBlock[], firstLevelIds: string
 function feishuError(action: string, response: { code?: number; msg?: string }): Error {
   const detail = response.msg || '飞书返回未知错误'
   const permissionHint = /permission|scope|access denied|权限/iu.test(detail)
-    ? '。请确认应用已开通 docx:document、docx:document.block:convert 和 drive:drive 权限'
+    ? '。请到“设置 → 飞书机器人”检查并一次性申请 CodyWork 完整权限'
     : ''
   return new Error(`${action}失败：${detail}（${response.code ?? 'unknown'}）${permissionHint}`)
+}
+
+async function feishuCall<T>(action: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch (error) {
+    throw feishuApiError(action, error)
+  }
 }
 
 async function discardIncompleteDocument(client: Lark.Client, documentId: string): Promise<void> {
@@ -99,27 +108,27 @@ export class FeishuConversationDocumentPublisher implements ConversationDocument
       domain: account.domain === 'lark' ? Lark.Domain.Lark : Lark.Domain.Feishu,
       logger: { error: () => undefined, warn: () => undefined, info: () => undefined, debug: () => undefined, trace: () => undefined },
     })
-    const created = await client.docx.document.create({ data: { title: document.title } })
+    const created = await feishuCall('创建飞书文档', () => client.docx.document.create({ data: { title: document.title } }))
     const documentId = created.data?.document?.document_id
     if (created.code !== 0 || !documentId) throw feishuError('创建飞书文档', created)
     try {
-      const converted = await client.docx.document.convert({ data: { content_type: 'markdown', content: document.markdown } })
+      const converted = await feishuCall('转换会话内容', () => client.docx.document.convert({ data: { content_type: 'markdown', content: document.markdown } }))
       const blocks = (converted.data?.blocks ?? []) as FeishuBlock[]
       const firstLevelIds = converted.data?.first_level_block_ids ?? []
       if (converted.code !== 0 || !blocks.length || !firstLevelIds.length) throw feishuError('转换会话内容', converted)
 
       let index = 0
       for (const batch of batchesForDescendantInsert(blocks, firstLevelIds)) {
-        const inserted = await client.docx.documentBlockDescendant.create({
+        const inserted = await feishuCall('写入会话内容', () => client.docx.documentBlockDescendant.create({
           path: { document_id: documentId, block_id: documentId },
           params: { document_revision_id: -1 },
           data: { children_id: batch.ids, descendants: batch.blocks.map(cleanBlock) as never[], index },
-        })
+        }))
         if (inserted.code !== 0) throw feishuError('写入会话内容', inserted)
         index += batch.ids.length
       }
 
-      const permission = await client.drive.v2.permissionPublic.patch({
+      const permission = await feishuCall('设置飞书文档访问权限', () => client.drive.v2.permissionPublic.patch({
         path: { token: documentId },
         params: { type: 'docx' },
         data: {
@@ -127,7 +136,7 @@ export class FeishuConversationDocumentPublisher implements ConversationDocument
           link_share_entity: 'tenant_readable',
           share_entity: 'same_tenant',
         },
-      })
+      }))
       if (permission.code !== 0) throw feishuError('设置飞书文档访问权限', permission)
     } catch (error) {
       await discardIncompleteDocument(client, documentId)
