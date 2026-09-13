@@ -31,13 +31,16 @@ export interface ConversationDocumentPublisher {
 
 type FeishuBlock = Record<string, unknown> & { block_id?: string; children?: string[] | string; block_type?: number }
 
-function cleanBlock(block: FeishuBlock): FeishuBlock {
+export function cleanConvertedFeishuBlock(block: FeishuBlock): FeishuBlock {
   const { parent_id: _parentId, ...cleaned } = block
   if (typeof cleaned.children === 'string') cleaned.children = [cleaned.children]
   const table = cleaned.table
   if (table && typeof table === 'object' && !Array.isArray(table)) {
-    const { merge_info: _mergeInfo, cells: _cells, ...rest } = table as Record<string, unknown>
-    cleaned.table = rest
+    const property = (table as Record<string, unknown>).property
+    if (property && typeof property === 'object' && !Array.isArray(property)) {
+      const { merge_info: _mergeInfo, ...writableProperty } = property as Record<string, unknown>
+      cleaned.table = { ...(table as Record<string, unknown>), property: writableProperty }
+    }
   }
   return cleaned
 }
@@ -122,7 +125,7 @@ export class FeishuConversationDocumentPublisher implements ConversationDocument
         const inserted = await feishuCall('写入会话内容', () => client.docx.documentBlockDescendant.create({
           path: { document_id: documentId, block_id: documentId },
           params: { document_revision_id: -1 },
-          data: { children_id: batch.ids, descendants: batch.blocks.map(cleanBlock) as never[], index },
+          data: { children_id: batch.ids, descendants: batch.blocks.map(cleanConvertedFeishuBlock) as never[], index },
         }))
         if (inserted.code !== 0) throw feishuError('写入会话内容', inserted)
         index += batch.ids.length

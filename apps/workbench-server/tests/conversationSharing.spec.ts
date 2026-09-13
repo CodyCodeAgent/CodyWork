@@ -8,6 +8,7 @@ import { CodyWorkChannelService } from '../src/services/channelBot.js'
 import { ChannelStore } from '../src/services/channelStore.js'
 import {
   buildConversationShareDocument,
+  cleanConvertedFeishuBlock,
   conversationShareEntries,
   type ConversationDocumentPublisher,
   type ConversationShareDocument,
@@ -21,6 +22,31 @@ function event(id: string, type: CodexEvent['type'], data: Record<string, unknow
 }
 
 describe('conversation Feishu document sharing', () => {
+  it('keeps table cell relationships while removing converted read-only fields', () => {
+    expect(cleanConvertedFeishuBlock({
+      block_id: 'table-1',
+      parent_id: 'temporary-parent',
+      block_type: 31,
+      children: ['cell-1'],
+      table: {
+        cells: ['cell-1'],
+        property: {
+          column_size: 1,
+          row_size: 1,
+          merge_info: [{ col_span: 1, row_span: 1 }],
+        },
+      },
+    })).toEqual({
+      block_id: 'table-1',
+      block_type: 31,
+      children: ['cell-1'],
+      table: {
+        cells: ['cell-1'],
+        property: { column_size: 1, row_size: 1 },
+      },
+    })
+  })
+
   it('rejects empty snapshots before contacting the document publisher', () => {
     expect(() => buildConversationShareDocument({
       workspaceName: 'AI Hub', conversationTitle: 'Empty conversation', events: [],
