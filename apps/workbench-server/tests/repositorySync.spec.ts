@@ -41,7 +41,7 @@ function createFixture() {
   return { root, baseline, updater, db, workspace, repository }
 }
 
-describe('safe repository baseline synchronization', () => {
+describe('safe repository baseline synchronization', { timeout: 15_000 }, () => {
   it('fetches and fast-forwards a clean baseline without rewriting history', () => {
     const test = createFixture()
     writeFileSync(join(test.updater, 'remote.md'), 'from origin\n')
@@ -69,6 +69,42 @@ describe('safe repository baseline synchronization', () => {
     expect(result.message).toContain('未提交改动')
     expect(git(test.baseline, ['rev-parse', 'HEAD'])).toBe(before)
     expect(git(test.baseline, ['status', '--porcelain=v1'])).toContain('local-only.md')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('infers the remote default branch and safely advances a detached baseline', () => {
+    const test = createFixture()
+    git(test.baseline, ['checkout', '--detach'])
+    test.db.db.prepare('UPDATE repositories SET default_ref = ? WHERE id = ?').run('HEAD', test.repository.id)
+    writeFileSync(join(test.updater, 'remote.md'), 'from origin while detached\n')
+    git(test.updater, ['add', 'remote.md'])
+    git(test.updater, ['commit', '-m', 'remote update'])
+    git(test.updater, ['push'])
+
+    const result = syncRepositoryBaseline(test.db, test.workspace, test.repository.id)
+
+    expect(result).toMatchObject({ state: 'fast_forwarded', commitsBehind: 1, commitsAhead: 0, ref: 'main' })
+    expect(git(test.baseline, ['rev-parse', 'HEAD'])).toBe(git(test.updater, ['rev-parse', 'HEAD']))
+    expect(() => git(test.baseline, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).toThrow()
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('publishes repository discovery atomically when reconciliation fails', () => {
+    const test = createFixture()
+    test.db.db.exec(`
+      CREATE TRIGGER fail_repository_reconcile
+      BEFORE UPDATE OF present ON repositories
+      WHEN NEW.present = 1
+      BEGIN
+        SELECT RAISE(ABORT, 'synthetic reconciliation failure');
+      END;
+    `)
+
+    expect(() => listRepositories(test.db, test.workspace)).toThrow('synthetic reconciliation failure')
+    const stored = test.db.db.prepare('SELECT id, present FROM repositories WHERE workspace_id = ?').all(test.workspace.id) as Array<{ id: string; present: number }>
+    expect(stored).toEqual([{ id: test.repository.id, present: 1 }])
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })

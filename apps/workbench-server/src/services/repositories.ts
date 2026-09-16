@@ -55,11 +55,31 @@ function repositoryOrigin(path: string): string | null {
   }
 }
 
+function remoteDefaultRef(path: string): string | null {
+  try {
+    const symbolic = runGit(path, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])
+    if (symbolic.startsWith('origin/')) return symbolic.slice('origin/'.length)
+  } catch {
+    // Older clones and manually assembled repositories may not have origin/HEAD.
+  }
+  for (const candidate of ['master', 'main']) {
+    for (const ref of [`refs/remotes/origin/${candidate}`, `refs/heads/${candidate}`]) {
+      try {
+        runGit(path, ['show-ref', '--verify', '--quiet', ref])
+        return candidate
+      } catch {
+        // Keep trying the remaining conventional default refs.
+      }
+    }
+  }
+  return null
+}
+
 function repositoryRef(path: string): string {
   try {
     return runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || 'HEAD'
   } catch {
-    return 'HEAD'
+    return remoteDefaultRef(path) ?? 'HEAD'
   }
 }
 
@@ -104,28 +124,35 @@ export function discoverRepositories(db: WorkbenchDb, workspace: WorkspaceRow): 
     ensureCodyWorkControlPlaneIgnored(workspace.path)
     candidates.push({ name: basename(workspace.path), path: workspace.path })
   }
-  const seen = new Set<string>()
-  const now = nowIso()
-  // Reconciliation is authoritative for this scan. Mark prior inventory rows
-  // absent first, then the successful candidates below restore present = 1.
-  // This also removes a stale root-repository row after a Workspace gains a
-  // normal services/ inventory.
-  db.db.prepare('UPDATE repositories SET present = 0, inspected_at = ? WHERE workspace_id = ?').run(now, workspace.id)
-  for (const candidate of candidates) {
-    const { path } = candidate
-    const id = (db.db.prepare('SELECT id FROM repositories WHERE workspace_id = ? AND baseline_path = ?').get(workspace.id, path) as { id?: string } | undefined)?.id ?? makeId('repo')
+  const inspected = candidates.map(candidate => {
     let inspection: ReturnType<typeof inspectRepository>
     try {
-      inspection = inspectRepository(path)
+      inspection = inspectRepository(candidate.path)
     } catch {
       inspection = { dirty: false, defaultRef: 'HEAD', originUrl: null, head: '' }
     }
-    db.db.prepare(`
-      INSERT INTO repositories (id, workspace_id, name, baseline_path, origin_url, default_ref, sync_status, sync_error, dirty, present, inspected_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'ok', NULL, ?, 1, ?)
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, origin_url = excluded.origin_url, default_ref = excluded.default_ref, dirty = excluded.dirty, present = 1, inspected_at = excluded.inspected_at
-    `).run(id, workspace.id, candidate.name, path, inspection.originUrl, inspection.defaultRef, inspection.dirty ? 1 : 0, now)
-    seen.add(path)
+    return { ...candidate, inspection }
+  })
+  const seen = new Set(inspected.map(candidate => candidate.path))
+  const now = nowIso()
+  // Git inspection can be slow for a large Workspace. Complete it before the
+  // write transaction, then publish the new inventory atomically so API reads
+  // never observe the temporary "all repositories absent" reconciliation state.
+  db.db.exec('BEGIN IMMEDIATE')
+  try {
+    db.db.prepare('UPDATE repositories SET present = 0, inspected_at = ? WHERE workspace_id = ?').run(now, workspace.id)
+    for (const candidate of inspected) {
+      const id = (db.db.prepare('SELECT id FROM repositories WHERE workspace_id = ? AND baseline_path = ?').get(workspace.id, candidate.path) as { id?: string } | undefined)?.id ?? makeId('repo')
+      db.db.prepare(`
+        INSERT INTO repositories (id, workspace_id, name, baseline_path, origin_url, default_ref, sync_status, sync_error, dirty, present, inspected_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'ok', NULL, ?, 1, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, origin_url = excluded.origin_url, default_ref = excluded.default_ref, dirty = excluded.dirty, present = 1, inspected_at = excluded.inspected_at
+      `).run(id, workspace.id, candidate.name, candidate.path, candidate.inspection.originUrl, candidate.inspection.defaultRef, candidate.inspection.dirty ? 1 : 0, now)
+    }
+    db.db.exec('COMMIT')
+  } catch (error) {
+    try { db.db.exec('ROLLBACK') } catch { /* transaction did not start */ }
+    throw error
   }
   const rows = db.db.prepare('SELECT * FROM repositories WHERE workspace_id = ? AND present = 1 ORDER BY name').all(workspace.id) as unknown as RepositoryRow[]
   return rows.filter(row => seen.has(row.baseline_path))
@@ -195,7 +222,8 @@ function saveRepositoryInspection(db: WorkbenchDb, repository: RepositoryRow, in
  */
 export function syncRepositoryBaseline(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): RepositorySyncResult {
   const repository = repositoryForSync(db, workspace, repositoryId)
-  const ref = repository.default_ref?.trim() || repositoryRef(repository.baseline_path)
+  const storedRef = repository.default_ref?.trim()
+  const ref = !storedRef || storedRef === 'HEAD' ? repositoryRef(repository.baseline_path) : storedRef
   if (!ref || ref === 'HEAD') return syncResult(repository, ref || 'HEAD', 'blocked', '无法确定 Repo 的当前默认分支，未执行同步。')
   if (!repository.origin_url) return syncResult(repository, ref, 'blocked', '该 Repo 未配置 origin，无法同步远端基线。')
 

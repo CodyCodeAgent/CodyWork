@@ -426,8 +426,8 @@ export const api = {
   listRepositories: (id: string) => request<Repository[]>('GET', `/api/workspaces/${id}/repositories`),
   addRepository: (id: string, input: { source: 'git' | 'folder'; url?: string; path?: string; name?: string }) =>
     request<Repository>('POST', `/api/workspaces/${id}/repositories`, input),
-  syncRepository: (workspaceId: string, repositoryId: string) =>
-    request<RepositorySyncResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/sync`),
+  syncRepository: (workspaceId: string, repositoryId: string, refreshDashboard = true) =>
+    request<RepositorySyncResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/sync${refreshDashboard ? '' : '?refresh=0'}`),
   clearRepositoryBaseline: (workspaceId: string, repositoryId: string) =>
     request<RepositoryCleanupResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/clear-baseline`, { confirm: true }),
   listDemands: (id: string) => request<Demand[]>('GET', `/api/workspaces/${id}/demands`),

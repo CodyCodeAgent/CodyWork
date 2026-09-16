@@ -494,7 +494,7 @@ function buildRoutes(ctx: AppContext) {
   add('POST', '/api/workspaces/:id/repositories/:repositoryId/sync', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     const result = syncRepositoryBaseline(ctx.db, row, requiredParam(c, 'repositoryId'))
-    void dashboardCache(ctx).refresh(row)
+    if (c.query.get('refresh') !== '0') void dashboardCache(ctx).refresh(row)
     return {
       repositoryId: result.repository.id,
       ref: result.ref,

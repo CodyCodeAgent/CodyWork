@@ -765,9 +765,9 @@ async function addDemandRepository(): Promise<void> {
     addingDemandRepository.value = false
   }
 }
-async function performRepositorySync(workspaceId: string, repository: Repository): Promise<RepositorySyncResult> {
+async function performRepositorySync(workspaceId: string, repository: Repository, refreshDashboard = true): Promise<RepositorySyncResult> {
   try {
-    const result = await api.syncRepository(workspaceId, repository.id)
+    const result = await api.syncRepository(workspaceId, repository.id, refreshDashboard)
     if (workspace.value?.id === workspaceId) {
       repositorySyncResults.value = { ...repositorySyncResults.value, [repository.id]: result }
       repositories.value = repositories.value.map(item => item.id === repository.id ? result.repository : item)
@@ -819,14 +819,14 @@ async function syncAllRepositoryBaselines(): Promise<void> {
     for (const repository of queue) {
       if (workspace.value?.id !== currentWorkspace.id) { interrupted = true; break }
       syncingRepositoryId.value = repository.id
-      const result = await performRepositorySync(currentWorkspace.id, repository)
+      const result = await performRepositorySync(currentWorkspace.id, repository, false)
       if (workspace.value?.id !== currentWorkspace.id) { interrupted = true; break }
       counts[result.state] += 1
       repositoryBulkSyncCompleted.value += 1
     }
     if (!interrupted) {
       repositoryBulkSyncMessage.value = `同步完成：更新 ${counts.fast_forwarded}，已是最新 ${counts.up_to_date}，跳过 ${counts.blocked}，失败 ${counts.failed}`
-      await refreshDashboard()
+      await requestDashboardRefresh()
     }
   } finally {
     syncingRepositoryId.value = ''
