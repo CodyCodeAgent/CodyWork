@@ -107,6 +107,19 @@ export interface QuickActionInput {
   enabled: boolean
 }
 
+export interface SmartNotificationSettings {
+  workspaceId: string
+  enabled: boolean
+  accountId: string
+  recipientOpenId: string
+  minActiveMinutes: number
+  notifyDemand: boolean
+  notifyWorkspace: boolean
+  updatedAt: string
+}
+
+export type SmartNotificationSettingsInput = Omit<SmartNotificationSettings, 'workspaceId' | 'updatedAt'>
+
 export interface SkillInstallEvent {
   type: string
   timestamp?: string
@@ -405,6 +418,9 @@ export const api = {
   createQuickAction: (id: string, input: QuickActionInput) => request<QuickAction>('POST', `/api/workspaces/${id}/quick-actions`, input),
   updateQuickAction: (id: string, actionId: string, input: QuickActionInput) => request<QuickAction>('PATCH', `/api/workspaces/${id}/quick-actions/${encodeURIComponent(actionId)}`, input),
   deleteQuickAction: (id: string, actionId: string) => request<{ deleted: true }>('DELETE', `/api/workspaces/${id}/quick-actions/${encodeURIComponent(actionId)}`),
+  smartNotificationSettings: (id: string) => request<SmartNotificationSettings>('GET', `/api/workspaces/${id}/smart-notifications`),
+  updateSmartNotificationSettings: (id: string, input: SmartNotificationSettingsInput) => request<SmartNotificationSettings>('PATCH', `/api/workspaces/${id}/smart-notifications`, input),
+  testSmartNotification: (id: string) => request<{ queued: true; outboxId: string }>('POST', `/api/workspaces/${id}/smart-notifications/test`),
   listKnowledge: (id: string) => request<KnowledgeDocument[]>('GET', `/api/workspaces/${id}/knowledge`),
   getKnowledge: (id: string, documentId: string) => request<KnowledgeDocument>('GET', `/api/workspaces/${id}/knowledge/${encodeURIComponent(documentId)}`),
   listRepositories: (id: string) => request<Repository[]>('GET', `/api/workspaces/${id}/repositories`),

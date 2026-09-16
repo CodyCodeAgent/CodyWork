@@ -11,7 +11,7 @@
         <div class="workspace-body">
           <div class="workspace-header-card"><span class="workspace-large-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><div class="workspace-header-copy"><h2>{{ workspace.name }}</h2><code>{{ workspace.path }}</code><p>Workspace 和 Demand 负责组织上下文；实际读写、命令与审批权限由底层 Codex 模式控制。</p></div><span class="ready-pill"><i />ready</span></div>
           <div class="metric-grid" aria-label="Workspace 统计"><article class="metric-card"><small>REPOSITORIES</small><strong>{{ dashboard?.repositories.total ?? repositories.length }}</strong><span>登记开发仓库</span></article><article class="metric-card"><small>DEMANDS</small><strong>{{ dashboard?.demands.total ?? demands.length }}</strong><span>隔离 Worktree</span></article><article class="metric-card"><small>KNOWLEDGE</small><strong>{{ dashboard?.knowledge.documents ?? 0 }}</strong><span>可读文档</span></article><article class="metric-card"><small>SKILLS</small><strong>{{ dashboard?.skills.available ?? 0 }}</strong><span>可调用能力</span></article></div>
-          <div class="workspace-grid"><article class="info-card repository-card"><div class="repository-card-head"><div><div class="card-kicker">REPOSITORIES</div><h3>开发根目录</h3></div><span class="repository-summary">{{ repositories.length }} 个项目</span></div><div v-if="repositories.length" class="repository-list" role="list" aria-label="开发仓库"><div v-for="repo in repositories" :key="repo.id" class="repository-row" role="listitem"><div class="repository-copy"><div class="repository-name"><strong>{{ repo.name }}</strong><code v-if="repo.defaultRef">{{ repo.defaultRef }}</code></div><small>{{ repo.path }}</small></div><div class="repository-statuses"><span v-if="repo.dirty" class="repository-status dirty">dirty</span><span v-else class="repository-status clean">clean</span><span v-if="repo.syncStatus === 'pull_failed'" class="repository-status sync-failed">sync failed</span><button v-if="repo.dirty" class="repository-clear-button" type="button" :disabled="Boolean(clearingRepositoryId)" :title="`丢弃 ${repo.name} 基线中的未提交改动`" @click="requestBaselineCleanup(repo)">清理</button></div></div></div><p v-else class="muted">先添加一个 Git 仓库或目录，再创建 Demand。</p><div class="repository-card-foot"><span>状态由后台扫描更新</span><button class="btn" @click="showAddRepository = true">管理仓库</button></div></article><article class="info-card next-step-card"><div class="card-kicker">NEXT STEP</div><h3>按需求进入执行</h3><p>Demand 为每个仓库创建独立 Worktree；实际读写和审批由所选 Codex 原生模式决定。</p><button class="btn primary" @click="goTo('demands')">查看需求</button></article></div>
+          <div class="workspace-grid"><RepositoryOverviewCard :repositories="repositories" :syncing-repository-id="syncingRepositoryId" :syncing-all="syncingAllRepositories" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :bulk-progress="repositoryBulkSyncProgress" :bulk-message="repositoryBulkSyncMessage" @sync="syncRepositoryBaseline" @sync-all="syncAllRepositoryBaselines" @cleanup="requestBaselineCleanup" @manage="showAddRepository = true" /><article class="info-card next-step-card"><div class="card-kicker">NEXT STEP</div><h3>按需求进入执行</h3><p>Demand 为每个仓库创建独立 Worktree；实际读写和审批由所选 Codex 模式决定。</p><button class="btn primary" @click="goTo('demands')">查看需求</button></article></div>
         </div>
       </section>
       <section v-else-if="activePage === 'knowledge'" class="knowledge-page"><header class="topbar"><div><div class="eyebrow">WORKSPACE / KNOWLEDGE</div><h1>知识库</h1></div><button class="btn" @click="loadKnowledge">刷新</button></header><div class="knowledge-body"><div class="knowledge-layout"><article class="knowledge-list-card"><div class="knowledge-list-head"><strong>文档</strong><span>{{ filteredKnowledge.length }}</span></div><div class="knowledge-search"><input v-model="knowledgeQuery" class="input" placeholder="搜索文档…" /></div><button v-for="doc in filteredKnowledge" :key="doc.id" :class="['knowledge-row', { active: selectedKnowledge?.id === doc.id }]" @click="openKnowledge(doc)"><span class="knowledge-file-icon">{{ doc.extension.replace('.', '').slice(0, 4) || 'doc' }}</span><span class="knowledge-row-copy"><strong>{{ doc.name }}</strong><small>{{ doc.relativePath }}</small></span></button><p v-if="!filteredKnowledge.length" class="knowledge-empty">Workspace 中还没有可展示的知识文档。</p></article><article class="knowledge-detail-card"><template v-if="selectedKnowledge"><div class="knowledge-detail-head"><div><div class="card-kicker">{{ selectedKnowledge.extension || 'DOCUMENT' }}</div><h2>{{ selectedKnowledge.name }}</h2><p>{{ selectedKnowledge.path }}</p></div><span class="knowledge-extension">{{ selectedKnowledge.size }} bytes</span></div><pre class="knowledge-content">{{ selectedKnowledge.content ?? '正在读取文档…' }}</pre></template><p v-else class="knowledge-detail-empty">从左侧选择一个文档查看其内容。</p></article></div></div></section>
@@ -39,6 +39,7 @@
         <SettingsOverview v-if="settingsSection === 'overview'" :action-count="quickActions.length" @open="openSettingsSection" />
         <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
         <FeishuChannelSettings v-else-if="settingsSection === 'feishu'" />
+        <SmartNotificationSettings v-else-if="settingsSection === 'smart-notifications'" :workspace-id="workspace.id" />
         <div v-else class="workspace-body"><article class="settings-card"><div class="card-kicker">APP SERVER</div><h2>Codex App Server</h2><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button></article></div>
       </section>
       <section v-else-if="activePage === 'demands' && !selectedDemand" class="demands-body">
@@ -138,9 +139,11 @@ import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
 import AddDemandRepositoryDialog from './components/AddDemandRepositoryDialog.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
 import DemandToolbox from './components/DemandToolbox.vue'
+import RepositoryOverviewCard from './components/RepositoryOverviewCard.vue'
 import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
 import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
+import SmartNotificationSettings from './components/SmartNotificationSettings.vue'
 import SkillInstallDialog from './components/SkillInstallDialog.vue'
 import ConversationChannelDialog from './components/ConversationChannelDialog.vue'
 import ConversationShareDialog from './components/ConversationShareDialog.vue'
@@ -218,6 +221,10 @@ const addingDemandRepository = ref(false)
 const selectedDemandRepositoryId = ref('')
 const demandRepositoryError = ref('')
 const syncingRepositoryId = ref('')
+const syncingAllRepositories = ref(false)
+const repositoryBulkSyncCompleted = ref(0)
+const repositoryBulkSyncTotal = ref(0)
+const repositoryBulkSyncMessage = ref('')
 const repositorySyncResults = ref<Record<string, RepositorySyncResult>>({})
 const baselineCleanupPending = ref<Repository | null>(null)
 const clearingRepositoryId = ref('')
@@ -241,6 +248,7 @@ let copiedDemandPathTimer: number | null = null; let copiedDemandLinkTimer: numb
 let quickActionFeedbackTimer: number | null = null
 const conversationScrollState = ref<ConversationScrollState | null>(null)
 const visibleConversationEntryCount = ref(DEFAULT_VISIBLE_MESSAGE_COUNT)
+const repositoryBulkSyncProgress = computed(() => syncingAllRepositories.value ? `${repositoryBulkSyncCompleted.value}/${repositoryBulkSyncTotal.value}` : '')
 const socketState = computed(() => socketConnection.value.status)
 const isWorkspaceConversationPage = computed(() => activePage.value === 'chat' && !selectedDemand.value)
 const socketLabel = computed(() => {
@@ -297,7 +305,7 @@ const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.tr
 const filteredSkills = computed(() => filterSkills(skills.value, skillQuery.value))
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
 const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
-const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : '设置')
+const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : settingsSection.value === 'smart-notifications' ? '智能通知' : '设置')
 const threadProjects = computed<ThreadProject[]>(() => groupThreadProjects(nativeThreads.value, selectedDemand.value?.repositories.map(repo => repo.worktreePath) ?? []))
 const filteredNativeThreads = computed(() => filterNativeThreads(nativeThreads.value, selectedThreadProject.value, threadQuery.value))
 const canBindNativeThread = computed(() => manualThreadEntry.value ? Boolean(boundNativeId.value.trim()) : filteredNativeThreads.value.some(thread => thread.nativeId === boundNativeId.value && !thread.bound))
@@ -500,6 +508,10 @@ async function selectWorkspace(next: Workspace, options: { demandId?: string | n
   workspaces.value = workspaces.value.map((item) => ({ ...item, active: item.id === next.id }))
   repositorySyncResults.value = {}
   syncingRepositoryId.value = ''
+  syncingAllRepositories.value = false
+  repositoryBulkSyncCompleted.value = 0
+  repositoryBulkSyncTotal.value = 0
+  repositoryBulkSyncMessage.value = ''
   skillQuery.value = ''
   selectedSkill.value = null
   showWorkspacePicker.value = false
@@ -753,22 +765,76 @@ async function addDemandRepository(): Promise<void> {
     addingDemandRepository.value = false
   }
 }
-async function syncRepositoryBaseline(repositoryId: string): Promise<void> {
-  if (!workspace.value || syncingRepositoryId.value) return
-  syncingRepositoryId.value = repositoryId
+async function performRepositorySync(workspaceId: string, repository: Repository): Promise<RepositorySyncResult> {
   try {
-    const result = await api.syncRepository(workspace.value.id, repositoryId)
-    repositorySyncResults.value = { ...repositorySyncResults.value, [repositoryId]: result }
-    repositories.value = repositories.value.map(repository => repository.id === repositoryId ? result.repository : repository)
-    await refreshDashboard()
+    const result = await api.syncRepository(workspaceId, repository.id)
+    if (workspace.value?.id === workspaceId) {
+      repositorySyncResults.value = { ...repositorySyncResults.value, [repository.id]: result }
+      repositories.value = repositories.value.map(item => item.id === repository.id ? result.repository : item)
+    }
+    return result
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause)
+    const message = cause instanceof Error ? cause.message : String(cause)
+    const result: RepositorySyncResult = {
+      repositoryId: repository.id,
+      ref: repository.defaultRef || 'HEAD',
+      state: 'failed',
+      message: `同步失败：${message}`,
+      localHead: null,
+      remoteHead: null,
+      commitsBehind: null,
+      commitsAhead: null,
+      repository,
+    }
+    if (workspace.value?.id === workspaceId) repositorySyncResults.value = { ...repositorySyncResults.value, [repository.id]: result }
+    return result
+  }
+}
+async function syncRepositoryBaseline(repositoryId: string): Promise<void> {
+  const currentWorkspace = workspace.value
+  const repository = repositories.value.find(item => item.id === repositoryId)
+  if (!currentWorkspace || !repository || syncingRepositoryId.value || syncingAllRepositories.value) return
+  syncingRepositoryId.value = repositoryId
+  repositoryBulkSyncMessage.value = ''
+  try {
+    const result = await performRepositorySync(currentWorkspace.id, repository)
+    if (result.state === 'failed') error.value = result.message
+    await refreshDashboard()
   } finally {
     syncingRepositoryId.value = ''
   }
 }
+async function syncAllRepositoryBaselines(): Promise<void> {
+  const currentWorkspace = workspace.value
+  const queue = [...repositories.value]
+  if (!currentWorkspace || !queue.length || syncingRepositoryId.value || syncingAllRepositories.value || clearingRepositoryId.value) return
+  syncingAllRepositories.value = true
+  repositoryBulkSyncCompleted.value = 0
+  repositoryBulkSyncTotal.value = queue.length
+  repositoryBulkSyncMessage.value = ''
+  repositorySyncResults.value = {}
+  const counts = { fast_forwarded: 0, up_to_date: 0, blocked: 0, failed: 0 }
+  let interrupted = false
+  try {
+    for (const repository of queue) {
+      if (workspace.value?.id !== currentWorkspace.id) { interrupted = true; break }
+      syncingRepositoryId.value = repository.id
+      const result = await performRepositorySync(currentWorkspace.id, repository)
+      if (workspace.value?.id !== currentWorkspace.id) { interrupted = true; break }
+      counts[result.state] += 1
+      repositoryBulkSyncCompleted.value += 1
+    }
+    if (!interrupted) {
+      repositoryBulkSyncMessage.value = `同步完成：更新 ${counts.fast_forwarded}，已是最新 ${counts.up_to_date}，跳过 ${counts.blocked}，失败 ${counts.failed}`
+      await refreshDashboard()
+    }
+  } finally {
+    syncingRepositoryId.value = ''
+    syncingAllRepositories.value = false
+  }
+}
 function requestBaselineCleanup(repository: Repository): void {
-  if (!repository.dirty || clearingRepositoryId.value || syncingRepositoryId.value) return
+  if (!repository.dirty || clearingRepositoryId.value || syncingRepositoryId.value || syncingAllRepositories.value) return
   baselineCleanupError.value = ''
   baselineCleanupPending.value = repository
 }

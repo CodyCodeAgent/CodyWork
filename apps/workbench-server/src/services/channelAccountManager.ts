@@ -16,6 +16,7 @@ import {
   type ChannelAccountInput,
 } from './channelStore.js'
 import type { ChannelRepositoryPorts } from './channelRepositories.js'
+import { makeId } from '../db/index.js'
 
 type DeliveryPayload = {
   text?: string
@@ -201,6 +202,22 @@ export class ChannelAccountManager {
     const runtime = this.runtimes.get(accountId)
     if (!runtime) throw new Error('飞书机器人当前未连接')
     return runtime.delivery.queue(input)
+  }
+
+  /** Persists proactive notifications even while the provider is reconnecting.
+   * An active delivery worker picks them up immediately; otherwise the normal
+   * account recovery flush delivers them after reconnect. */
+  async queueDurable(accountId: string, input: Parameters<ChannelDeliveryWorker['queue']>[0]): Promise<ChannelOutboxItem> {
+    const account = this.repositories.accounts.get(accountId)
+    if (!account.enabled) throw new Error('飞书机器人未启用')
+    const runtime = this.runtimes.get(accountId)
+    if (runtime) return runtime.delivery.queue(input)
+    return this.repositories.outbox.enqueue({
+      id: makeId('outbox'), provider: 'feishu', accountId,
+      kind: input.kind, targetId: input.targetId, payload: input.payload, dedupeKey: input.dedupeKey,
+      ...(input.revision === undefined ? {} : { revision: input.revision }),
+      ...(input.terminal === undefined ? {} : { terminal: input.terminal }),
+    })
   }
 
   flushInBackground(accountId: string, action = 'channel.outbox.background_flush'): void {

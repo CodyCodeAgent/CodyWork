@@ -76,6 +76,18 @@ export interface QuickActionRow {
   updated_at: string
 }
 
+export interface SmartNotificationSettingsRow {
+  workspace_id: string
+  enabled: number
+  account_id: string | null
+  recipient_open_id: string
+  min_active_minutes: number
+  notify_demand: number
+  notify_workspace: number
+  created_at: string
+  updated_at: string
+}
+
 export class WorkbenchDb {
   readonly db: DatabaseSync
   readonly path: string
@@ -200,6 +212,17 @@ export class WorkbenchDb {
         quick_action_id TEXT NOT NULL REFERENCES quick_actions(id) ON DELETE CASCADE,
         scene TEXT NOT NULL,
         PRIMARY KEY(quick_action_id, scene)
+      );
+      CREATE TABLE IF NOT EXISTS smart_notification_settings (
+        workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        account_id TEXT REFERENCES channel_accounts(id) ON DELETE SET NULL,
+        recipient_open_id TEXT NOT NULL DEFAULT '',
+        min_active_minutes INTEGER NOT NULL DEFAULT 30 CHECK (min_active_minutes BETWEEN 5 AND 240),
+        notify_demand INTEGER NOT NULL DEFAULT 1,
+        notify_workspace INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS runtime_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),

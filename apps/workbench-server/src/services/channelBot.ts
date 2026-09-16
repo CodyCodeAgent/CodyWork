@@ -27,6 +27,7 @@ import {
   type ChannelAccountInput,
   type CodyWorkChannelBinding,
 } from './channelStore.js'
+import { SmartNotificationService, type SmartNotificationSettingsInput } from './smartNotifications.js'
 
 export { feishuProjectionBody } from './channelFeishuRenderer.js'
 
@@ -62,6 +63,7 @@ export class CodyWorkChannelService {
   private readonly commands: ChannelCommandAdapter
   private readonly bindings: ChannelBindingService
   private readonly settings: ChannelSessionSettingsService
+  private readonly notifications: SmartNotificationService
 
   constructor(
     private readonly database: WorkbenchDb,
@@ -87,6 +89,12 @@ export class CodyWorkChannelService {
       detachAccountObservations: accountId => this.projection.detachAccount(accountId),
       validateLocalImage: (path, root) => this.projection.isAllowedImage(path, root),
     }, this.options.providerFactory)
+    this.notifications = new SmartNotificationService(database, conversations, workspaces, {
+      queue: (accountId, input) => this.accounts.queueDurable(accountId, input),
+      account: accountId => this.repositories.accounts.get(accountId),
+      audit: (accountId, action, targetType, targetId, success, metadata, error) => this.repositories.audit.record(accountId, action, targetType, targetId, success, metadata, error),
+      openUrl: binding => this.openUrl(binding),
+    })
     this.access = new ChannelAccessService(
       this.repositories,
       (accountId, input) => this.accounts.enqueue(accountId, input),
@@ -165,11 +173,16 @@ export class CodyWorkChannelService {
   }
 
   async close(): Promise<void> {
+    this.notifications.close()
     await this.accounts.close()
     this.projection.close()
   }
 
   listAccounts(): ChannelAccount[] { return this.repositories.accounts.list() }
+
+  smartNotificationSettings(workspaceId: string) { return this.notifications.get(workspaceId) }
+  saveSmartNotificationSettings(workspaceId: string, input: SmartNotificationSettingsInput) { return this.notifications.save(workspaceId, input) }
+  testSmartNotification(workspaceId: string) { return this.notifications.test(workspaceId) }
 
   permissionTemplate() { return feishuPermissionTemplate() }
 

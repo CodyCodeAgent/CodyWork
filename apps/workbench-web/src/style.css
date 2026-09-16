@@ -889,7 +889,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .info-card.repository-card { min-height: 0; padding: 0; overflow: hidden; }
 .repository-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 15px; border-bottom: 1px solid #edf0f4; }
 .repository-card-head h3 { margin: 7px 0 0; }
+.repository-card-actions { display: flex; align-items: center; gap: 8px; }
 .repository-summary { padding: 5px 8px; color: #5b5cc9; background: #f0f0ff; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.repository-sync-all { min-width: 82px; }
 .repository-list { max-height: 430px; overflow: auto; }
 .repository-row { display: flex; align-items: center; gap: 16px; min-height: 58px; padding: 10px 22px; border-bottom: 1px solid #f0f2f5; transition: background 160ms var(--ease); }
 .repository-row:hover { background: #fafaff; }
@@ -898,6 +900,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .repository-name strong { overflow: hidden; color: #2e3542; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .repository-name code { flex: 0 1 auto; overflow: hidden; padding: 2px 5px; color: #727d8d; background: #f2f4f7; border-radius: 4px; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .repository-copy small { display: block; overflow: hidden; margin-top: 3px; color: #929aaa; font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.repository-inline-result { max-width: 640px; margin: 6px 0 0; color: #2d7459; font-size: 10px; line-height: 1.45; }
+.repository-inline-result[data-state='blocked'] { color: #9c650e; }
+.repository-inline-result[data-state='failed'] { color: #aa414d; }
 .repository-statuses { display: flex; justify-content: flex-end; gap: 5px; flex: 0 0 auto; }
 .repository-status { padding: 4px 7px; border-radius: 999px; font-size: 9px; font-weight: 750; line-height: 1; letter-spacing: .02em; white-space: nowrap; }
 .repository-status.clean { color: #237554; background: #e8f7ef; }
@@ -905,6 +910,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .repository-status.sync-failed { color: #af3f4b; background: #fff0f1; }
 .repository-clear-button { min-height: 26px; padding: 3px 7px; color: #9d5530; background: #fff; border: 1px solid #e7bf9c; border-radius: 6px; font-size: 9px; font-weight: 700; white-space: nowrap; }
 .repository-clear-button:hover:not(:disabled) { color: #8c413d; background: #fff6ef; border-color: #d89972; }
+.repository-sync-button { min-width: 52px; min-height: 26px; padding: 3px 8px; color: #4f58bf; background: #fff; border: 1px solid #cfd3f4; border-radius: 6px; font-size: 9px; font-weight: 750; white-space: nowrap; }
+.repository-sync-button:hover:not(:disabled) { color: #3f47a8; background: #f4f4ff; border-color: #aeb4ec; }
+.repository-sync-button:disabled, .repository-clear-button:disabled { cursor: not-allowed; opacity: .48; }
 .repository-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 22px; color: #939ba8; background: #fbfcfd; font-size: 10px; }
 .repository-card-foot .btn { flex: 0 0 auto; }
 .next-step-card { min-height: 235px; }
@@ -957,8 +965,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .metric-card, .metric-card:nth-child(4), .metric-card:nth-child(5) { min-height: 116px; }
   .repository-card-head, .repository-row, .repository-card-foot { padding-right: 15px; padding-left: 15px; }
   .repository-row { gap: 10px; }
+  .repository-card-actions { align-items: flex-end; flex-direction: column; gap: 5px; }
   .repository-name code { display: none; }
   .repository-copy small { max-width: 190px; }
+  .repository-statuses { align-items: flex-end; flex-direction: column; }
   .bound-thread-note > div { align-items: flex-start; flex-direction: column; gap: 6px; }
   .thread-option { align-items: flex-start; }
   .thread-option-meta { display: none; }

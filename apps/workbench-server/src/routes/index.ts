@@ -25,6 +25,7 @@ import { createQuickAction, deleteQuickAction, listQuickActions, updateQuickActi
 import type { QuickActionInput } from '../services/quickActions.js'
 import { CodyWorkChannelService } from '../services/channelBot.js'
 import { AgentQuickActionTools } from '../services/agentQuickActions.js'
+import type { SmartNotificationSettingsInput } from '../services/smartNotifications.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -412,6 +413,21 @@ function buildRoutes(ctx: AppContext) {
   add('DELETE', '/api/workspaces/:id/quick-actions/:actionId', (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return deleteQuickAction(ctx.db, workspace, requiredParam(c, 'actionId'))
+  })
+
+  add('GET', '/api/workspaces/:id/smart-notifications', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return channelService(ctx).smartNotificationSettings(workspace.id)
+  })
+
+  add('PATCH', '/api/workspaces/:id/smart-notifications', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return channelService(ctx).saveSmartNotificationSettings(workspace.id, c.body as SmartNotificationSettingsInput)
+  })
+
+  add('POST', '/api/workspaces/:id/smart-notifications/test', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return channelService(ctx).testSmartNotification(workspace.id)
   })
 
   add('POST', '/api/workspaces/:id/dashboard/refresh', (c) => {

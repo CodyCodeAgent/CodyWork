@@ -120,6 +120,8 @@ describe('workbench UI rules', () => {
     expect(settings.toString()).toBe('http://localhost:3001/?debug=1&workspace=ws-1&view=settings&settings=quick-actions')
     expect(parseWorkbenchRoute(settings.search).settingsSection).toBe('quick-actions')
     expect(workbenchUrl(settings.toString(), 'ws-1', 'demand-1').searchParams.has('settings')).toBe(false)
+    const notifications = workbenchUrl(settings.toString(), 'ws-1', null, { page: 'settings', settingsSection: 'smart-notifications' })
+    expect(parseWorkbenchRoute(notifications.search).settingsSection).toBe('smart-notifications')
   })
 
   it('derives execution status from the complete Core ConversationState', () => {
