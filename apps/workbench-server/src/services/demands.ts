@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { DemandRow, RepositoryRow, WorkbenchDb, WorkspaceRow, makeId, nowIso } from '../db/index.js'
-import { listRepositories } from './repositories.js'
+import { listRepositories, prepareRepositoryBaselineForDemand, type PreparedRepositoryBaseline } from './repositories.js'
 
 function runGit(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
@@ -165,6 +165,7 @@ export function createDemand(db: WorkbenchDb, workspace: WorkspaceRow, input: Cr
   if (duplicateName) throw new Error('同名需求已存在')
   for (const repository of repositories) {
     if (branchCheckedOut(repository, branchName)) throw new Error(`Repo ${repository.name} 已经在其他 Worktree 使用该分支`)
+    if (branchExists(repository, branchName)) throw new Error(`Repo ${repository.name} 已存在未登记的需求分支 ${branchName}`)
     const existing = db.db.prepare('SELECT demand_id FROM demand_repositories WHERE repository_id = ? AND branch_name = ?').get(repository.id, branchName) as { demand_id?: string } | undefined
     if (existing) throw new Error(`Repo ${repository.name} 已经存在该需求分支`)
   }
@@ -174,16 +175,15 @@ export function createDemand(db: WorkbenchDb, workspace: WorkspaceRow, input: Cr
   db.db.prepare('INSERT INTO demand_operations (id, workspace_id, status, request_json, created_at) VALUES (?, ?, ?, ?, ?)').run(operationId, workspace.id, 'creating', JSON.stringify(input), createdAt)
   const created: { repository: RepositoryRow; path: string; baseRef: string; baseCommit: string; branchCreated: boolean }[] = []
   try {
+    const prepared = new Map<string, PreparedRepositoryBaseline>()
+    for (const repository of repositories) prepared.set(repository.id, prepareRepositoryBaselineForDemand(db, workspace, repository.id))
     mkdirSync(worktreeServices, { recursive: true })
     for (const repository of repositories) {
       const target = resolve(worktreeServices, repository.name)
       if (!isInside(worktreeServices, target) || existsSync(target)) throw new Error(`Worktree 目标不可用：${repository.name}`)
-      const ref = baseRef(repository)
-      const commit = runGit(repository.baseline_path, ['rev-parse', ref])
-      const alreadyExists = branchExists(repository, branchName)
-      if (alreadyExists) runGit(repository.baseline_path, ['worktree', 'add', target, branchName])
-      else runGit(repository.baseline_path, ['worktree', 'add', '-b', branchName, target, ref])
-      created.push({ repository, path: target, baseRef: ref, baseCommit: commit, branchCreated: !alreadyExists })
+      const baseline = prepared.get(repository.id)!
+      runGit(repository.baseline_path, ['worktree', 'add', '-b', branchName, target, baseline.ref])
+      created.push({ repository: baseline.repository, path: target, baseRef: baseline.ref, baseCommit: baseline.commit, branchCreated: true })
     }
     mkdirSync(resolve(demandRoot, 'docs'), { recursive: true })
     const context = [
@@ -263,6 +263,7 @@ export function addRepositoryToDemand(db: WorkbenchDb, workspace: WorkspaceRow, 
   const existing = db.db.prepare('SELECT 1 FROM demand_repositories WHERE demand_id = ? AND repository_id = ?').get(demandId, repositoryId)
   if (existing) throw new Error('该 Repo 已经在需求中')
   if (branchCheckedOut(repository, demand.branch_name)) throw new Error(`Repo ${repository.name} 已经在其他 Worktree 使用该分支`)
+  if (branchExists(repository, demand.branch_name)) throw new Error(`Repo ${repository.name} 已存在未登记的需求分支 ${demand.branch_name}`)
   const demandRoot = resolve(workspace.path, 'worktrees', demand.worktree_key)
   const target = resolve(demandRoot, 'services', repository.name)
   if (!isInside(resolve(demandRoot, 'services'), target) || existsSync(target)) throw new Error(`Worktree 目标不可用：${repository.name}`)
@@ -272,14 +273,13 @@ export function addRepositoryToDemand(db: WorkbenchDb, workspace: WorkspaceRow, 
   let branchCreated = false
   try {
     mkdirSync(resolve(demandRoot, 'services'), { recursive: true })
-    const ref = baseRef(repository)
-    const commit = runGit(repository.baseline_path, ['rev-parse', ref])
-    if (branchExists(repository, demand.branch_name)) runGit(repository.baseline_path, ['worktree', 'add', target, demand.branch_name])
-    else { runGit(repository.baseline_path, ['worktree', 'add', '-b', demand.branch_name, target, ref]); branchCreated = true }
-    updateDemandContext(demandRoot, { name: repository.name, path: target, baseRef: ref, baseCommit: commit })
+    const baseline = prepareRepositoryBaselineForDemand(db, workspace, repository.id)
+    runGit(repository.baseline_path, ['worktree', 'add', '-b', demand.branch_name, target, baseline.ref])
+    branchCreated = true
+    updateDemandContext(demandRoot, { name: repository.name, path: target, baseRef: baseline.ref, baseCommit: baseline.commit })
     db.db.exec('BEGIN')
     try {
-      db.db.prepare('INSERT INTO demand_repositories (demand_id, repository_id, branch_name, worktree_path, base_ref, base_commit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(demandId, repository.id, demand.branch_name, target, ref, commit, createdAt)
+      db.db.prepare('INSERT INTO demand_repositories (demand_id, repository_id, branch_name, worktree_path, base_ref, base_commit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(demandId, repository.id, demand.branch_name, target, baseline.ref, baseline.commit, createdAt)
       db.db.prepare('UPDATE demands SET updated_at = ? WHERE id = ?').run(nowIso(), demandId)
       db.db.prepare('UPDATE demand_operations SET status = ?, completed_at = ? WHERE id = ?').run('completed', nowIso(), operationId)
       db.db.exec('COMMIT')

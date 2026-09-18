@@ -76,10 +76,46 @@ function remoteDefaultRef(path: string): string | null {
 }
 
 function repositoryRef(path: string): string {
+  const remoteRef = remoteDefaultRef(path)
+  if (remoteRef) return remoteRef
   try {
     return runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || 'HEAD'
   } catch {
-    return remoteDefaultRef(path) ?? 'HEAD'
+    return 'HEAD'
+  }
+}
+
+function currentBranch(path: string): string | null {
+  try {
+    return runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || null
+  } catch {
+    return null
+  }
+}
+
+function resolveRef(path: string, ref: string): string | null {
+  try {
+    return runGit(path, ['rev-parse', '--verify', ref]) || null
+  } catch {
+    return null
+  }
+}
+
+function cleanBaselineCheckout(path: string): void {
+  if (repositoryHead(path)) runGit(path, ['reset', '--hard', 'HEAD'])
+  // Keep ignored caches and local environment files. The explicit worktrees/
+  // exclusion protects legacy single-project Workspaces even before their
+  // local Git exclude rule has been reconciled.
+  runGit(path, ['clean', '-fd', '--exclude=worktrees/'])
+}
+
+function checkoutRemoteDefault(path: string, ref: string, remoteRef: string): void {
+  runGit(path, ['checkout', '-B', ref, remoteRef])
+  try {
+    runGit(path, ['branch', '--set-upstream-to', remoteRef, ref])
+  } catch {
+    // The baseline alignment itself is complete even when an unusual remote
+    // configuration cannot persist branch tracking metadata.
   }
 }
 
@@ -188,6 +224,12 @@ export interface RepositorySyncResult {
   commitsAhead: number | null
 }
 
+export interface PreparedRepositoryBaseline {
+  repository: RepositoryRow
+  ref: string
+  commit: string
+}
+
 export type RepositoryCleanupState = 'already_clean' | 'cleaned' | 'failed'
 
 export interface RepositoryCleanupResult {
@@ -223,7 +265,7 @@ function saveRepositoryInspection(db: WorkbenchDb, repository: RepositoryRow, in
 export function syncRepositoryBaseline(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): RepositorySyncResult {
   const repository = repositoryForSync(db, workspace, repositoryId)
   const storedRef = repository.default_ref?.trim()
-  const ref = !storedRef || storedRef === 'HEAD' ? repositoryRef(repository.baseline_path) : storedRef
+  const ref = remoteDefaultRef(repository.baseline_path) ?? (!storedRef || storedRef === 'HEAD' ? repositoryRef(repository.baseline_path) : storedRef)
   if (!ref || ref === 'HEAD') return syncResult(repository, ref || 'HEAD', 'blocked', '无法确定 Repo 的当前默认分支，未执行同步。')
   if (!repository.origin_url) return syncResult(repository, ref, 'blocked', '该 Repo 未配置 origin，无法同步远端基线。')
 
@@ -233,33 +275,42 @@ export function syncRepositoryBaseline(db: WorkbenchDb, workspace: WorkspaceRow,
       const current = saveRepositoryInspection(db, repository, inspection, 'ok', null)
       return syncResult(current, ref, 'blocked', '基线存在未提交改动；为避免覆盖本地工作区，未执行同步。')
     }
-    if (inspection.defaultRef !== ref) {
-      const current = saveRepositoryInspection(db, repository, inspection, 'ok', null)
-      return syncResult(current, ref, 'blocked', `基线当前位于 ${inspection.defaultRef}，不是登记的 ${ref}；未执行同步。`)
-    }
 
     runGit(repository.baseline_path, ['fetch', '--prune', 'origin', ref])
-    const localHead = runGit(repository.baseline_path, ['rev-parse', 'HEAD'])
     const remoteRef = `origin/${ref}`
     const remoteHead = runGit(repository.baseline_path, ['rev-parse', remoteRef])
-    const commitsAhead = Number(runGit(repository.baseline_path, ['rev-list', '--count', `${remoteRef}..${localHead}`]))
-    const commitsBehind = Number(runGit(repository.baseline_path, ['rev-list', '--count', `${localHead}..${remoteRef}`]))
+    const localRef = `refs/heads/${ref}`
+    const localHead = resolveRef(repository.baseline_path, localRef)
+    const current = currentBranch(repository.baseline_path)
+    const checkoutHead = runGit(repository.baseline_path, ['rev-parse', 'HEAD'])
+    const detachedAhead = current === null
+      ? Number(runGit(repository.baseline_path, ['rev-list', '--count', `${remoteRef}..${checkoutHead}`]))
+      : 0
+    if (detachedAhead > 0) {
+      const saved = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+      return syncResult(saved, ref, 'blocked', `detached HEAD 包含 ${detachedAhead} 个远端没有的提交；为避免丢失本地历史，未同步。`, checkoutHead, remoteHead, null, detachedAhead)
+    }
+    const commitsAhead = localHead ? Number(runGit(repository.baseline_path, ['rev-list', '--count', `${remoteRef}..${localHead}`])) : 0
+    const commitsBehind = localHead ? Number(runGit(repository.baseline_path, ['rev-list', '--count', `${localHead}..${remoteRef}`])) : 0
 
     if (commitsAhead > 0) {
-      const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+      const saved = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
       const message = commitsBehind > 0
         ? `本地与远端已分叉（本地 ${commitsAhead}、远端 ${commitsBehind} 个提交）；仅支持安全快进，未同步。`
         : `本地基线领先远端 ${commitsAhead} 个提交；不会自动推送或改写远端。`
-      return syncResult(current, ref, 'blocked', message, localHead, remoteHead, commitsBehind, commitsAhead)
+      return syncResult(saved, ref, 'blocked', message, localHead, remoteHead, commitsBehind, commitsAhead)
     }
-    if (commitsBehind === 0) {
-      const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
-      return syncResult(current, ref, 'up_to_date', '远端基线已是最新。', localHead, remoteHead, 0, 0)
+    if (commitsBehind === 0 && current === ref && checkoutHead === remoteHead) {
+      const saved = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+      return syncResult(saved, ref, 'up_to_date', '远端基线已是最新。', localHead, remoteHead, 0, 0)
     }
 
-    runGit(repository.baseline_path, ['merge', '--ff-only', remoteRef])
-    const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
-    return syncResult(current, ref, 'fast_forwarded', `已安全快进 ${commitsBehind} 个提交。Demand Worktree 未被修改。`, localHead, remoteHead, commitsBehind, 0)
+    checkoutRemoteDefault(repository.baseline_path, ref, remoteRef)
+    const saved = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+    const message = commitsBehind > 0
+      ? `已安全快进 ${commitsBehind} 个提交，并将基线切回 ${ref}。Demand Worktree 未被修改。`
+      : `已将基线切回 ${ref} 并对齐远端。Demand Worktree 未被修改。`
+    return syncResult(saved, ref, 'fast_forwarded', message, localHead, remoteHead, commitsBehind, 0)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const inspection = (() => { try { return inspectRepository(repository.baseline_path) } catch { return null } })()
@@ -267,6 +318,48 @@ export function syncRepositoryBaseline(db: WorkbenchDb, workspace: WorkspaceRow,
       ? saveRepositoryInspection(db, repository, inspection, 'pull_failed', message)
       : repository
     return syncResult(current, ref, 'failed', `同步远端基线失败：${message}`)
+  }
+}
+
+/**
+ * Rebuild the service checkout as a disposable mirror of the remote default
+ * branch before creating a Demand Worktree. This intentionally discards
+ * tracked and untracked baseline changes, but never touches ignored files or
+ * any linked Demand Worktree.
+ */
+export function prepareRepositoryBaselineForDemand(db: WorkbenchDb, workspace: WorkspaceRow, repositoryId: string): PreparedRepositoryBaseline {
+  const repository = repositoryForSync(db, workspace, repositoryId)
+  const path = repository.baseline_path
+  const storedRef = repository.default_ref?.trim()
+  const ref = remoteDefaultRef(path) ?? (!storedRef || storedRef === 'HEAD' ? repositoryRef(path) : storedRef)
+  if (!ref || ref === 'HEAD') throw new Error(`Repo ${repository.name} 无法确定默认主分支`)
+
+  try {
+    if (repository.origin_url) {
+      // Fetch and resolve the immutable remote commit before discarding local
+      // state, so a network/authentication failure leaves the checkout intact.
+      runGit(path, ['fetch', '--prune', 'origin', ref])
+      const remoteRef = `origin/${ref}`
+      const remoteHead = runGit(path, ['rev-parse', remoteRef])
+      cleanBaselineCheckout(path)
+      checkoutRemoteDefault(path, ref, remoteRef)
+      const alignedHead = runGit(path, ['rev-parse', 'HEAD'])
+      const localHead = runGit(path, ['rev-parse', `refs/heads/${ref}`])
+      if (alignedHead !== remoteHead || localHead !== remoteHead) throw new Error(`Repo ${repository.name} 基线未能与 ${remoteRef} 对齐`)
+      const saved = saveRepositoryInspection(db, repository, inspectRepository(path), 'ok', null)
+      return { repository: saved, ref, commit: remoteHead }
+    }
+
+    cleanBaselineCheckout(path)
+    if (currentBranch(path) !== ref) runGit(path, ['checkout', ref])
+    const commit = runGit(path, ['rev-parse', ref])
+    const saved = saveRepositoryInspection(db, repository, inspectRepository(path), 'ok', null)
+    return { repository: saved, ref, commit }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const inspection = (() => { try { return inspectRepository(path) } catch { return null } })()
+    if (inspection) saveRepositoryInspection(db, repository, inspection, 'pull_failed', message)
+    throw new Error(`Repo ${repository.name} 更新远端基线失败：${message}`)
   }
 }
 

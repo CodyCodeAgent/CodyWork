@@ -97,6 +97,50 @@ describe('demand worktree construction', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('forces a service baseline to the latest remote default branch before creating a demand', () => {
+    const { root, db, workspace } = fixture()
+    const baseline = join(root, 'services', 'repo1')
+    const remote = join(root, 'repo1-origin.git')
+    const updater = join(root, 'repo1-updater')
+    git(root, ['init', '--bare', remote])
+    git(baseline, ['remote', 'add', 'origin', remote])
+    git(baseline, ['push', '-u', 'origin', 'main'])
+    git(root, ['--git-dir', remote, 'symbolic-ref', 'HEAD', 'refs/heads/main'])
+    git(root, ['clone', remote, updater])
+    git(updater, ['config', 'user.email', 'test@example.com'])
+    git(updater, ['config', 'user.name', 'Test'])
+
+    const existingWorktree = join(root, 'existing-worktree')
+    git(baseline, ['worktree', 'add', '-b', 'existing-demand', existingWorktree])
+    writeFileSync(join(existingWorktree, 'demand-only.md'), 'preserve me\n')
+    git(baseline, ['checkout', '--detach'])
+    writeFileSync(join(baseline, 'README.md'), '# discarded baseline edit\n')
+    writeFileSync(join(baseline, 'untracked.txt'), 'discard me\n')
+
+    writeFileSync(join(updater, 'remote.md'), 'latest remote content\n')
+    git(updater, ['add', 'remote.md'])
+    git(updater, ['commit', '-m', 'remote update'])
+    git(updater, ['push'])
+    const remoteHead = git(updater, ['rev-parse', 'HEAD'])
+    const repository = listRepositories(db, workspace).find(item => item.name === 'repo1')!
+
+    const result = createDemand(db, workspace, { name: 'Latest baseline', repositoryIds: [repository.id] })
+    const worktree = join(root, 'worktrees', 'latest-baseline', 'services', 'repo1')
+    const mapping = db.db.prepare('SELECT base_ref, base_commit FROM demand_repositories WHERE demand_id = ? AND repository_id = ?')
+      .get(result.demand.id, repository.id)
+
+    expect(currentBranch(baseline)).toBe('main')
+    expect(git(baseline, ['rev-parse', 'HEAD'])).toBe(remoteHead)
+    expect(git(baseline, ['rev-parse', 'refs/heads/main'])).toBe(remoteHead)
+    expect(git(worktree, ['rev-parse', 'HEAD'])).toBe(remoteHead)
+    expect(mapping).toEqual({ base_ref: 'main', base_commit: remoteHead })
+    expect(git(baseline, ['status', '--porcelain=v1'])).toBe('')
+    expect(readFileSync(join(existingWorktree, 'demand-only.md'), 'utf8')).toBe('preserve me\n')
+    expect(git(existingWorktree, ['status', '--porcelain=v1'])).toContain('demand-only.md')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('imports an existing multi-repo worktree using its Git branch as the demand name', () => {
     const { root, db, workspace } = fixture()
     const worktreeRoot = join(root, 'worktrees', 'existing-coupon')

@@ -5,7 +5,7 @@
         <div><div class="eyebrow">DEMAND REPOSITORIES</div><h2 id="add-demand-repository-title">添加 Repo 到需求</h2></div>
         <button class="icon-button" :disabled="adding" aria-label="关闭添加 Repo 弹窗" @click="emit('close')">×</button>
       </div>
-      <p id="add-demand-repository-help" class="demand-repository-intro">选择已登记在 Workspace 的项目。CodyWork 会在 <code>{{ demand.branchName }}</code> 分支下创建隔离 Worktree，不会修改 <code>services/</code> 基线。</p>
+      <p id="add-demand-repository-help" class="demand-repository-intro">选择已登记在 Workspace 的项目。CodyWork 会先丢弃该 <code>services/</code> 基线的本地状态并更新到远端默认分支，再为 <code>{{ demand.branchName }}</code> 创建隔离 Worktree；已有 Demand Worktree 不受影响。</p>
       <fieldset class="repo-picker demand-repository-picker">
         <legend>可加入项目</legend>
         <template v-if="repositories.length">

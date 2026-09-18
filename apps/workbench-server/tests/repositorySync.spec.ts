@@ -73,7 +73,7 @@ describe('safe repository baseline synchronization', { timeout: 15_000 }, () => 
     rmSync(test.root, { recursive: true, force: true })
   })
 
-  it('infers the remote default branch and safely advances a detached baseline', () => {
+  it('infers the remote default branch, advances its local ref, and exits detached HEAD', () => {
     const test = createFixture()
     git(test.baseline, ['checkout', '--detach'])
     test.db.db.prepare('UPDATE repositories SET default_ref = ? WHERE id = ?').run('HEAD', test.repository.id)
@@ -86,7 +86,27 @@ describe('safe repository baseline synchronization', { timeout: 15_000 }, () => 
 
     expect(result).toMatchObject({ state: 'fast_forwarded', commitsBehind: 1, commitsAhead: 0, ref: 'main' })
     expect(git(test.baseline, ['rev-parse', 'HEAD'])).toBe(git(test.updater, ['rev-parse', 'HEAD']))
-    expect(() => git(test.baseline, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).toThrow()
+    expect(git(test.baseline, ['rev-parse', 'refs/heads/main'])).toBe(git(test.updater, ['rev-parse', 'HEAD']))
+    expect(git(test.baseline, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).toBe('main')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('restores a clean baseline parked on another branch without changing that branch', () => {
+    const test = createFixture()
+    git(test.baseline, ['checkout', '-b', 'local-inspection'])
+    const inspectionHead = git(test.baseline, ['rev-parse', 'HEAD'])
+    writeFileSync(join(test.updater, 'remote.md'), 'from origin while baseline is on another branch\n')
+    git(test.updater, ['add', 'remote.md'])
+    git(test.updater, ['commit', '-m', 'remote update'])
+    git(test.updater, ['push'])
+
+    const result = syncRepositoryBaseline(test.db, test.workspace, test.repository.id)
+
+    expect(result).toMatchObject({ state: 'fast_forwarded', commitsBehind: 1, commitsAhead: 0, ref: 'main' })
+    expect(git(test.baseline, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).toBe('main')
+    expect(git(test.baseline, ['rev-parse', 'main'])).toBe(git(test.updater, ['rev-parse', 'HEAD']))
+    expect(git(test.baseline, ['rev-parse', 'local-inspection'])).toBe(inspectionHead)
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
   })
