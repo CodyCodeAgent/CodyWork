@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
@@ -108,6 +108,8 @@ describe('CodyWork channel end-to-end pipeline', () => {
     class CapturingRuntime extends TestRuntimeAdapter {
       readonly permissions: string[] = []
       readonly settings: Array<{ model?: string; reasoningEffort?: string } | undefined> = []
+      readonly localImages: string[][] = []
+      readonly prompts: string[] = []
       override async getComposerOptions() {
         return {
           models: [{ id: 'gpt-pipeline', label: 'GPT Pipeline', description: 'fixture', isDefault: true, defaultReasoningEffort: 'high' as const, supportedReasoningEfforts: ['medium', 'high'] as const }],
@@ -117,6 +119,8 @@ describe('CodyWork channel end-to-end pipeline', () => {
       override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
         this.permissions.push(request.executionProfile?.permissionMode ?? '')
         this.settings.push(request.settings)
+        this.localImages.push(request.localImages?.map(image => image.path) ?? [])
+        this.prompts.push(request.prompt)
         return super.submitTurn(request)
       }
     }
@@ -134,6 +138,17 @@ describe('CodyWork channel end-to-end pipeline', () => {
       allowAllUsers: true, allowedConversationIds: ['oc-reply', 'oc-topic'], groupMentionMode: 'always',
     })
     const privateMessage = inbound(account.id, 'PRIVATE_PIPELINE', 'ou-private')
+    privateMessage.replyTo = 'message-quoted'
+    privateMessage.quotedMessage = {
+      messageId: 'message-quoted', conversationId: 'ou-private',
+      sender: { id: 'ou-quoted-author', type: 'user', name: 'Quoted Author' },
+      text: 'QUOTED_CONTEXT_BODY',
+      attachments: [
+        { id: 'quoted-image', type: 'image', name: 'quoted.png' },
+        { id: 'quoted-file', type: 'file', name: 'quoted.txt' },
+      ],
+      createdAtIso: '2026-09-06T00:00:00.000Z',
+    }
     const replyMessage = inbound(account.id, 'GROUP_REPLY_PIPELINE', 'oc-reply', 'group')
     const topicMessage = inbound(account.id, 'GROUP_TOPIC_PIPELINE', 'oc-topic', 'group')
     const createBinding = (message: ChannelInboundMessage, conversation: typeof privateConversation): CodyWorkChannelBinding => repositories.bindings.create({
@@ -176,7 +191,15 @@ describe('CodyWork channel end-to-end pipeline', () => {
       enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true, openUrl: () => 'http://localhost/conversation',
     } as never)
     const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, projection, settings, {
-      provider: () => ({}) as never, enqueue, openUrl: () => 'http://localhost/conversation',
+      provider: () => ({
+        downloadAttachment: async (messageId: string, attachment: { name: string }, destination: string) => {
+          mkdirSync(destination, { recursive: true })
+          const path = join(destination, attachment.name)
+          writeFileSync(path, `${messageId}:${attachment.name}`)
+          return { path, sizeBytes: 1 }
+        },
+      }) as never,
+      enqueue, openUrl: () => 'http://localhost/conversation',
     })
     let bindings!: ChannelBindingService
     const bindingHooks = {
@@ -209,6 +232,12 @@ describe('CodyWork channel end-to-end pipeline', () => {
         { model: 'gpt-pipeline', reasoningEffort: 'high' },
         { model: 'gpt-pipeline', reasoningEffort: 'high' },
       ])
+      expect(runtime.localImages[0]).toHaveLength(1)
+      expect(runtime.localImages[0]?.[0]).toContain('message-quoted/quoted.png')
+      expect(runtime.prompts[0]).toContain('Quoted Author')
+      expect(runtime.prompts[0]).toContain('QUOTED_CONTEXT_BODY')
+      expect(runtime.prompts[0]).toContain('message-quoted/quoted.txt')
+      expect(runtime.prompts[0]).toContain('[当前消息]\nPRIVATE_PIPELINE\n[/当前消息]')
 
       const initialCards = deliveries.filter(delivery => delivery.kind === 'reply_card')
       expect(initialCards).toHaveLength(3)
@@ -218,7 +247,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
       const initialByPrompt = new Map(initialCards.map(delivery => [
         JSON.stringify(delivery.payload), delivery,
       ]))
-      const privateInitial = [...initialByPrompt].find(([body]) => body.includes('PRIVATE_PIPELINE'))?.[1]
+      const privateInitial = [...initialByPrompt].find(([body]) => body.includes('QUOTED_CONTEXT_BODY'))?.[1]
       const replyInitial = [...initialByPrompt].find(([body]) => body.includes('GROUP_REPLY_PIPELINE'))?.[1]
       const topicInitial = [...initialByPrompt].find(([body]) => body.includes('GROUP_TOPIC_PIPELINE'))?.[1]
       expect(privateInitial?.payload.replyInThread).toBe(false)

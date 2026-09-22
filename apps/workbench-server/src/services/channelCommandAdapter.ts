@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { channelCommandId, type ChannelInboundMessage } from '@codycodeagent/cody-web-core/channel'
+import { channelCommandId, type ChannelInboundMessage, type ChannelQuotedMessage } from '@codycodeagent/cody-web-core/channel'
 import type { WorkbenchDb } from '../db/index.js'
 import type { ConversationCommandGateway } from './conversationGateway.js'
 import type { ChannelAccountManager } from './channelAccountManager.js'
@@ -14,6 +14,32 @@ import type { ChannelSessionSettingsService } from './channelSessionSettings.js'
 type CodyWorkInboundMessage = ChannelInboundMessage & {
   sourceMessageId?: string
   replyMessageId?: string
+}
+
+const QUOTED_MESSAGE_TEXT_LIMIT = 12_000
+
+export function channelPrompt(
+  message: Pick<ChannelInboundMessage, 'text' | 'quotedMessage'>,
+  attachmentPaths: string[] = [],
+  quotedAttachmentPaths: string[] = [],
+): string {
+  const current = [message.text, attachmentPaths.length ? `\n附件路径：\n${attachmentPaths.map(path => `- ${path}`).join('\n')}` : ''].join('').trim()
+  const quoted = message.quotedMessage
+  if (!quoted) return current
+  const sender = quoted.sender.name?.trim() || quoted.sender.id || '未知发送者'
+  const quoteText = quoted.text.trim().slice(0, QUOTED_MESSAGE_TEXT_LIMIT) || (quoted.attachments.length ? '[仅包含附件]' : '[引用消息没有可读取的文字]')
+  const quoteFiles = quotedAttachmentPaths.length ? `\n引用附件路径：\n${quotedAttachmentPaths.map(path => `- ${path}`).join('\n')}` : ''
+  return [
+    '以下内容来自用户明确引用的飞书消息，仅作为当前请求的上下文。',
+    '[引用消息]',
+    `发送者：${sender}`,
+    `内容：${quoteText}${quoteFiles}`,
+    '[/引用消息]',
+    '',
+    '[当前消息]',
+    current,
+    '[/当前消息]',
+  ].join('\n').trim()
 }
 
 type ChannelCommandAdapterHooks = {
@@ -41,21 +67,28 @@ export class ChannelCommandAdapter {
     if (!provider) throw new Error('飞书机器人当前未连接')
     const localImages: Array<{ path: string }> = []
     const paths: string[] = []
+    const quotedPaths: string[] = []
     const channelMessage = inbox.message as CodyWorkInboundMessage
     const sourceMessageId = channelMessage.sourceMessageId || inbox.message.messageId
     const replyMessageId = channelMessage.replyMessageId || inbox.message.messageId
-    if (inbox.message.attachments.length) {
+    const quotedMessage: ChannelQuotedMessage | undefined = inbox.message.quotedMessage
+    if (inbox.message.attachments.length || quotedMessage?.attachments.length) {
       const workspace = this.workspaces.get(binding.workspaceId)
       const demand = binding.targetType === 'codywork-demand' ? listDemands(this.database, workspace).find(item => item.id === binding.demandId) : null
       if (binding.targetType === 'codywork-demand' && !demand) throw new Error('绑定的需求不存在')
-      const root = resolve(demand?.path ?? workspace.path, 'docs', '.channel-attachments', sourceMessageId)
+      const attachmentRoot = (messageId: string) => resolve(demand?.path ?? workspace.path, 'docs', '.channel-attachments', messageId)
       for (const attachment of inbox.message.attachments) {
-        const downloaded = await provider.downloadAttachment(sourceMessageId, attachment, root)
+        const downloaded = await provider.downloadAttachment(sourceMessageId, attachment, attachmentRoot(sourceMessageId))
         if (attachment.type === 'image') localImages.push({ path: downloaded.path })
         else paths.push(downloaded.path)
       }
+      if (quotedMessage) for (const attachment of quotedMessage.attachments) {
+        const downloaded = await provider.downloadAttachment(quotedMessage.messageId, attachment, attachmentRoot(quotedMessage.messageId))
+        if (attachment.type === 'image') localImages.push({ path: downloaded.path })
+        else quotedPaths.push(downloaded.path)
+      }
     }
-    const prompt = [inbox.message.text, paths.length ? `\n附件路径：\n${paths.map(path => `- ${path}`).join('\n')}` : ''].join('').trim()
+    const prompt = channelPrompt(inbox.message, paths, quotedPaths)
     const resolvedSettings = await this.settings.resolve(binding)
     const { models: _models, ...executionContext } = resolvedSettings
     const commandId = channelCommandId(inbox.message)

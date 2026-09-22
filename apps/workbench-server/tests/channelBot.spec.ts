@@ -8,6 +8,7 @@ import { codyWorkConversationUrl, feishuProjectionBody } from '../src/services/c
 import { projectionCard } from '../src/services/channelFeishuRenderer.js'
 import { ChannelAccessService } from '../src/services/channelAccessService.js'
 import { ChannelAccountManager } from '../src/services/channelAccountManager.js'
+import { channelPrompt } from '../src/services/channelCommandAdapter.js'
 import { ChannelProjectionService } from '../src/services/channelProjection.js'
 import { ChannelRouter } from '../src/services/channelRouter.js'
 import { ChannelStore, type ChannelAccountSecret, type CodyWorkChannelBinding } from '../src/services/channelStore.js'
@@ -73,6 +74,19 @@ function findActionValue(value: unknown, action: string): Record<string, unknown
 }
 
 describe('CodyWork channel architecture and lifecycle', () => {
+  it('delimits quoted context from the current Feishu request and caps quoted text', () => {
+    const prompt = channelPrompt({
+      text: 'CURRENT_REQUEST',
+      quotedMessage: {
+        messageId: 'quoted-1', conversationId: 'chat-1', sender: { id: 'ou-author', type: 'user', name: 'Author' },
+        text: `QUOTED_START${'x'.repeat(13_000)}QUOTED_END`, attachments: [], createdAtIso: '2026-09-22T00:00:00.000Z',
+      },
+    })
+    expect(prompt).toContain('[引用消息]\n发送者：Author\n内容：QUOTED_START')
+    expect(prompt).toContain('[当前消息]\nCURRENT_REQUEST\n[/当前消息]')
+    expect(prompt).not.toContain('QUOTED_END')
+  })
+
   it('keeps ChannelBot as a small composition root', async () => {
     const source = await readFile(new URL('../src/services/channelBot.ts', import.meta.url), 'utf8')
     expect(source.split('\n').length).toBeLessThan(350)
