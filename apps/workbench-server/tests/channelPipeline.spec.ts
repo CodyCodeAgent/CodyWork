@@ -200,6 +200,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
         },
       }) as never,
       enqueue, openUrl: () => 'http://localhost/conversation',
+      persistImage: (_workspaceId, _conversationId, input) => ({ path: `${input.path}.owned` }),
     })
     let bindings!: ChannelBindingService
     const bindingHooks = {
@@ -233,7 +234,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
         { model: 'gpt-pipeline', reasoningEffort: 'high' },
       ])
       expect(runtime.localImages[0]).toHaveLength(1)
-      expect(runtime.localImages[0]?.[0]).toContain('message-quoted/quoted.png')
+      expect(runtime.localImages[0]?.[0]).toContain('message-quoted/quoted.png.owned')
       expect(runtime.prompts[0]).toContain('Quoted Author')
       expect(runtime.prompts[0]).toContain('QUOTED_CONTEXT_BODY')
       expect(runtime.prompts[0]).toContain('message-quoted/quoted.txt')

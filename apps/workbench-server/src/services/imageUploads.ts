@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, extname, join } from 'node:path'
 import { DEFAULT_COMPOSER_IMAGE_POLICY, validateComposerImage } from '@codycodeagent/cody-web-core/composer'
 import { WorkbenchDb, nowIso } from '../db/index.js'
 
@@ -29,6 +29,16 @@ const IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+
 function extensionFor(mimeType: string): string {
   if (mimeType === 'image/jpeg') return '.jpg'
   return `.${mimeType.slice('image/'.length)}`
+}
+
+function mimeTypeForLocalImage(path: string, explicit?: string): string {
+  if (explicit && ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(explicit)) return explicit
+  const extension = extname(path).toLowerCase()
+  if (extension === '.png') return 'image/png'
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg'
+  if (extension === '.webp') return 'image/webp'
+  if (extension === '.gif') return 'image/gif'
+  throw new Error('仅支持 PNG、JPEG、WebP 或 GIF 图片')
 }
 
 function safeImageName(name: string, mimeType: string): string {
@@ -74,6 +84,31 @@ export class ConversationImageUploads {
       throw error
     }
     return this.publicImage({ id, workspace_id: workspaceId, conversation_id: conversationId, name: parsed.name, mime_type: parsed.mimeType, byte_length: parsed.bytes.length, file_path: filePath, created_at: nowIso() })
+  }
+
+  importLocalFile(
+    workspaceId: string,
+    conversationId: string,
+    input: { path: string; name?: string; mimeType?: string },
+  ): UploadedConversationImage {
+    const source = statSync(input.path)
+    if (!source.isFile()) throw new Error('图片文件不可用')
+    const mimeType = mimeTypeForLocalImage(input.path, input.mimeType)
+    const name = safeImageName(input.name || basename(input.path), mimeType)
+    const validation = validateComposerImage({ name, type: mimeType, size: source.size })
+    if (!validation.accepted) throw new Error(validation.reason === 'too_large' ? '图片不能超过 20MB' : '仅支持 PNG、JPEG、WebP 或 GIF 图片')
+
+    const id = `image_${randomUUID()}`
+    const filePath = join(this.root, `${id}${extensionFor(mimeType)}`)
+    copyFileSync(input.path, filePath, constants.COPYFILE_EXCL)
+    try {
+      this.db.db.prepare('INSERT INTO conversation_images (id, workspace_id, conversation_id, name, mime_type, byte_length, file_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, workspaceId, conversationId, name, mimeType, source.size, filePath, nowIso())
+    } catch (error) {
+      rmSync(filePath, { force: true })
+      throw error
+    }
+    return this.publicImage({ id, workspace_id: workspaceId, conversation_id: conversationId, name, mime_type: mimeType, byte_length: source.size, file_path: filePath, created_at: nowIso() })
   }
 
   resolveForTurn(workspaceId: string, conversationId: string, ids: readonly string[]): Array<{ id: string; path: string; url: string }> {

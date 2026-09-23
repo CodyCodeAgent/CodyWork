@@ -75,6 +75,11 @@ export class CodyWorkChannelService {
       providerFactory?: ChannelProviderFactory
       documentPublisher?: ConversationDocumentPublisher
       permissionInspector?: { inspect(account: import('./channelStore.js').ChannelAccountSecret): Promise<FeishuPermissionStatus> }
+      persistConversationImage?: (
+        workspaceId: string,
+        conversationId: string,
+        input: { path: string; name?: string; mimeType?: string },
+      ) => Promise<{ path: string }> | { path: string }
     } = {},
   ) {
     this.repositories = new ChannelRepositories(new ChannelStore(database))
@@ -134,6 +139,7 @@ export class CodyWorkChannelService {
         provider: accountId => this.accounts.provider(accountId),
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
         openUrl: binding => this.openUrl(binding),
+        persistImage: this.options.persistConversationImage,
       },
     )
     this.bindings = new ChannelBindingService(

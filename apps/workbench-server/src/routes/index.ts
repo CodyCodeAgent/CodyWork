@@ -235,7 +235,14 @@ function workspaceRegistry(ctx: AppContext): WorkspaceRegistry {
 }
 
 export function channelService(ctx: AppContext): CodyWorkChannelService {
-  if (!ctx.channels) ctx.channels = new CodyWorkChannelService(ctx.db, conversationService(ctx), workspaceRegistry(ctx), { publicOrigin })
+  if (!ctx.channels) ctx.channels = new CodyWorkChannelService(ctx.db, conversationService(ctx), workspaceRegistry(ctx), {
+    publicOrigin,
+    persistConversationImage: (workspaceId, conversationId, input) => {
+      const uploads = imageUploads(ctx)
+      const uploaded = uploads.importLocalFile(workspaceId, conversationId, input)
+      return uploads.resolveForTurn(workspaceId, conversationId, [uploaded.id])[0]!
+    },
+  })
   return ctx.channels
 }
 

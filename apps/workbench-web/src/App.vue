@@ -149,6 +149,7 @@ import ConversationChannelDialog from './components/ConversationChannelDialog.vu
 import ConversationShareDialog from './components/ConversationShareDialog.vue'
 import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepositories'
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
+import { buildConversationRecoveryPrompt, isThreadMigrationRecommended, recoveryConversationTitle } from './conversationRecovery'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
 import { initialModelId, reasoningOptionsForModel, reconcileReasoningEffort } from './composerModels'
@@ -1228,6 +1229,10 @@ async function sendMessage(): Promise<void> {
 }
 async function retryFailedMessage(message: CodyMessage): Promise<void> {
   if (sending.value || message.outbox?.status !== 'failed') return
+  if (isThreadMigrationRecommended(message.outbox.lastError)) {
+    await recoverFailedMessageInNewConversation(message)
+    return
+  }
   const turnSkills = (message.skills ?? [])
     .map((skill) => skill.path)
     .filter((id) => runtimeSkills.value.some((skill) => skill.id === id))
@@ -1253,6 +1258,78 @@ async function retryFailedMessage(message: CodyMessage): Promise<void> {
     sending.value = false
   }
 }
+async function recoverFailedMessageInNewConversation(message: CodyMessage): Promise<void> {
+  const activeWorkspace = workspace.value
+  const sourceConversation = selectedConversation.value
+  if (!activeWorkspace || !sourceConversation) return
+  const sourceMessages = [...conversationState.value.messages]
+  const turnSkills = (message.skills ?? [])
+    .map(skill => skill.path)
+    .filter(id => runtimeSkills.value.some(skill => skill.id === id))
+  const skillReferences = (message.skills ?? []).filter(skill => turnSkills.includes(skill.path))
+  const sourceImageUrls = message.images ?? []
+  const reusableImageUrls = sourceImageUrls.filter(url => imageIdFromUrl(url))
+  sending.value = true
+  try {
+    let created = sourceConversation.scope === 'demand' && sourceConversation.demandId
+      ? await api.createConversation(activeWorkspace.id, sourceConversation.demandId, recoveryConversationTitle(sourceConversation.title))
+      : await api.createWorkspaceConversation(activeWorkspace.id, recoveryConversationTitle(sourceConversation.title))
+    if (created.permissionMode !== sourceConversation.permissionMode) {
+      created = await api.setConversationPermission(activeWorkspace.id, created.id, sourceConversation.permissionMode)
+    }
+    conversations.value = [created, ...conversations.value]
+    if (created.scope === 'workspace') workspaceConversations.value = conversations.value
+    await openConversation(created)
+
+    const migratedImages: ComposerImage[] = []
+    for (const url of reusableImageUrls) {
+      try {
+        const response = await fetch(url)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const blob = await response.blob()
+        const mimeType = blob.type || 'image/png'
+        const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1] || 'png'
+        const upload = await api.uploadConversationImage(activeWorkspace.id, created.id, {
+          name: `recovered-image.${extension}`,
+          dataUrl: await blobAsDataUrl(blob),
+        })
+        migratedImages.push(imageFromUpload(upload))
+      } catch {
+        // Text recovery remains useful; the prompt below tells the agent how
+        // many images the user needs to attach again.
+      }
+    }
+    const recoveryPrompt = buildConversationRecoveryPrompt(
+      sourceMessages,
+      message,
+      sourceImageUrls.length - migratedImages.length,
+    )
+    await submitUserMessage(
+      {
+        text: message.text,
+        ...(migratedImages.length ? { images: migratedImages.map(image => image.url) } : {}),
+        ...(skillReferences.length ? { skills: skillReferences } : {}),
+      },
+      {
+        mode: 'queue',
+        input: {
+          content: recoveryPrompt,
+          ...(migratedImages.length ? { imageIds: migratedImages.map(image => image.id) } : {}),
+          settings: {
+            ...(selectedModel.value ? { model: selectedModel.value } : {}),
+            ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
+            collaborationMode: selectedCollaborationModeKind.value,
+            ...(turnSkills.length ? { skills: turnSkills } : {}),
+          },
+        },
+      },
+    )
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sending.value = false
+  }
+}
 function updateDraft(value: string): void { draft.value = value; const conversationId = selectedConversation.value?.id; if (!conversationId) return; if (value) draftByConversationId.set(conversationId, value); else draftByConversationId.delete(conversationId) }
 function imageIdFromUrl(url: string): string | null {
   try {
@@ -1265,6 +1342,14 @@ function imageFromUpload(upload: ConversationImageUpload): ComposerImage {
   // compatibility with the current tagged Core type; CodyWork resolves the
   // opaque id to its private local path only on the server.
   return { id: upload.id, name: upload.name, path: '', url: upload.url, mimeType: upload.mimeType }
+}
+function blobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('无法读取图片'))
+    reader.onerror = () => reject(new Error('无法读取图片'))
+    reader.readAsDataURL(blob)
+  })
 }
 function persistComposerImages(images: ComposerImage[]): void {
   composerImages.value = images

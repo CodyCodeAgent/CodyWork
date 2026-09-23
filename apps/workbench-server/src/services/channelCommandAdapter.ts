@@ -46,6 +46,11 @@ type ChannelCommandAdapterHooks = {
   provider(accountId: string): ReturnType<ChannelAccountManager['provider']>
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
   openUrl(binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string
+  persistImage?: (
+    workspaceId: string,
+    conversationId: string,
+    input: { path: string; name?: string; mimeType?: string },
+  ) => Promise<{ path: string }> | { path: string }
 }
 
 /** Converts a durable channel Inbox row into the shared command gateway. */
@@ -79,12 +84,22 @@ export class ChannelCommandAdapter {
       const attachmentRoot = (messageId: string) => resolve(demand?.path ?? workspace.path, 'docs', '.channel-attachments', messageId)
       for (const attachment of inbox.message.attachments) {
         const downloaded = await provider.downloadAttachment(sourceMessageId, attachment, attachmentRoot(sourceMessageId))
-        if (attachment.type === 'image') localImages.push({ path: downloaded.path })
+        if (attachment.type === 'image') {
+          const stored = this.hooks.persistImage
+            ? await this.hooks.persistImage(binding.workspaceId, binding.conversationId, { path: downloaded.path, name: attachment.name, mimeType: attachment.mimeType })
+            : downloaded
+          localImages.push({ path: stored.path })
+        }
         else paths.push(downloaded.path)
       }
       if (quotedMessage) for (const attachment of quotedMessage.attachments) {
         const downloaded = await provider.downloadAttachment(quotedMessage.messageId, attachment, attachmentRoot(quotedMessage.messageId))
-        if (attachment.type === 'image') localImages.push({ path: downloaded.path })
+        if (attachment.type === 'image') {
+          const stored = this.hooks.persistImage
+            ? await this.hooks.persistImage(binding.workspaceId, binding.conversationId, { path: downloaded.path, name: attachment.name, mimeType: attachment.mimeType })
+            : downloaded
+          localImages.push({ path: stored.path })
+        }
         else quotedPaths.push(downloaded.path)
       }
     }

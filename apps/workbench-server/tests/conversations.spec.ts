@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import WebSocket from 'ws'
@@ -277,6 +277,32 @@ describe('conversation websocket control plane', () => {
     expect(history.events.find(event => event.type === 'user.completed')?.data.images).toEqual([uploaded.url])
     expect(uploaded.url).not.toContain(test.root)
     expect(() => uploads.resolveForTurn(test.workspaceId, 'other-conversation', [uploaded.id])).toThrow('不属于当前会话')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('copies channel-downloaded images into conversation-owned storage', async () => {
+    const test = await fixture()
+    const sourcePath = join(test.root, 'channel-image.png')
+    writeFileSync(sourcePath, Buffer.from('iVBORw0KGgo=', 'base64'))
+    const uploads = new ConversationImageUploads(test.db, join(test.root, 'uploads'))
+    const conversations = new ConversationService(test.db, new TestRuntimeAdapter())
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Imported image')
+
+    const imported = uploads.importLocalFile(test.workspaceId, conversation.id, {
+      path: sourcePath,
+      name: 'from-feishu.png',
+      mimeType: 'image/png',
+    })
+    const [resolved] = uploads.resolveForTurn(test.workspaceId, conversation.id, [imported.id])
+
+    expect(resolved?.path).not.toBe(sourcePath)
+    expect(readFileSync(resolved!.path)).toEqual(readFileSync(sourcePath))
+    expect(uploads.urlForPath(test.workspaceId, conversation.id, resolved!.path)).toBe(imported.url)
+    uploads.removeConversation(test.workspaceId, conversation.id)
+    expect(existsSync(sourcePath)).toBe(true)
+    expect(existsSync(resolved!.path)).toBe(false)
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
