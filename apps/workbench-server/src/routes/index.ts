@@ -26,6 +26,7 @@ import type { QuickActionInput } from '../services/quickActions.js'
 import { CodyWorkChannelService } from '../services/channelBot.js'
 import { AgentQuickActionTools } from '../services/agentQuickActions.js'
 import type { SmartNotificationSettingsInput } from '../services/smartNotifications.js'
+import { AiCodeReportService } from '../services/aiCodeReports.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -63,6 +64,7 @@ export interface AppContext {
   skillInstalls?: SkillInstallCoordinator
   images?: ConversationImageUploads
   channels?: CodyWorkChannelService
+  aiReports?: AiCodeReportService
 }
 
 export function normalizeRepositoryInput(body: Record<string, unknown>): {
@@ -244,6 +246,11 @@ export function channelService(ctx: AppContext): CodyWorkChannelService {
     },
   })
   return ctx.channels
+}
+
+function aiCodeReports(ctx: AppContext): AiCodeReportService {
+  if (!ctx.aiReports) ctx.aiReports = new AiCodeReportService(ctx.db)
+  return ctx.aiReports
 }
 
 function stringArray(value: unknown): string[] {
@@ -572,6 +579,22 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/demands/:demandId', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return getDemand(ctx.db, row, requiredParam(c, 'demandId'))
+  })
+
+  add('GET', '/api/workspaces/:id/demands/:demandId/ai-report', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return aiCodeReports(ctx).summary(workspace, requiredParam(c, 'demandId'))
+  })
+
+  add('POST', '/api/workspaces/:id/demands/:demandId/ai-report/backfill', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return aiCodeReports(ctx).backfill(workspace, requiredParam(c, 'demandId'))
+  })
+
+  add('POST', '/api/workspaces/:id/demands/:demandId/ai-report/retry', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    getDemand(ctx.db, workspace, requiredParam(c, 'demandId'))
+    return aiCodeReports(ctx).retry()
   })
 
   add('POST', '/api/workspaces/:id/demands/:demandId/repositories', async (c) => {

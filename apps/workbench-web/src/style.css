@@ -319,6 +319,12 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(53,111,242,.
 .socket-pill.connected { color: #16845a; background: #e7f8ef; }
 .socket-pill.connecting, .socket-pill.reconnecting { color: #95691d; background: #fff4d5; }
 .socket-pill.disconnected { color: #b24652; background: #fff0f1; }
+.ai-report-trigger { display: inline-flex; align-items: center; gap: 7px; }
+.ai-report-trigger-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa5b5; box-shadow: 0 0 0 3px rgba(148,163,184,.12); }
+.ai-report-trigger.healthy .ai-report-trigger-dot { background: #20af72; box-shadow: 0 0 0 3px rgba(32,175,114,.12); }
+.ai-report-trigger.pending .ai-report-trigger-dot { background: #d8a111; box-shadow: 0 0 0 3px rgba(216,161,17,.12); }
+.ai-report-trigger.retrying .ai-report-trigger-dot,
+.ai-report-trigger.degraded .ai-report-trigger-dot { background: #ed7a32; box-shadow: 0 0 0 3px rgba(237,122,50,.12); }
 .chat-layout { display: flex; flex: 1; min-height: 0; background: #f7f8fa; }
 .conversation-sidebar { display: flex; flex-direction: column; width: 268px; flex: 0 0 268px; padding: 18px 12px 12px; background: #fff; border-right: 1px solid var(--line); }
 .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 14px; }

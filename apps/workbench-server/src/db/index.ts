@@ -88,6 +88,26 @@ export interface SmartNotificationSettingsRow {
   updated_at: string
 }
 
+export interface AiReportReceiptRow {
+  delivery_id: string
+  native_session_id: string
+  event_type: string
+  tool_name: string
+  source: string
+  model: string
+  user_id: string
+  file_path: string
+  report_status: string
+  capture_status: string
+  capture_reason: string
+  additions: number
+  deletions: number
+  added_line_hashes_json: string
+  event_time: string
+  received_at: string
+  updated_at: string
+}
+
 export class WorkbenchDb {
   readonly db: DatabaseSync
   readonly path: string
@@ -222,6 +242,37 @@ export class WorkbenchDb {
         notify_demand INTEGER NOT NULL DEFAULT 1,
         notify_workspace INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      -- AI code reporting is an optional, fail-open observer.  Keep only
+      -- delivery receipts and derived line hashes here; raw patches and shell
+      -- commands remain owned by the external reporter and are never copied
+      -- into CodyWork's database.
+      CREATE TABLE IF NOT EXISTS ai_report_receipts (
+        delivery_id TEXT PRIMARY KEY,
+        native_session_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        tool_name TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        user_id TEXT NOT NULL DEFAULT '',
+        file_path TEXT NOT NULL DEFAULT '',
+        report_status TEXT NOT NULL,
+        capture_status TEXT NOT NULL DEFAULT '',
+        capture_reason TEXT NOT NULL DEFAULT '',
+        additions INTEGER NOT NULL DEFAULT 0,
+        deletions INTEGER NOT NULL DEFAULT 0,
+        added_line_hashes_json TEXT NOT NULL DEFAULT '[]',
+        event_time TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS ai_report_receipts_session_time
+        ON ai_report_receipts(native_session_id, event_time DESC);
+      CREATE TABLE IF NOT EXISTS ai_report_log_cursors (
+        path TEXT PRIMARY KEY,
+        inode TEXT NOT NULL,
+        byte_offset INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS runtime_settings (

@@ -193,6 +193,70 @@ export interface Demand {
   repositories: { id: string; name: string; worktreePath: string }[]
 }
 
+export type AiReportCapabilityState = 'not_installed' | 'partial' | 'ready' | 'unavailable'
+export type AiReportState = 'not_installed' | 'empty' | 'healthy' | 'pending' | 'retrying' | 'degraded'
+
+export interface AiReportCapability {
+  state: AiReportCapabilityState
+  hooks: string[]
+  missingHooks: string[]
+  exportAvailable: boolean
+  retryAvailable: boolean
+  message: string
+}
+
+export interface AiReportConversationSummary {
+  conversationId: string
+  nativeSessionId: string
+  title: string
+  acceptedEvents: number
+  acceptedCodeEvents: number
+  additions: number
+  deletions: number
+  lastSuccessAt: string | null
+}
+
+export interface AiReportReceipt {
+  deliveryId: string
+  conversationId: string
+  conversationTitle: string
+  eventType: string
+  toolName: string
+  model: string
+  filePath: string
+  status: string
+  additions: number
+  deletions: number
+  eventTime: string
+  receivedAt: string
+}
+
+export interface AiReportDemandSummary {
+  state: AiReportState
+  capability: AiReportCapability
+  acceptedEvents: number
+  acceptedCodeEvents: number
+  additions: number
+  deletions: number
+  netLines: number
+  effectiveLines: number | null
+  effectiveLinesNote: string
+  pending: number
+  retrying: number
+  lastSuccessAt: string | null
+  conversations: AiReportConversationSummary[]
+  recent: AiReportReceipt[]
+  refreshedAt: string
+  warning: string
+}
+
+export interface AiReportManualResult {
+  action: 'backfill' | 'retry'
+  processed: number
+  message: string
+  output: string
+}
+
 export interface ExistingWorktreeImportResult {
   imported: Array<{ id: string; name: string; branchName: string; worktreeKey: string; repositories: number }>
   skipped: Array<{ worktreeKey: string; reason: string }>
@@ -435,6 +499,12 @@ export const api = {
   createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[] }) =>
     request<{ demand: { id: string; name: string; branch_name: string; worktree_key: string; status: Demand['status'] }; repositories: Demand['repositories'] }>('POST', `/api/workspaces/${id}/demands`, input),
   getDemand: (workspaceId: string, demandId: string) => request<Demand>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}`),
+  demandAiReport: (workspaceId: string, demandId: string) =>
+    request<AiReportDemandSummary>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/ai-report`),
+  backfillDemandAiReport: (workspaceId: string, demandId: string) =>
+    request<AiReportManualResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/ai-report/backfill`),
+  retryAiReport: (workspaceId: string, demandId: string) =>
+    request<AiReportManualResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/ai-report/retry`),
   addRepositoryToDemand: (workspaceId: string, demandId: string, repositoryId: string) =>
     request<Demand>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/repositories`, { repositoryId }),
   listConversations: (workspaceId: string, demandId: string) =>
