@@ -148,13 +148,33 @@ describe('CodyWork channel architecture and lifecycle', () => {
     })
     const text = JSON.stringify(card)
     for (const expected of ['GPT 6 Astra', '推理', '高', 'YOLO', 'AI Hub', '灵活返佣审批流调整', '完成']) expect(text).toContain(expected)
-    const elements = card.elements as Array<{ tag?: string; content?: string; elements?: Array<{ content?: string }> }>
+    const elements = (card.body as { elements: Array<{ tag?: string; content?: string }> }).elements
     expect(elements[0]).toMatchObject({ tag: 'markdown', content: '完成' })
     expect(elements.at(-1)).toMatchObject({
-      tag: 'note',
-      elements: [{ content: 'CodyWork · AI Hub · 灵活返佣审批流调整\nGPT 6 Astra · 推理 高 · YOLO\n问题：build it' }],
+      tag: 'markdown',
+      content: '---\nCodyWork · AI Hub · 灵活返佣审批流调整\nGPT 6 Astra · 推理 高 · YOLO\n问题：build it',
     })
     expect(text).not.toContain('运行配置')
+  })
+
+  it('renders assistant pipe tables as native Feishu tables without losing CodyWork chrome', () => {
+    const card = projectionCard({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true, revision: 1,
+      assistantText: '| 项目 | 状态 |\n| --- | --- |\n| Core | 完成 |', assistantImages: [], error: '',
+    }, 'show status', 'https://work.example/demand/1', {
+      model: 'gpt-6-astra', modelLabel: 'GPT 6 Astra', reasoningEffort: 'high', reasoningLabel: '高',
+      permissionLabel: 'YOLO', workspaceName: 'AI Hub', demandName: '飞书表格',
+    })
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements
+    expect(card).toMatchObject({ schema: '2.0', header: { template: 'green', title: { content: 'CodyWork · 已完成' } } })
+    expect(elements.find(element => element.tag === 'table')).toMatchObject({
+      columns: [{ display_name: '项目' }, { display_name: '状态' }],
+      rows: [{ c0: 'Core', c1: '完成' }],
+    })
+    expect(elements.find(element => element.tag === 'action')).toMatchObject({
+      actions: [{ tag: 'button', type: 'primary', url: 'https://work.example/demand/1' }],
+    })
+    expect(JSON.stringify(elements.at(-1))).toContain('CodyWork · AI Hub · 飞书表格')
   })
 
   it('opens a two-step /model picker and confirms the persisted selection', async () => {

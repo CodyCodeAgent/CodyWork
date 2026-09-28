@@ -1,5 +1,5 @@
 import { projectChannelTurn, stripMarkdownImages } from '@codycodeagent/cody-web-core/channel'
-import { feishuTextCard, type FeishuCard } from '@codycodeagent/cody-web-core/feishu'
+import { feishuMarkdownCards, feishuTextCard, type FeishuCard, type FeishuCardButton } from '@codycodeagent/cody-web-core/feishu'
 import type { ChannelExecutionContext } from './channelSessionSettings.js'
 
 type TurnProjection = ReturnType<typeof projectChannelTurn>
@@ -71,9 +71,33 @@ export function executionContextFromState(value: unknown): ChannelExecutionConte
   }
 }
 
+function projectionResultCard(title: string, markdown: string, options: { color: string; actions?: FeishuCardButton[]; note?: string }): FeishuCard {
+  const cards = feishuMarkdownCards(markdown, { ...(options.note ? { note: options.note } : {}) })
+  const card = cards[0] ?? { schema: '2.0', config: { update_multi: true }, body: { direction: 'vertical', elements: [] } }
+  card.header = { template: options.color, title: { tag: 'plain_text', content: title.slice(0, 80) } }
+  const body = card.body && typeof card.body === 'object' && !Array.isArray(card.body)
+    ? card.body as { elements?: unknown[] }
+    : { elements: [] as unknown[] }
+  const elements = Array.isArray(body.elements) ? body.elements : []
+  if (cards.length > 1) {
+    const noteIndex = options.note ? Math.max(0, elements.length - 1) : elements.length
+    elements.splice(noteIndex, 0, { tag: 'markdown', content: `---\n回复内容较长，飞书仅展示第 1/${cards.length} 张；请在 CodyWork 中查看完整结果。` })
+  }
+  if (options.actions?.length) {
+    const noteIndex = options.note ? Math.max(0, elements.length - 1) : elements.length
+    elements.splice(noteIndex, 0, { tag: 'action', actions: options.actions.map(action => ({
+      tag: 'button', text: { tag: 'plain_text', content: action.text.slice(0, 80) }, type: action.type ?? 'default',
+      ...('url' in action ? { url: action.url } : { value: action.value }),
+    })) })
+  }
+  body.elements = elements
+  card.body = body
+  return card
+}
+
 export function projectionCard(projection: TurnProjection, prompt: string, openUrl = '', context?: ChannelExecutionContext): FeishuCard {
   const body = feishuProjectionBody(projection) || emptyProjectionBody(projection)
-  return feishuTextCard(`CodyWork · ${statusLabel(projection.status)}`, body, {
+  return projectionResultCard(`CodyWork · ${statusLabel(projection.status)}`, body, {
     color: statusColor(projection.status),
     ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
     note: executionContextNote(context, prompt),
