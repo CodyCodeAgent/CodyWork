@@ -45,6 +45,7 @@ export function channelPrompt(
 type ChannelCommandAdapterHooks = {
   provider(accountId: string): ReturnType<ChannelAccountManager['provider']>
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
+  addReceiptReaction(accountId: string, messageId: string): Promise<string>
   openUrl(binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string
   persistImage?: (
     workspaceId: string,
@@ -108,17 +109,28 @@ export class ChannelCommandAdapter {
     const { models: _models, ...executionContext } = resolvedSettings
     const commandId = channelCommandId(inbox.message)
     const turnLinkId = this.repositories.projections.createTurnLink({ inboxId, bindingId: binding.id, clientCommandId: commandId })
-    const presentation = this.repositories.projections.createPresentation({ accountId: inbox.message.accountId, bindingId: binding.id, turnLinkId, purpose: 'turn', state: { prompt, executionContext } })
-    this.repositories.inbox.update(inboxId, 'submitting', { bindingId: binding.id, clientCommandId: commandId })
-    await this.projection.observe(binding)
-    const initial = projectionCard({
-      threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0,
-    }, prompt, this.hooks.openUrl(binding), executionContext)
-    const sent = await this.hooks.enqueue(inbox.message.accountId, {
-      kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
+    const receiptReactionId = await this.hooks.addReceiptReaction(inbox.message.accountId, sourceMessageId)
+    const presentation = this.repositories.projections.createPresentation({
+      accountId: inbox.message.accountId,
+      bindingId: binding.id,
+      turnLinkId,
+      purpose: 'turn',
+      state: { prompt, executionContext, sourceMessageId, receiptReactionId, receiptReactionFinished: false },
     })
-    this.repositories.projections.updatePresentation(presentation.id, { remoteMessageId: sent.remoteMessageId, status: sent.status, state: { prompt, executionContext, outboxId: sent.id } })
+    this.repositories.inbox.update(inboxId, 'submitting', { bindingId: binding.id, clientCommandId: commandId })
     try {
+      await this.projection.observe(binding)
+      const initial = projectionCard({
+        threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0,
+      }, prompt, this.hooks.openUrl(binding), executionContext)
+      const sent = await this.hooks.enqueue(inbox.message.accountId, {
+        kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
+      })
+      this.repositories.projections.updatePresentation(presentation.id, {
+        remoteMessageId: sent.remoteMessageId,
+        status: sent.status,
+        state: { prompt, executionContext, sourceMessageId, receiptReactionId, receiptReactionFinished: false, outboxId: sent.id },
+      })
       await this.gateway.submitCommand({
         id: commandId,
         workspaceId: binding.workspaceId,

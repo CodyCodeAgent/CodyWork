@@ -19,6 +19,8 @@ class FakeFeishuProvider {
   readonly replies: Array<{ targetId: string; card: FeishuCard; replyInThread: boolean }> = []
   readonly userCards: Array<{ targetId: string; card: FeishuCard; remoteMessageId: string }> = []
   readonly updates: Array<{ targetId: string; card: FeishuCard }> = []
+  readonly reactions: Array<{ messageId: string; emojiType: string; reactionId: string }> = []
+  readonly removedReactions: Array<{ messageId: string; reactionId: string }> = []
 
   async identity() { return { id: 'ou-test-bot', name: 'CodyWork E2E' } }
   async start(hooks: ProviderStartHooks) {
@@ -39,6 +41,12 @@ class FakeFeishuProvider {
     return remoteMessageId
   }
   async updateCard(targetId: string, card: FeishuCard) { this.updates.push({ targetId, card }) }
+  async addReaction(messageId: string, emojiType = 'GoGoGo') {
+    const reactionId = `reaction-${this.reactions.length + 1}`
+    this.reactions.push({ messageId, emojiType, reactionId })
+    return reactionId
+  }
+  async removeReaction(messageId: string, reactionId: string) { this.removedReactions.push({ messageId, reactionId }) }
   async emitMessage(message: ChannelInboundMessage) {
     if (!this.hooks) throw new Error('fake Feishu provider is not connected')
     await this.hooks.onMessage(message)
@@ -150,6 +158,9 @@ describe('CodyWork channel composition root', () => {
         expect.objectContaining({ targetId: 'message-COMPOSITION_GROUP_TOPIC', replyInThread: true }),
       ]))
       expect(firstProvider.updates).toHaveLength(3)
+      expect(firstProvider.reactions.filter(reaction => reaction.emojiType === 'GoGoGo')).toHaveLength(3)
+      expect(firstProvider.reactions.filter(reaction => reaction.emojiType === 'DONE')).toHaveLength(3)
+      expect(firstProvider.removedReactions).toHaveLength(3)
       for (const prompt of ['COMPOSITION_FIRST', 'COMPOSITION_GROUP_REPLY', 'COMPOSITION_GROUP_TOPIC']) {
         expect(firstProvider.updates.filter(update => JSON.stringify(update.card).includes(`Test runtime received: ${prompt}`))).toHaveLength(1)
       }
@@ -188,6 +199,7 @@ describe('CodyWork channel composition root', () => {
       await waitFor(() => recoveredProvider.updates.some(update => JSON.stringify(update.card).includes('CodyWork · 已完成')))
       expect(recoveredProvider.replies).toHaveLength(1)
       expect(recoveredProvider.updates).toHaveLength(1)
+      expect(recoveredProvider.reactions.map(reaction => reaction.emojiType)).toEqual(['GoGoGo', 'DONE'])
       expect(JSON.stringify(recoveredProvider.updates[0]?.card)).toContain('Test runtime received: COMPOSITION_AFTER_RESTART')
       expect(service.diagnostics(account.id)).toMatchObject({
         account: { connectionState: 'connected' }, bindings: 3, inbox: { failed: 0 }, outbox: { pending: 0, deadLetter: 0 },

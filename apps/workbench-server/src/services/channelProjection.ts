@@ -27,6 +27,7 @@ type ChannelProjectionHooks = {
   queue(accountId: string, input: Parameters<ChannelAccountManager['queue']>[1]): ReturnType<ChannelAccountManager['queue']>
   fail(accountId: string, action: string, error: unknown): void
   isAccountActive(accountId: string): boolean
+  finishReceiptReaction(accountId: string, messageId: string, reactionId: string, outcome: 'DONE' | 'ERROR'): Promise<void>
   openUrl(binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string
 }
 
@@ -234,9 +235,10 @@ export class ChannelProjectionService {
     const state = this.host.state(binding.conversationId)
     const link = this.repositories.projections.turnByBinding(binding.id, turnId)
     if (!state || !link) return
-    const presentation = this.findTurnPresentation(link.id)
+    let presentation = this.findTurnPresentation(link.id)
     if (!presentation) return
     const projection = projectChannelTurn(state, turnId, presentation.revision + 1)
+    if (projection.terminal) presentation = await this.finalizeReceiptReaction(presentation, projection.status === 'completed' ? 'DONE' : 'ERROR')
     const prompt = string(presentation.state.prompt)
     const card = projectionCard(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext))
     let remoteMessageId = presentation.remoteMessageId
@@ -261,8 +263,9 @@ export class ChannelProjectionService {
   }
 
   async renderCommandFailure(turnLinkId: string, error: string): Promise<void> {
-    const presentation = this.findTurnPresentation(turnLinkId)
+    let presentation = this.findTurnPresentation(turnLinkId)
     if (!presentation) return
+    presentation = await this.finalizeReceiptReaction(presentation, 'ERROR')
     let openUrl = ''
     try { openUrl = this.hooks.openUrl(this.repositories.bindings.get(presentation.bindingId)) } catch { /* removed binding */ }
     const card = commandFailureCard(error, openUrl, executionContextFromState(presentation.state.executionContext))
@@ -277,6 +280,16 @@ export class ChannelProjectionService {
     }
     await this.hooks.enqueue(presentation.accountId, { kind: 'update_card', targetId: remoteMessageId, payload: { card }, dedupeKey: `${presentation.id}:command-failed`, terminal: true })
     this.repositories.projections.updatePresentation(presentation.id, { remoteMessageId, status: 'failed', terminal: true, state: { ...presentation.state, error } })
+  }
+
+  private async finalizeReceiptReaction(presentation: ChannelPresentation, outcome: 'DONE' | 'ERROR'): Promise<ChannelPresentation> {
+    if (presentation.state.receiptReactionFinished === true) return presentation
+    const messageId = string(presentation.state.sourceMessageId)
+    const reactionId = string(presentation.state.receiptReactionId)
+    if (messageId) await this.hooks.finishReceiptReaction(presentation.accountId, messageId, reactionId, outcome)
+    return this.repositories.projections.updatePresentation(presentation.id, {
+      state: { ...presentation.state, receiptReactionFinished: true, receiptReactionOutcome: outcome },
+    })
   }
 
   private findTurnPresentation(turnLinkId: string): ChannelPresentation | null {

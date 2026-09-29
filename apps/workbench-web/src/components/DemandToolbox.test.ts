@@ -18,6 +18,7 @@ function toolbox(actions: QuickAction[], disabled = false) {
     props: {
       demand, repositories: [], usage: null, canSettle: true, settleTitle: '沉淀', canAddRepository: true,
       syncingRepositoryId: '', clearingRepositoryId: '', syncResults: {}, quickActions: actions, quickActionsDisabled: disabled, quickActionFeedback: '',
+      canCompact: true, compacting: false, compactMessage: '',
     },
   })
 }
@@ -35,5 +36,13 @@ describe('DemandToolbox', () => {
     await actions[0]!.trigger('click')
     expect(wrapper.emitted('execute-quick-action')?.[0]).toEqual([valid])
     expect(wrapper.find('.demand-toolbox-panel').exists()).toBe(false)
+  })
+
+  it('offers manual context compaction without closing the toolbox', async () => {
+    const wrapper = toolbox([])
+    await wrapper.find('.demand-toolbox-trigger').trigger('click')
+    await wrapper.findAll('.toolbox-action .btn').at(0)!.trigger('click')
+    expect(wrapper.emitted('compact')).toHaveLength(1)
+    expect(wrapper.find('.demand-toolbox-panel').exists()).toBe(true)
   })
 })

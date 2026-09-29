@@ -34,6 +34,7 @@ import type {
   RuntimeConversationSnapshot,
   RuntimeContext,
   RuntimeEvent,
+  RuntimeAccountRateLimits,
   RuntimePermissionMode,
   RuntimeSkillCatalogEntry,
   RuntimeSkillCatalogRequest,
@@ -148,6 +149,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   diagnostics() { return this.host?.diagnostics() ?? null }
+  failureReport() { return this.host?.failureReport() ?? null }
 
   async checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult> { return workspaceCheck(request.workspacePath) }
 
@@ -373,6 +375,41 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   async interrupt(conversation: ConversationHandle): Promise<{ supported: boolean }> {
     const session = this.require(conversation)
     return { supported: await this.requireManager().interrupt(session.handle.id) }
+  }
+
+  async compactConversation(conversation: ConversationHandle): Promise<void> {
+    const session = this.require(conversation)
+    await this.requireManager().compactThread(session.binding.threadId)
+  }
+
+  async reloadMcpServers(): Promise<void> {
+    await this.ensureRuntime()
+    await this.requireCatalog().reloadMcpServers()
+  }
+
+  async readAccountRateLimits(): Promise<RuntimeAccountRateLimits> {
+    await this.ensureRuntime()
+    const result = await this.requireCatalog().readAccountRateLimits()
+    const entries = result.rateLimitsByLimitId && Object.keys(result.rateLimitsByLimitId).length
+      ? Object.entries(result.rateLimitsByLimitId).filter((entry): entry is [string, NonNullable<typeof entry[1]>] => Boolean(entry[1]))
+      : [[result.rateLimits.limitId || 'codex', result.rateLimits] as const]
+    const window = (value: typeof result.rateLimits.primary) => value ? {
+      usedPercent: value.usedPercent,
+      remainingPercent: Math.max(0, Math.min(100, 100 - value.usedPercent)),
+      windowDurationMins: value.windowDurationMins,
+      resetsAtIso: value.resetsAt === null ? null : new Date(value.resetsAt * 1_000).toISOString(),
+    } : null
+    return {
+      buckets: entries.map(([id, snapshot]) => ({
+        id,
+        name: snapshot.limitName || id,
+        planType: snapshot.planType ? String(snapshot.planType) : '',
+        reachedType: snapshot.rateLimitReachedType ? String(snapshot.rateLimitReachedType) : '',
+        primary: window(snapshot.primary),
+        secondary: window(snapshot.secondary),
+      })),
+      resetCreditsAvailable: result.rateLimitResetCredits ? Number(result.rateLimitResetCredits.availableCount) : null,
+    }
   }
 
   releaseConversation(conversation: ConversationHandle): void {

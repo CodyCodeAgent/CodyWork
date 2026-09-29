@@ -16,6 +16,8 @@
             <p class="toolbox-note">{{ usageDetail }}</p>
           </template>
           <p v-else class="toolbox-note">等待 Codex 返回本 Thread 的上下文 Token 用量。</p>
+          <div class="toolbox-action"><div><strong>手动压缩上下文</strong><p>让 Codex 压缩当前 Thread，保留关键信息并释放上下文空间。</p></div><button class="btn" type="button" :disabled="!canCompact || compacting" @click="emit('compact')">{{ compacting ? '压缩中…' : '立即压缩' }}</button></div>
+          <p v-if="compactMessage" class="toolbox-result" role="status">{{ compactMessage }}</p>
         </section>
 
         <section class="toolbox-section" aria-labelledby="toolbox-docs-title">
@@ -70,8 +72,11 @@ const props = defineProps<{
   quickActions: QuickAction[]
   quickActionsDisabled: boolean
   quickActionFeedback: string
+  canCompact: boolean
+  compacting: boolean
+  compactMessage: string
 }>()
-const emit = defineEmits<{ settle: []; 'add-repository': []; sync: [repositoryId: string]; cleanup: [repository: Repository]; 'execute-quick-action': [action: QuickAction] }>()
+const emit = defineEmits<{ settle: []; compact: []; 'add-repository': []; sync: [repositoryId: string]; cleanup: [repository: Repository]; 'execute-quick-action': [action: QuickAction] }>()
 const open = ref(false)
 const trigger = ref<HTMLButtonElement | null>(null)
 const panel = ref<HTMLElement | null>(null)

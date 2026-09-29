@@ -350,6 +350,15 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/runtime/diagnostics', () => conversationService(ctx).diagnostics())
 
+  add('GET', '/api/runtime/failure-report', () => conversationService(ctx).failureReport())
+
+  add('GET', '/api/runtime/rate-limits', () => conversationService(ctx).accountRateLimits())
+
+  add('POST', '/api/runtime/mcp/reload', async () => {
+    await conversationService(ctx).reloadMcpServers()
+    return { reloaded: true }
+  })
+
   // Observe the process already owned by the ConversationService. Creating a
   // throwaway App Server for a health click breaks single-owner semantics.
   add('POST', '/api/runtime/test', () => conversationService(ctx).getRuntime().getInfo())
@@ -739,6 +748,11 @@ function buildRoutes(ctx: AppContext) {
   add('POST', '/api/workspaces/:id/conversations/:conversationId/interrupt', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return conversationService(ctx).interrupt(workspace.id, requiredParam(c, 'conversationId'))
+  })
+
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/compact', async (c) => {
+    await conversationService(ctx).compact(requiredParam(c, 'id'), requiredParam(c, 'conversationId'))
+    return { compacted: true }
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/permission', async (c) => {

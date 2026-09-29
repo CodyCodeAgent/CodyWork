@@ -188,7 +188,8 @@ describe('CodyWork channel end-to-end pipeline', () => {
       handleApprovalAction: vi.fn(), handleQuestionAction: vi.fn(),
     }
     const projection = new ChannelProjectionService(db, repositories, conversations, workspaces, requests as never, {
-      enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true, openUrl: () => 'http://localhost/conversation',
+      enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true,
+      finishReceiptReaction: vi.fn(async () => undefined), openUrl: () => 'http://localhost/conversation',
     } as never)
     const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, projection, settings, {
       provider: () => ({
@@ -199,7 +200,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
           return { path, sizeBytes: 1 }
         },
       }) as never,
-      enqueue, openUrl: () => 'http://localhost/conversation',
+      enqueue, addReceiptReaction: vi.fn(async () => 'reaction-received'), openUrl: () => 'http://localhost/conversation',
       persistImage: (_workspaceId, _conversationId, input) => ({ path: `${input.path}.owned` }),
     })
     let bindings!: ChannelBindingService

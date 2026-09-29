@@ -328,6 +328,71 @@ export interface RuntimeSettings {
   updatedAt: string
 }
 
+export interface RuntimeLogEntry {
+  atIso: string
+  level: 'info' | 'warning' | 'error'
+  source: 'bridge' | 'stdout' | 'stderr'
+  message: string
+}
+
+export interface RuntimeDiagnostics {
+  status: 'running' | 'stopped'
+  lifecycle: 'not_started' | 'running' | 'unavailable' | 'disposed'
+  startCount: number
+  unavailableReason: string | null
+  initialized: boolean
+  pid: number | null
+  startedAtIso: string | null
+  exitedAtIso: string | null
+  exitCode: number | null
+  exitSignal: string | null
+  pendingClientRequestCount: number
+  pendingServerRequestCount: number
+  sentClientRequestCount: number
+  completedClientRequestCount: number
+  failedClientRequestCount: number
+  notificationCount: number
+  serverRequestCount: number
+  notificationCountsByMethod: Record<string, number>
+  recentLogs: RuntimeLogEntry[]
+}
+
+export interface RuntimeFailureReport {
+  schemaVersion: 1
+  capturedAtIso: string
+  phase: 'initialize' | 'rpc' | 'process' | 'transport' | 'protocol'
+  cause: 'initialize_timeout' | 'rpc_timeout' | 'process_exit' | 'stdin_error' | 'malformed_json'
+  failedMethod: string | null
+  message: string
+  process: Pick<RuntimeDiagnostics, 'status' | 'lifecycle' | 'startCount' | 'unavailableReason' | 'initialized' | 'pid' | 'startedAtIso' | 'exitedAtIso' | 'exitCode' | 'exitSignal'>
+  pendingClientRequests: Array<{ id: number; method: string; startedAtIso: string; deadlineAtIso: string; durationMs: number }>
+  pendingServerRequests: Array<{ id: number; method: string; receivedAtIso: string; durationMs: number }>
+  recentLogs: RuntimeLogEntry[]
+  counts: { sentClientRequests: number; completedClientRequests: number; failedClientRequests: number; notifications: number; serverRequests: number; notificationsByMethod: Record<string, number> }
+  hints: string[]
+}
+
+export interface RuntimeRateLimitWindow {
+  usedPercent: number
+  remainingPercent: number
+  windowDurationMins: number | null
+  resetsAtIso: string | null
+}
+
+export interface RuntimeRateLimitBucket {
+  id: string
+  name: string
+  planType: string
+  reachedType: string
+  primary: RuntimeRateLimitWindow | null
+  secondary: RuntimeRateLimitWindow | null
+}
+
+export interface RuntimeAccountRateLimits {
+  buckets: RuntimeRateLimitBucket[]
+  resetCreditsAvailable: number | null
+}
+
 export interface FeishuChannelAccount {
   id: string
   provider: 'feishu'
@@ -458,6 +523,10 @@ export const api = {
   unbindFeishuConversation: (accountId: string, bindingId: string) => request<{ unbound: boolean }>('DELETE', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/bindings/${encodeURIComponent(bindingId)}`),
   retryFeishuOutbox: (accountId: string, outboxId: string) => request<{ retried: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/outbox/${encodeURIComponent(outboxId)}/retry`),
   testRuntime: () => request<{ runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
+  runtimeDiagnostics: () => request<RuntimeDiagnostics | null>('GET', '/api/runtime/diagnostics'),
+  runtimeFailureReport: () => request<RuntimeFailureReport | null>('GET', '/api/runtime/failure-report'),
+  runtimeRateLimits: () => request<RuntimeAccountRateLimits>('GET', '/api/runtime/rate-limits'),
+  reloadRuntimeMcp: () => request<{ reloaded: true }>('POST', '/api/runtime/mcp/reload'),
   runtimeSettings: () => request<RuntimeSettings>('GET', '/api/settings/runtime'),
   updateRuntimeSettings: (patch: { command?: string }) =>
     request<RuntimeSettings>('PATCH', '/api/settings/runtime', patch),
@@ -533,6 +602,8 @@ export const api = {
     request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}), ...(imageIds.length ? { images: imageIds } : {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
+  compactConversation: (workspaceId: string, conversationId: string) =>
+    request<{ compacted: true }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/compact`),
   setConversationPermission: (workspaceId: string, conversationId: string, mode: ConversationPermissionMode) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/permission`, { mode }),
   renameConversation: (workspaceId: string, conversationId: string, title: string) =>

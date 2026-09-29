@@ -125,6 +125,7 @@ export class CodyWorkChannelService {
         queue: (accountId, input) => this.accounts.queue(accountId, input),
         fail: (accountId, action, error) => this.accounts.fail(accountId, action, error),
         isAccountActive: accountId => this.accounts.has(accountId),
+        finishReceiptReaction: (accountId, messageId, reactionId, outcome) => this.accounts.finishReceiptReaction(accountId, messageId, reactionId, outcome),
         openUrl: binding => this.openUrl(binding),
       },
     )
@@ -138,6 +139,7 @@ export class CodyWorkChannelService {
       {
         provider: accountId => this.accounts.provider(accountId),
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
+        addReceiptReaction: (accountId, messageId) => this.accounts.addReceiptReaction(accountId, messageId),
         openUrl: binding => this.openUrl(binding),
         persistImage: this.options.persistConversationImage,
       },
@@ -163,6 +165,8 @@ export class CodyWorkChannelService {
       this.settings,
       {
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
+        addReceiptReaction: (accountId, messageId) => this.accounts.addReceiptReaction(accountId, messageId),
+        finishReceiptReaction: (accountId, messageId, reactionId, outcome) => this.accounts.finishReceiptReaction(accountId, messageId, reactionId, outcome),
         submitInbox: (inboxId, binding) => this.commands.submitInbox(inboxId, binding),
         observe: (binding, observeOptions) => this.projection.observe(binding, observeOptions),
         detachBindingObservation: binding => this.projection.detach(binding),

@@ -54,7 +54,8 @@ function routerHarness(input: { message?: ChannelInboundMessage; account?: Recor
   const bindings = { requestWorkspace: vi.fn(), bindConfiguredTopic: vi.fn(), bindConfiguredReply: vi.fn(), handleAction: vi.fn() }
   const settings = { resolve: vi.fn(), model: vi.fn(), select: vi.fn() }
   const hooks = {
-    enqueue: vi.fn(async () => ({ id: 'outbox-1' })), submitInbox: vi.fn(), observe: vi.fn(), detachBindingObservation: vi.fn(),
+    enqueue: vi.fn(async () => ({ id: 'outbox-1' })), addReceiptReaction: vi.fn(async () => 'reaction-1'), finishReceiptReaction: vi.fn(async () => undefined),
+    submitInbox: vi.fn(), observe: vi.fn(), detachBindingObservation: vi.fn(),
     openUrl: vi.fn(() => ''), accountState: vi.fn(() => 'connected'), retryOutbox: vi.fn(), fail: vi.fn(),
   }
   const router = new ChannelRouter(new ChannelRepositories(store as never), {} as never, access as never, requests as never, bindings as never, settings as never, hooks as never)
@@ -193,6 +194,8 @@ describe('CodyWork channel architecture and lifecycle', () => {
     await test.router.onMessage(incoming)
     expect(JSON.stringify(test.hooks.enqueue.mock.calls[0]?.[1])).toContain('channel.model_select')
     expect(JSON.stringify(test.hooks.enqueue.mock.calls[0]?.[1])).toContain('GPT 6 Astra')
+    expect(test.hooks.addReceiptReaction).toHaveBeenCalledWith('account-1', incoming.messageId)
+    expect(test.hooks.finishReceiptReaction).toHaveBeenCalledWith('account-1', incoming.messageId, 'reaction-1', 'DONE')
 
     await test.router.onAction('account-1', { eventId: 'pick-model', actorId: currentBinding.ownerIdentity, remoteMessageId: 'model-card', value: { action: 'channel.model_select', bindingId: currentBinding.id, modelId: model.id } })
     expect(JSON.stringify(test.hooks.enqueue.mock.calls.at(-1)?.[1])).toContain('channel.reasoning_select')

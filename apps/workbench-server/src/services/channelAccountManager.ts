@@ -186,6 +186,42 @@ export class ChannelAccountManager {
     await this.startAccount(accountId)
   }
 
+  /** Reactions are lightweight UX receipts. They must never become a second
+   * command-delivery gate, so failures are audited and degraded to no-op. */
+  async addReceiptReaction(accountId: string, messageId: string): Promise<string> {
+    const provider = this.provider(accountId)
+    if (!provider || !messageId) return ''
+    try {
+      const reactionId = await provider.addReaction(messageId, 'GoGoGo')
+      this.repositories.audit.record(accountId, 'channel.reaction.received', 'channel_message', messageId, true, { reactionId })
+      return reactionId
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[codywork] failed to add Feishu receipt reaction for ${messageId}: ${message}`)
+      this.repositories.audit.record(accountId, 'channel.reaction.received', 'channel_message', messageId, false, {}, message)
+      return ''
+    }
+  }
+
+  async finishReceiptReaction(accountId: string, messageId: string, reactionId: string, outcome: 'DONE' | 'ERROR'): Promise<void> {
+    const provider = this.provider(accountId)
+    if (!provider || !messageId) return
+    if (reactionId) {
+      try { await provider.removeReaction(messageId, reactionId) }
+      catch (error) {
+        console.warn(`[codywork] failed to remove Feishu receipt reaction for ${messageId}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    try {
+      const finalReactionId = await provider.addReaction(messageId, outcome)
+      this.repositories.audit.record(accountId, 'channel.reaction.finished', 'channel_message', messageId, true, { outcome, finalReactionId })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[codywork] failed to add Feishu final reaction for ${messageId}: ${message}`)
+      this.repositories.audit.record(accountId, 'channel.reaction.finished', 'channel_message', messageId, false, { outcome }, message)
+    }
+  }
+
   retryOutbox(accountId: string, outboxId: string): void {
     this.repositories.outbox.retry(accountId, outboxId)
     this.flushInBackground(accountId, 'channel.outbox.manual_retry')

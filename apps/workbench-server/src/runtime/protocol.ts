@@ -191,6 +191,27 @@ export interface RuntimeConversationSnapshot {
   watermark: number
 }
 
+export interface RuntimeRateLimitWindow {
+  usedPercent: number
+  remainingPercent: number
+  windowDurationMins: number | null
+  resetsAtIso: string | null
+}
+
+export interface RuntimeRateLimitBucket {
+  id: string
+  name: string
+  planType: string
+  reachedType: string
+  primary: RuntimeRateLimitWindow | null
+  secondary: RuntimeRateLimitWindow | null
+}
+
+export interface RuntimeAccountRateLimits {
+  buckets: RuntimeRateLimitBucket[]
+  resetCreditsAvailable: number | null
+}
+
 /** CodyWork's product port to the shared Codex runtime. */
 export interface CodyWorkRuntime {
   getInfo(): Promise<CodexRuntimeInfo>
@@ -208,6 +229,8 @@ export interface CodyWorkRuntime {
   close(): Promise<void>
   /** Bounded runtime diagnostics suitable for an authenticated product surface. */
   diagnostics?(): unknown
+  /** Most recent classified, redacted Runtime failure snapshot. */
+  failureReport?(): unknown
   resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle>
   /** Lists resumable native Codex threads without attaching one to a Demand. */
   listNativeThreads(request: ListNativeThreadsRequest): Promise<NativeThreadSummary[]>
@@ -230,6 +253,10 @@ export interface CodyWorkRuntime {
   /** Refreshes an attached conversation's Demand-scoped execution context. */
   updateContext(conversation: ConversationHandle, context: RuntimeContext): Promise<void>
   setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void>
+  /** Optional Core capabilities keep alternative/test runtimes source-compatible. */
+  compactConversation?(conversation: ConversationHandle): Promise<void>
+  reloadMcpServers?(): Promise<void>
+  readAccountRateLimits?(): Promise<RuntimeAccountRateLimits>
   respondApproval(conversation: ConversationHandle, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(conversation: ConversationHandle, requestId: string, answer: unknown): Promise<void>
 }

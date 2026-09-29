@@ -40,7 +40,15 @@
         <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
         <FeishuChannelSettings v-else-if="settingsSection === 'feishu'" />
         <SmartNotificationSettings v-else-if="settingsSection === 'smart-notifications'" :workspace-id="workspace.id" />
-        <div v-else class="workspace-body"><article class="settings-card"><div class="card-kicker">APP SERVER</div><h2>Codex App Server</h2><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button></article></div>
+        <div v-else class="runtime-settings-body">
+          <section class="settings-intro"><div><div class="card-kicker">CODEX RUNTIME</div><h2>App Server 运行状态</h2><p>CodyWork 只展示 Core 的权威状态，不自行重启或复制 Runtime 状态。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
+          <div class="runtime-settings-grid">
+            <article class="settings-card runtime-config-card"><div class="settings-card-head"><div><div class="card-kicker">APP SERVER</div><h3>启动配置</h3></div><button class="btn" type="button" :disabled="loadingRuntimeDetails" @click="loadRuntimeDetails">{{ loadingRuntimeDetails ? '刷新中…' : '刷新状态' }}</button></div><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><div class="runtime-actions"><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button><button class="btn" type="button" :disabled="reloadingMcp" @click="reloadRuntimeMcp">{{ reloadingMcp ? '刷新中…' : '刷新 MCP Server' }}</button></div></article>
+            <article class="settings-card"><div class="settings-card-head"><div><div class="card-kicker">HEALTH</div><h3>进程诊断</h3></div><span class="runtime-mini-state">PID {{ runtimeDiagnostics?.pid ?? '—' }}</span></div><div v-if="runtimeDiagnostics" class="runtime-facts"><div><span>生命周期</span><strong>{{ runtimeDiagnostics.lifecycle }}</strong></div><div><span>启动次数</span><strong>{{ runtimeDiagnostics.startCount }}</strong></div><div><span>RPC 成功</span><strong>{{ runtimeDiagnostics.completedClientRequestCount }}</strong></div><div><span>RPC 失败</span><strong>{{ runtimeDiagnostics.failedClientRequestCount }}</strong></div></div><p v-else class="settings-note">Runtime 尚未产生诊断快照。</p><p v-if="runtimeDiagnostics?.unavailableReason" class="runtime-warning">{{ runtimeDiagnostics.unavailableReason }}</p></article>
+            <article class="settings-card runtime-usage-card"><div class="settings-card-head"><div><div class="card-kicker">ACCOUNT USAGE</div><h3>Codex 用量</h3></div><span v-if="runtimeRateLimits?.resetCreditsAvailable !== null && runtimeRateLimits?.resetCreditsAvailable !== undefined" class="runtime-mini-state">Reset {{ runtimeRateLimits.resetCreditsAvailable }}</span></div><div v-if="runtimeRateLimits?.buckets.length" class="runtime-rate-list"><div v-for="bucket in runtimeRateLimits.buckets" :key="bucket.id" class="runtime-rate-row"><div><strong>{{ bucket.name }}</strong><small>{{ bucket.planType || bucket.id }}</small></div><div class="runtime-rate-window"><span v-if="bucket.primary">{{ formatRuntimeWindow(bucket.primary) }}</span><span v-if="bucket.secondary">{{ formatRuntimeWindow(bucket.secondary) }}</span></div></div></div><p v-else class="settings-note">当前账户没有可展示的用量窗口。</p></article>
+            <article v-if="runtimeFailureReport" class="settings-card runtime-failure-card"><div class="settings-card-head"><div><div class="card-kicker">LAST FAILURE</div><h3>{{ runtimeFailureReport.phase }} · {{ runtimeFailureReport.cause }}</h3></div><time>{{ formatRuntimeTime(runtimeFailureReport.capturedAtIso) }}</time></div><p class="runtime-failure-message">{{ runtimeFailureReport.message }}</p><ul v-if="runtimeFailureReport.hints.length"><li v-for="hint in runtimeFailureReport.hints" :key="hint">{{ hint }}</li></ul><details v-if="runtimeFailureReport.recentLogs.length"><summary>查看最近 Runtime 日志</summary><pre>{{ runtimeFailureReport.recentLogs.map(entry => `${entry.atIso} [${entry.level}] ${entry.message}`).join('\n') }}</pre></details></article>
+          </div>
+        </div>
       </section>
       <section v-else-if="activePage === 'demands' && !selectedDemand" class="demands-body">
         <header class="topbar"><div><div class="eyebrow">{{ workspace.name.toUpperCase() }} / WORK MODE</div><h1>需求工作台</h1></div><div class="topbar-actions"><button class="btn" :disabled="importingWorktrees" @click="importExistingWorktrees">{{ importingWorktrees ? '扫描中…' : '扫描已有 Worktree' }}</button><button class="btn primary" @click="showCreateDemand = true">＋ 新建需求</button></div></header>
@@ -51,7 +59,7 @@
         <header class="topbar chat-topbar">
           <div v-if="selectedDemand"><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
           <div v-else><button class="back-link" @click="returnToWorkspace">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 Codex</strong><span>默认 YOLO，可切换只读或 Normal；支持文件、Git、CLI 与全局 Skill</span></div></div>
-          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button v-if="selectedDemand" :class="['btn', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" title="查看当前需求的 AI 代码上报回执和行数" @click="openAiCodeReport"><span class="ai-report-trigger-dot" />代码上报</button><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" title="将当前会话导出为飞书文档" @click="openConversationShare">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" @settle="settleConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand" class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div>
+          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button v-if="selectedDemand" :class="['btn', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" title="查看当前需求的 AI 代码上报回执和行数" @click="openAiCodeReport"><span class="ai-report-trigger-dot" />代码上报</button><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" title="将当前会话导出为飞书文档" @click="openConversationShare">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="settleConversation" @compact="compactConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand" class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div>
         </header>
         <div class="chat-layout">
           <aside :class="['conversation-sidebar', { collapsed: conversationSidebarCollapsed }]">
@@ -176,6 +184,10 @@ import {
   type QuickActionInput,
   type Repository,
   type RepositorySyncResult,
+  type RuntimeAccountRateLimits,
+  type RuntimeDiagnostics,
+  type RuntimeFailureReport,
+  type RuntimeRateLimitWindow,
   type RuntimeSettings,
   type SkillInstallStatus,
   type Workspace,
@@ -213,7 +225,7 @@ const draft = ref(''); const sending = ref(false); const permission = ref<Conver
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
 const composerImagesByConversationId = new Map<string, ComposerImage[]>()
-const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillQuery = ref(''); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const showSkillInstallDialog = ref(false); const pausingSkillInstall = ref(false); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillQuery = ref(''); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const showSkillInstallDialog = ref(false); const pausingSkillInstall = ref(false); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const runtimeDiagnostics = ref<RuntimeDiagnostics | null>(null); const runtimeFailureReport = ref<RuntimeFailureReport | null>(null); const runtimeRateLimits = ref<RuntimeAccountRateLimits | null>(null); const loadingRuntimeDetails = ref(false); const reloadingMcp = ref(false); const compactingConversation = ref(false); const compactConversationMessage = ref(''); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
 const settingsSection = ref<WorkbenchSettingsSection>('overview')
 const quickActions = ref<QuickAction[]>([])
 const selectedQuickActionId = ref('')
@@ -276,6 +288,14 @@ const socketDetail = computed(() => {
   return `WebSocket 已关闭（${state.closeCode ?? '无关闭码'}）：${state.closeReason || '未提供原因'}`
 })
 const isRunning = computed(() => Boolean(conversationState.value.activeTurnId))
+const runtimeStatusLabel = computed(() => {
+  const diagnostics = runtimeDiagnostics.value
+  if (!diagnostics) return '等待诊断'
+  if (diagnostics.lifecycle === 'running' && diagnostics.initialized) return '运行正常'
+  if (diagnostics.lifecycle === 'unavailable') return '服务不可用'
+  if (diagnostics.lifecycle === 'disposed') return '已关闭'
+  return diagnostics.status === 'running' ? '正在初始化' : '尚未启动'
+})
 const canSettleConversation = computed(() => Boolean(selectedConversation.value && selectedConversation.value.permissionMode !== 'read-only' && !sending.value && !isRunning.value))
 const settleConversationTitle = computed(() => {
   if (!selectedConversation.value) return '请先选择会话'
@@ -719,6 +739,21 @@ async function pauseSkillInstall(): Promise<void> {
 async function loadRuntime(): Promise<void> {
   runtime.value = await api.runtimeSettings()
   runtimeCommand.value = runtime.value.command
+  await loadRuntimeDetails()
+}
+async function loadRuntimeDetails(): Promise<void> {
+  loadingRuntimeDetails.value = true
+  const [diagnostics, failure, rateLimits] = await Promise.allSettled([
+    api.runtimeDiagnostics(),
+    api.runtimeFailureReport(),
+    api.runtimeRateLimits(),
+  ])
+  if (diagnostics.status === 'fulfilled') runtimeDiagnostics.value = diagnostics.value
+  if (failure.status === 'fulfilled') runtimeFailureReport.value = failure.value
+  if (rateLimits.status === 'fulfilled') runtimeRateLimits.value = rateLimits.value
+  const rejected = [diagnostics, failure, rateLimits].find(result => result.status === 'rejected')
+  if (rejected?.status === 'rejected') runtimeMessage.value = rejected.reason instanceof Error ? rejected.reason.message : String(rejected.reason)
+  loadingRuntimeDetails.value = false
 }
 async function saveRuntime(): Promise<void> {
   try {
@@ -728,9 +763,43 @@ async function saveRuntime(): Promise<void> {
 }
 async function testRuntime(): Promise<void> {
   testingRuntime.value = true
-  try { const manifest = await api.testRuntime(); runtimeMessage.value = `连接成功：${manifest.runtimeVersion} · protocol ${manifest.protocolVersion}` }
+  try { const manifest = await api.testRuntime(); runtimeMessage.value = `连接成功：${manifest.runtimeVersion} · protocol ${manifest.protocolVersion}`; await loadRuntimeDetails() }
   catch (cause) { runtimeMessage.value = cause instanceof Error ? cause.message : String(cause) }
   finally { testingRuntime.value = false }
+}
+async function reloadRuntimeMcp(): Promise<void> {
+  reloadingMcp.value = true
+  try {
+    await api.reloadRuntimeMcp()
+    runtimeMessage.value = 'MCP Server 列表已从 Codex Runtime 刷新。'
+  } catch (cause) {
+    runtimeMessage.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    reloadingMcp.value = false
+  }
+}
+function formatRuntimeTime(value: string | null): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+}
+function formatRuntimeWindow(window: RuntimeRateLimitWindow): string {
+  const duration = window.windowDurationMins ? `${Math.round(window.windowDurationMins / 60)}h` : '窗口'
+  const reset = window.resetsAtIso ? ` · ${formatRuntimeTime(window.resetsAtIso)} 重置` : ''
+  return `${duration} 剩余 ${Math.round(window.remainingPercent)}%${reset}`
+}
+async function compactConversation(): Promise<void> {
+  if (!workspace.value || !selectedConversation.value || compactingConversation.value || isRunning.value) return
+  compactingConversation.value = true
+  compactConversationMessage.value = ''
+  try {
+    await api.compactConversation(workspace.value.id, selectedConversation.value.id)
+    compactConversationMessage.value = '上下文压缩完成；后续消息将继续使用压缩后的 Thread。'
+  } catch (cause) {
+    compactConversationMessage.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    compactingConversation.value = false
+  }
 }
 async function addRepository(): Promise<void> {
   if (!workspace.value) return
@@ -1518,6 +1587,7 @@ watch(() => selectedDemand.value?.id, (current, previous) => {
   aiReportError.value = ''
   aiReportMessage.value = ''
 })
+watch(() => selectedConversation.value?.id, () => { compactConversationMessage.value = '' })
 watch(() => conversationState.value.activeTurnId, (activeTurnId, previousTurnId) => {
   if (previousTurnId && !activeTurnId && selectedDemand.value) void loadQuickActions()
 })

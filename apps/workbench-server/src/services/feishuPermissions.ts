@@ -16,6 +16,7 @@ export const CODYWORK_FEISHU_REQUIRED_SCOPES: readonly FeishuRequiredScope[] = [
   { name: 'application:application:self_manage', label: '读取应用所有者与管理员' },
   { name: 'application:bot.basic_info:read', label: '读取机器人身份' },
   { name: 'im:chat:read', label: '读取群聊与话题模式' },
+  { name: 'im:message', label: '获取与发送单聊、群组消息（含表情回执）' },
   { name: 'im:message:readonly', label: '读取消息' },
   { name: 'im:message:send_as_bot', label: '以机器人身份发送消息' },
   { name: 'im:message:update', label: '更新执行卡片' },

@@ -110,6 +110,17 @@ export class ConversationService implements ConversationCommandGateway {
   getRuntime(): CodyWorkRuntime { return this.runtime }
 
   diagnostics() { return this.runtime.diagnostics?.() ?? null }
+  failureReport() { return this.runtime.failureReport?.() ?? null }
+
+  async reloadMcpServers(): Promise<void> {
+    if (!this.runtime.reloadMcpServers) throw new Error('当前 Runtime 不支持刷新 MCP Server')
+    await this.runtime.reloadMcpServers()
+  }
+
+  accountRateLimits() {
+    if (!this.runtime.readAccountRateLimits) throw new Error('当前 Runtime 不支持读取账户用量')
+    return this.runtime.readAccountRateLimits()
+  }
 
   list(workspaceId: string, demandId: string): ConversationView[] {
     return this.repository.listDemand(workspaceId, demandId).map(toView)
@@ -345,6 +356,17 @@ export class ConversationService implements ConversationCommandGateway {
   async interrupt(workspaceId: string, conversationId: string): Promise<{ supported: boolean }> {
     const result = await this.executeAction({ kind: 'interrupt', workspaceId, conversationId, origin: { kind: 'browser' } })
     return { supported: result.kind === 'interrupt' && result.supported }
+  }
+
+  async compact(workspaceId: string, conversationId: string): Promise<void> {
+    const row = this.requireConversation(workspaceId, conversationId)
+    await this.ensureHandle(row)
+    const handle = this.handleFor(row)
+    const state = this.runtime.sessionSnapshot?.(handle) ?? null
+    if (state?.activeTurnId || state?.pendingRequestCount) throw new Error('会话正在执行或等待确认，不能压缩上下文')
+    if (!this.runtime.compactConversation) throw new Error('当前 Runtime 不支持手动压缩上下文')
+    await this.runtime.compactConversation(handle)
+    this.audit(conversationId, 'conversation.compacted', { nativeId: row.native_id })
   }
 
   async approve(workspaceId: string, conversationId: string, approvalId: string, outcome: 'allowed-once' | 'rejected'): Promise<void> {

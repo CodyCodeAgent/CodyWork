@@ -19,6 +19,8 @@ import { channelReasoningLabel, type ChannelModelSettings, type ChannelSessionSe
 
 type ChannelRouterHooks = {
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
+  addReceiptReaction(accountId: string, messageId: string): Promise<string>
+  finishReceiptReaction(accountId: string, messageId: string, reactionId: string, outcome: 'DONE' | 'ERROR'): Promise<void>
   submitInbox(inboxId: string, binding: CodyWorkChannelBinding): Promise<void>
   observe(binding: CodyWorkChannelBinding, options?: { emptyHistory?: boolean }): Promise<void>
   detachBindingObservation(binding: CodyWorkChannelBinding): void
@@ -90,7 +92,7 @@ export class ChannelRouter {
       const decision = this.allowed(account, routedMessage, binding)
       if (!decision.allowed) {
         if (decision.reason === 'sender_denied') {
-          await this.access.request(account, routedMessage, claimed.item.id)
+          await this.withReceipt(routedMessage, () => this.access.request(account, routedMessage, claimed.item.id))
           return
         }
         this.repositories.inbox.update(claimed.item.id, 'ignored', { lastError: decision.reason })
@@ -100,10 +102,12 @@ export class ChannelRouter {
         })
         return
       }
-      if (binding && command.startsWith('/')) return void await this.handleCommand(binding, claimed.item.id, command)
+      if (binding && command.startsWith('/')) return void await this.withReceipt(routedMessage, () => this.handleCommand(binding, claimed.item.id, command))
+      // Configured topic/reply binding immediately delegates to submitInbox,
+      // which owns the durable processing receipt for the resulting Turn.
       if (!binding && profile?.conversationMode === 'topic') return void await this.bindings.bindConfiguredTopic(claimed.item.id, profile)
       if (!binding && profile?.conversationMode === 'reply') return void await this.bindings.bindConfiguredReply(claimed.item.id, profile)
-      if (!binding) return void await this.bindings.requestWorkspace(claimed.item.id)
+      if (!binding) return void await this.withReceipt(routedMessage, () => this.bindings.requestWorkspace(claimed.item.id))
       this.repositories.inbox.update(claimed.item.id, 'ready', { bindingId: binding.id })
       await this.hooks.submitInbox(claimed.item.id, binding)
     } catch (error) {
@@ -119,6 +123,17 @@ export class ChannelRouter {
           payload: { text: `命令执行失败：${detail}` }, dedupeKey: `${claimed.item.id}:command-error`, terminal: true,
         }).catch(replyError => this.hooks.fail(message.accountId, 'channel.command.error_reply', replyError))
       }
+    }
+  }
+
+  private async withReceipt(message: ChannelInboundMessage, action: () => Promise<unknown>): Promise<void> {
+    const reactionId = await this.hooks.addReceiptReaction(message.accountId, message.messageId)
+    try {
+      await action()
+      await this.hooks.finishReceiptReaction(message.accountId, message.messageId, reactionId, 'DONE')
+    } catch (error) {
+      await this.hooks.finishReceiptReaction(message.accountId, message.messageId, reactionId, 'ERROR')
+      throw error
     }
   }
 
