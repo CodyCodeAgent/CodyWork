@@ -21,7 +21,7 @@
     "service:restart": "bash scripts/codywork-service.sh restart",
     "service:status": "bash scripts/codywork-service.sh status",
     "typecheck": "pnpm --filter @codywork/server exec tsc -p tsconfig.json --noEmit && pnpm --filter @codywork/web exec vue-tsc --noEmit",
-    "test": "pnpm --filter @codywork/server exec vitest run --testTimeout=20000",
+    "test": "pnpm --filter @codywork/server exec vitest run --testTimeout=20000 && bash scripts/codywork-service-network.test.sh",
     "test:web": "pnpm --filter @codywork/web test",
     "verify": "pnpm run typecheck && pnpm run test && pnpm run test:web && pnpm run build"
   },

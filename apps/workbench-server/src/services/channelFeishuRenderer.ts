@@ -102,28 +102,28 @@ export function executionContextFromState(value: unknown): ChannelExecutionConte
   }
 }
 
-function projectionResultCard(title: string, markdown: string, options: { color: string; actions?: FeishuCardButton[]; note?: string }): FeishuCard {
+function projectionResultCards(title: string, markdown: string, options: { color: string; actions?: FeishuCardButton[]; note?: string }): FeishuCard[] {
   const cards = feishuMarkdownCards(markdown, { ...(options.note ? { note: options.note } : {}) })
-  const card = cards[0] ?? { schema: '2.0', config: { update_multi: true }, body: { direction: 'vertical', elements: [] } }
-  card.header = { template: options.color, title: { tag: 'plain_text', content: title.slice(0, 80) } }
-  const body = card.body && typeof card.body === 'object' && !Array.isArray(card.body)
-    ? card.body as { elements?: unknown[] }
-    : { elements: [] as unknown[] }
-  const elements = Array.isArray(body.elements) ? body.elements : []
-  if (cards.length > 1) {
-    const noteIndex = options.note ? Math.max(0, elements.length - 1) : elements.length
-    elements.splice(noteIndex, 0, { tag: 'markdown', content: `---\n回复内容较长，飞书仅展示第 1/${cards.length} 张；请在 CodyWork 中查看完整结果。` })
-  }
-  if (options.actions?.length) {
-    const noteIndex = options.note ? Math.max(0, elements.length - 1) : elements.length
-    elements.splice(noteIndex, 0, ...feishuCardButtonElements(options.actions))
-  }
-  body.elements = elements
-  card.body = body
-  return card
+  return cards.map((card, index) => {
+    const partLabel = cards.length > 1 ? `（第 ${index + 1}/${cards.length} 部分）` : ''
+    card.header = { template: options.color, title: { tag: 'plain_text', content: `${title}${partLabel}`.slice(0, 80) } }
+    // The first card remains the patchable turn card. Continuations are final
+    // delivery-only cards, so they never add a second command source.
+    if (index === 0 && options.actions?.length) {
+      const body = card.body && typeof card.body === 'object' && !Array.isArray(card.body)
+        ? card.body as { elements?: unknown[] }
+        : { elements: [] as unknown[] }
+      const elements = Array.isArray(body.elements) ? body.elements : []
+      const noteIndex = options.note ? Math.max(0, elements.length - 1) : elements.length
+      elements.splice(noteIndex, 0, ...feishuCardButtonElements(options.actions))
+      body.elements = elements
+      card.body = body
+    }
+    return card
+  })
 }
 
-export function projectionCard(projection: TurnProjection, prompt: string, openUrl = '', context?: ChannelExecutionContext, controls?: { bindingId: string; runtimePicker?: boolean }): FeishuCard {
+export function projectionCards(projection: TurnProjection, prompt: string, openUrl = '', context?: ChannelExecutionContext, controls?: { bindingId: string; runtimePicker?: boolean }): FeishuCard[] {
   const body = feishuProjectionBody(projection, openUrl) || emptyProjectionBody(projection)
   const actions: FeishuCardButton[] = []
   // Keep model switching next to the current model on the live card. The
@@ -132,11 +132,16 @@ export function projectionCard(projection: TurnProjection, prompt: string, openU
   if (controls?.runtimePicker) actions.push({ text: '切换 Runtime', value: { action: 'channel.runtime_picker', bindingId: controls.bindingId } })
   if (openUrl) actions.push({ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' })
   const runtimeLabel = context?.runtimeLabel || context?.runtimeType || 'Codex'
-  return projectionResultCard(`CodyWork · ${runtimeLabel} · ${statusLabel(projection.status)}`, body, {
+  return projectionResultCards(`CodyWork · ${runtimeLabel} · ${statusLabel(projection.status)}`, body, {
     color: statusColor(projection.status),
     ...(actions.length ? { actions } : {}),
     note: executionContextNote(context, prompt),
   })
+}
+
+/** The first page is used by callers that render a mutable in-place card. */
+export function projectionCard(projection: TurnProjection, prompt: string, openUrl = '', context?: ChannelExecutionContext, controls?: { bindingId: string; runtimePicker?: boolean }): FeishuCard {
+  return projectionCards(projection, prompt, openUrl, context, controls)[0]!
 }
 
 export function commandFailureCard(error: string, openUrl = '', context?: ChannelExecutionContext): FeishuCard {

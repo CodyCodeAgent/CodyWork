@@ -7,7 +7,7 @@ import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION, type RuntimeEvent } from '../src/runtime/protocol.js'
 import { CodyWorkCodexRuntime } from '../src/runtime/codex.js'
-import { CodyWorkTraeRuntime } from '../src/runtime/trae.js'
+import { CodyWorkTraeRuntime, presentTraeFailure } from '../src/runtime/trae.js'
 import { CODY_WEB_CORE_VERSION } from '@codycodeagent/cody-web-core/runtime'
 import { createConversationState, reduceConversationEvents } from '@codycodeagent/cody-web-core/conversation'
 
@@ -442,6 +442,12 @@ describe('generic runtime protocol', () => {
     const failedCommand = rejectedEvents.find(event => event.type === 'command.failed')
     expect(failedCommand).toMatchObject({ threadId: first.nativeId, turnId: expect.any(String), itemId: expect.any(String) })
     expect(failedCommand?.itemId).toBe(failedCommand?.turnId)
+    const networkFailureEvents: RuntimeEvent[] = []
+    await expect(runtime.sendTurn({ conversation: first, prompt: 'NETWORK_REQUEST_FAILURE', onEvent: event => networkFailureEvents.push(event) }))
+      .rejects.toThrow('Trae 模型网络连接失败')
+    expect(networkFailureEvents.filter(event => event.type === 'turn.failed')).toEqual([
+      expect.objectContaining({ data: { error: expect.stringContaining('NO_PROXY'), code: 'trae_model_network_connection_failed' } }),
+    ])
     await expect(runtime.sendTurn({ conversation: first, prompt: 'no synthetic reasoning', settings: { reasoningEffort: 'medium' } })).rejects.toThrow('未提供推理程度配置')
     await expect(runtime.sendTurn({ conversation: first, prompt: 'no synthetic plan', settings: { collaborationMode: 'plan' } })).rejects.toThrow('未提供 Plan 模式配置')
     await expect(runtime.listNativeThreads({ context })).resolves.toEqual([expect.objectContaining({ nativeId: 'trae-saved-thread', preview: 'Trae saved session' })])
@@ -472,5 +478,22 @@ describe('generic runtime protocol', () => {
     expect(snapshot.events.some(event => event.type === 'assistant.delta')).toBe(true)
     await runtime.close()
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it('presents normalized Trae transport failures as actionable network recovery', () => {
+    expect(presentTraeFailure(new Error('Connection failed: error sending request'))).toEqual({
+      message: expect.stringContaining('Trae 模型网络连接失败'),
+      code: 'trae_model_network_connection_failed',
+    })
+    // The JSON-RPC bridge may erase the original transport message. Keep the
+    // product recovery actionable even when ACP exposes only this standard
+    // error string.
+    expect(presentTraeFailure(new Error('Internal error'))).toEqual({
+      message: expect.stringContaining('Trae 模型网络连接失败'),
+      code: 'trae_model_network_connection_failed',
+    })
+    expect(presentTraeFailure(new Error('当前 Trae ACP 不支持模型'))).toEqual({
+      message: '当前 Trae ACP 不支持模型',
+    })
   })
 })

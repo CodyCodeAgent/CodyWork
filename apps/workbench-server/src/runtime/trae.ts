@@ -62,6 +62,23 @@ type ProductSession = {
 
 const CANCEL_NOTIFICATION_TIMEOUT_MS = 750
 const CANCEL_SETTLEMENT_TIMEOUT_MS = 1_500
+const TRAE_MODEL_NETWORK_FAILURE = /(?:connection failed:\s*error sending request|^internal error$)/i
+
+export function presentTraeFailure(error: unknown): { message: string; code?: string } {
+  const original = error instanceof Error ? error.message : String(error)
+  // ACP normalizes a remote prompt rejection to "Internal error" in some
+  // implementations, discarding Trae's original "error sending request"
+  // detail. This adapter owns only Trae prompt failures, so present both forms
+  // as the same actionable network recovery instead of leaking a dead-end
+  // generic message into the browser or a remote channel.
+  if (TRAE_MODEL_NETWORK_FAILURE.test(original)) {
+    return {
+      message: 'Trae 模型网络连接失败，请检查 CodyWork 的 NO_PROXY 直连配置后重试。',
+      code: 'trae_model_network_connection_failed',
+    }
+  }
+  return { message: original }
+}
 
 function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -444,13 +461,14 @@ export class CodyWorkTraeRuntime implements CodyWorkRuntime {
       if (session.forcedInterruptedTurns.has(turnId)) {
         return { conversation: session.handle, finalText: this.finalText(events), events: [...events] }
       }
-      const message = error instanceof Error ? error.message : String(error)
+      const failure = presentTraeFailure(error)
       // A setup failure happens before there is a native user item. Surface a
       // command failure first so the browser turns its optimistic queued row
       // into a retryable failure instead of leaving it permanently queued.
-      if (!started) this.emit(session, runtimeEvent(session, 'command.failed', { error: message }, turnId, turnId))
-      this.emit(session, runtimeEvent(session, 'turn.failed', { error: message }, turnId))
-      throw error
+      const eventData = { error: failure.message, ...(failure.code ? { code: failure.code } : {}) }
+      if (!started) this.emit(session, runtimeEvent(session, 'command.failed', eventData, turnId, turnId))
+      this.emit(session, runtimeEvent(session, 'turn.failed', eventData, turnId))
+      throw new Error(failure.message)
     } finally {
       session.forcedInterruptionResolvers.delete(turnId)
       if (session.activeTurnId === turnId) session.activeTurnId = undefined

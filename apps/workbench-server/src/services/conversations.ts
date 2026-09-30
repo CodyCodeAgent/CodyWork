@@ -173,7 +173,7 @@ export class ConversationService implements ConversationCommandGateway {
     this.contexts = new ConversationContextResolver(db)
   }
 
-  getRuntime(type: ConversationRuntimeType = this.defaultRuntimeType()): CodyWorkRuntime { return this.runtimes.create(this.resolveRuntimeType(type), undefined) }
+  getRuntime(type?: ConversationRuntimeType): CodyWorkRuntime { return this.runtimes.create(this.resolveRuntimeType(type), undefined) }
 
   runtimeDescriptors(): RuntimeDescriptorView[] {
     return this.runtimes.list().map(({ id, label, description, capabilities }) => ({ id, label, ...(description ? { description } : {}), ...(capabilities ? { capabilities } : {}) }))

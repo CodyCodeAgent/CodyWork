@@ -15,35 +15,93 @@ PORT="${CODYWORK_PORT:-3001}"
 ENTRYPOINT="$PROJECT_DIR/apps/workbench-server/dist/index.js"
 mkdir -p "$RUNTIME_DIR"
 
+# Trae ACP reaches both public model endpoints and ByteDance internal services.
+# Keep these direct-route defaults in the launcher so detached service processes
+# cannot accidentally inherit only one shell-specific proxy spelling.
+TRAE_NO_PROXY_DEFAULTS=(
+  localhost
+  127.0.0.1
+  byted.org
+  bytedance.net
+  trae.com.cn
+  byteintl.net
+  copilot-cn.bytedance.net
+)
+
+append_no_proxy_rule() {
+  local current="$1" candidate="$2" entry trimmed
+  local -a entries=()
+  local IFS=','
+  read -r -a entries <<< "$current"
+  for entry in "${entries[@]}"; do
+    trimmed="${entry#"${entry%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    [[ "$trimmed" == "$candidate" ]] && { printf '%s' "$current"; return; }
+  done
+  [[ -z "$current" ]] && { printf '%s' "$candidate"; return; }
+  printf '%s,%s' "$current" "$candidate"
+}
+
+normalise_no_proxy_environment() {
+  # A few Node and CLI stacks consult only one casing. Merge both inputs, then
+  # export both spellings with the same value so CodyWork and its ACP children
+  # follow one deterministic direct-routing policy.
+  local merged='' source rule
+  local -a rules=()
+  for source in "${no_proxy:-}" "${NO_PROXY:-}"; do
+    local IFS=','
+    read -r -a rules <<< "$source"
+    for rule in "${rules[@]}"; do
+      rule="${rule#"${rule%%[![:space:]]*}"}"
+      rule="${rule%"${rule##*[![:space:]]}"}"
+      [[ -n "$rule" ]] && merged="$(append_no_proxy_rule "$merged" "$rule")"
+    done
+  done
+  for rule in "${TRAE_NO_PROXY_DEFAULTS[@]}"; do
+    merged="$(append_no_proxy_rule "$merged" "$rule")"
+  done
+  export no_proxy="$merged"
+  export NO_PROXY="$merged"
+
+  local rule_count=0
+  local IFS=','
+  read -r -a rules <<< "$merged"
+  rule_count="${#rules[@]}"
+  # Do not print proxy URLs or host values: operators only need to know that
+  # the detached process received a normalized direct-routing rule set.
+  echo "CodyWork NO_PROXY rules active: $rule_count"
+}
+
 load_network_environment() {
   # CodyWork's App Server runs as a detached process, so it cannot rely on an
   # interactive shell having exported the corporate proxy variables. Read only
   # the small allowlist needed for outbound model/tool traffic from a local
   # runtime file. Do not `source` it: the file is configuration, not code.
   local environment_file="${CODYWORK_NETWORK_ENV_FILE:-$RUNTIME_DIR/codywork.network.env}"
-  [[ -r "$environment_file" ]] || return 0
-
-  local line key value
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    [[ "$line" == export\ * ]] && line="${line#export }"
-    if [[ "$line" != *=* ]]; then
-      echo "Ignoring malformed CodyWork network setting in $environment_file" >&2
-      continue
-    fi
-    key="${line%%=*}"
-    value="${line#*=}"
-    case "$key" in
-      HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|http_proxy|https_proxy|all_proxy|no_proxy)
-        export "$key=$value"
-        ;;
-      *)
-        echo "Ignoring unsupported CodyWork network setting: $key" >&2
-        ;;
-    esac
-  done < "$environment_file"
-  echo "Loaded CodyWork network configuration from $environment_file"
+  if [[ -r "$environment_file" ]]; then
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      [[ "$line" == export\ * ]] && line="${line#export }"
+      if [[ "$line" != *=* ]]; then
+        echo "Ignoring malformed CodyWork network setting in $environment_file" >&2
+        continue
+      fi
+      key="${line%%=*}"
+      value="${line#*=}"
+      case "$key" in
+        HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|http_proxy|https_proxy|all_proxy|no_proxy)
+          export "$key=$value"
+          ;;
+        *)
+          echo "Ignoring unsupported CodyWork network setting: $key" >&2
+          ;;
+      esac
+    done < "$environment_file"
+    echo "Loaded CodyWork network configuration from $environment_file"
+  fi
+  normalise_no_proxy_environment
 }
 
 load_service_environment() {
@@ -219,11 +277,13 @@ status_service() {
   return 1
 }
 
-case "${1:-status}" in
-  start) start_service ;;
-  stop) stop_service ;;
-  restart) stop_service; start_service ;;
-  status) status_service ;;
-  logs) touch "$LOG_FILE"; tail -n "${CODYWORK_LOG_LINES:-100}" -f "$LOG_FILE" ;;
-  *) echo 'Usage: codywork-service.sh {start|stop|restart|status|logs}' >&2; exit 2 ;;
-esac
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-status}" in
+    start) start_service ;;
+    stop) stop_service ;;
+    restart) stop_service; start_service ;;
+    status) status_service ;;
+    logs) touch "$LOG_FILE"; tail -n "${CODYWORK_LOG_LINES:-100}" -f "$LOG_FILE" ;;
+    *) echo 'Usage: codywork-service.sh {start|stop|restart|status|logs}' >&2; exit 2 ;;
+  esac
+fi

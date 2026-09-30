@@ -54,6 +54,7 @@ const app = acp.agent({ name: 'trae-acp-fixture' })
       session.appendRejected = true
       throw new Error('SESSION_BUSY')
     }
+    if (text.includes('NETWORK_REQUEST_FAILURE')) throw new Error('Connection failed: error sending request')
     await update(client, params.sessionId, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text } })
     if (text.includes('APPROVAL')) {
       const permission = await client.request(acp.methods.client.session.requestPermission, {

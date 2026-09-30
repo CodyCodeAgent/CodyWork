@@ -12,7 +12,7 @@ import { listDemands } from './demands.js'
 import type { WorkspaceRegistry } from './workspaceRegistry.js'
 import type { ChannelPresentation, CodyWorkChannelBinding } from './channelStore.js'
 import type { ChannelRepositoryPorts } from './channelRepositories.js'
-import { commandFailureCard, executionContextFromState, projectionCard } from './channelFeishuRenderer.js'
+import { commandFailureCard, executionContextFromState, projectionCards } from './channelFeishuRenderer.js'
 
 const PROJECTION_THROTTLE_MS = 700
 const FEISHU_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'])
@@ -240,15 +240,11 @@ export class ChannelProjectionService {
     if (!state || !link) return
     let presentation = this.findTurnPresentation(link.id)
     if (!presentation) return
-    const initialProjection = projectChannelTurn(state, turnId, presentation.revision + 1)
-    // Older Trae sessions persisted only assistant.delta chunks. Keep their
-    // historical Feishu cards readable while current sessions use the
-    // normalized assistant.completed emitted by the runtime.
-    const assistantText = initialProjection.assistantText || await this.legacyAssistantText(binding, turnId)
-    const projection = assistantText === initialProjection.assistantText ? initialProjection : { ...initialProjection, assistantText }
+    const projection = projectChannelTurn(state, turnId, presentation.revision + 1)
     if (projection.terminal) presentation = await this.finalizeReceiptReaction(presentation, projection.status === 'completed' ? 'DONE' : 'ERROR')
     const prompt = string(presentation.state.prompt)
-    const card = projectionCard(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext), { bindingId: binding.id, runtimePicker: true })
+    const cards = projectionCards(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext), { bindingId: binding.id, runtimePicker: true })
+    const card = cards[0]!
     let remoteMessageId = presentation.remoteMessageId
     if (!remoteMessageId) {
       const outboxId = string(presentation.state.outboxId)
@@ -266,6 +262,7 @@ export class ChannelProjectionService {
     if (projection.terminal) {
       this.repositories.inbox.update(link.inboxId, projection.status === 'completed' ? 'completed' : 'failed', { turnId, lastError: projection.error || null })
       this.repositories.projections.updateTurnLink(link.clientCommandId, { turnId, status: projection.status })
+      if (projection.status === 'completed') await this.publishContinuationCards(binding, cards.slice(1), presentation, link.inboxId)
       if (projection.status === 'completed') await this.publishAssistantImages(binding, projection, presentation, link.inboxId)
     }
   }
@@ -305,12 +302,20 @@ export class ChannelProjectionService {
     return row?.id ? this.repositories.projections.getPresentation(row.id) : null
   }
 
-  private async legacyAssistantText(binding: CodyWorkChannelBinding, turnId: string): Promise<string> {
-    const snapshot = await this.conversations.historyCanonical(binding.workspaceId, binding.conversationId)
-    return snapshot.events
-      .filter(event => event.type === 'assistant.delta' && event.turnId === turnId)
-      .map(event => string(event.data.text))
-      .join('')
+  /** Deliver every Core-generated continuation through the same reply route as
+   * the initial card. Stable page keys make terminal reconciliation idempotent. */
+  private async publishContinuationCards(binding: CodyWorkChannelBinding, cards: FeishuCard[], presentation: ChannelPresentation, inboxId: string): Promise<void> {
+    if (!cards.length) return
+    const inbox = this.repositories.inbox.get(inboxId)
+    const source = inbox.message as typeof inbox.message & CodyWorkInboundMessage
+    const replyMessageId = source.replyMessageId || inbox.message.messageId
+    for (const [index, card] of cards.entries()) {
+      await this.hooks.enqueue(binding.accountId, {
+        kind: 'reply_card', targetId: replyMessageId,
+        payload: { card, replyInThread: binding.channelScope === 'topic' },
+        dedupeKey: `${presentation.id}:continuation:${index + 1}`, terminal: true,
+      })
+    }
   }
 
   private async publishAssistantImages(binding: CodyWorkChannelBinding, projection: ReturnType<typeof projectChannelTurn>, presentation: ChannelPresentation, inboxId: string): Promise<void> {
