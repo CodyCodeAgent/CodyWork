@@ -10,7 +10,10 @@ import type { WorkspaceRow } from '../db/index.js'
 import { getDemand } from './demands.js'
 
 const execFileAsync = promisify(execFile)
-const REQUIRED_CODEX_HOOKS = ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop'] as const
+// The reporter's Codex integration emits only these three lifecycle events.
+// Requiring generic Codex hooks here would present a healthy installation as
+// incomplete even though those extra events cannot produce report receipts.
+const REQUIRED_CODEX_HOOKS = ['PostToolUse', 'Stop', 'SubagentStop'] as const
 const MAX_LOG_BYTES_PER_SCAN = 128 * 1024 * 1024
 const MAX_QUEUE_RECORDS_PER_DIRECTORY = 10_000
 const MAX_RECENT_RECEIPTS = 120
@@ -86,7 +89,6 @@ interface AiReportServiceOptions {
   codexHome?: string
   reportHome?: string
   exportBin?: string
-  pendingBin?: string
   outboxBin?: string
 }
 
@@ -246,7 +248,6 @@ export class AiCodeReportService {
   readonly codexHome: string
   readonly reportHome: string
   private readonly exportBinOverride?: string
-  private readonly pendingBinOverride?: string
   private readonly outboxBinOverride?: string
   private manualAction: Promise<AiReportManualResult> | null = null
 
@@ -255,7 +256,6 @@ export class AiCodeReportService {
     this.codexHome = options.codexHome ?? process.env.CODYWORK_CODEX_HOME?.trim() ?? join(this.home, '.codex')
     this.reportHome = options.reportHome ?? process.env.CODYWORK_AI_REPORT_HOME?.trim() ?? join(this.home, '.ai-code-report')
     this.exportBinOverride = options.exportBin ?? process.env.CODYWORK_AI_REPORT_EXPORT_BIN?.trim()
-    this.pendingBinOverride = options.pendingBin ?? process.env.CODYWORK_AI_REPORT_PENDING_BIN?.trim()
     this.outboxBinOverride = options.outboxBin ?? process.env.CODYWORK_AI_REPORT_OUTBOX_BIN?.trim()
   }
 
@@ -266,7 +266,7 @@ export class AiCodeReportService {
     const hooks = REQUIRED_CODEX_HOOKS.filter(name => (commands.get(name) ?? []).some(isAiReportCommand))
     const missingHooks = REQUIRED_CODEX_HOOKS.filter(name => !hooks.includes(name))
     const exportAvailable = Boolean(this.exportBin())
-    const retryAvailable = Boolean(this.pendingBin() && this.outboxBin())
+    const retryAvailable = Boolean(this.outboxBin())
     if (hooks.length === 0) {
       return { state: 'not_installed', hooks: [], missingHooks: [...REQUIRED_CODEX_HOOKS], exportAvailable, retryAvailable, message: '当前机器没有启用 AI 代码上报 Hook；不影响 CodyWork 使用。' }
     }
@@ -362,11 +362,10 @@ export class AiCodeReportService {
   }
 
   async retry(): Promise<AiReportManualResult> {
-    const pending = this.pendingBin()
     const outbox = this.outboxBin()
-    if (!pending || !outbox) throw new Error('当前机器缺少 ai-report-pending 或 ai-report-outbox，无法重试。')
+    if (!outbox) throw new Error('当前机器缺少 ai-report-outbox，无法重试。')
     if (this.manualAction) throw new Error('已有代码上报操作正在执行，请稍后再试。')
-    const task = this.runRetry(pending, outbox)
+    const task = this.runRetry(outbox)
     this.manualAction = task
     try { return await task } finally { this.manualAction = null }
   }
@@ -519,10 +518,6 @@ export class AiCodeReportService {
     return findExecutable(this.exportBinOverride || 'ai-report-export')
   }
 
-  private pendingBin(): string | null {
-    return findExecutable(this.pendingBinOverride || 'ai-report-pending')
-  }
-
   private outboxBin(): string | null {
     return findExecutable(this.outboxBinOverride || 'ai-report-outbox')
   }
@@ -547,11 +542,10 @@ export class AiCodeReportService {
     return { action: 'backfill', processed, message: `已补扫 ${processed} 个会话；TEA 接收回执会异步更新。`, output: outputs.join('\n').slice(-12_000) }
   }
 
-  private async runRetry(pending: string, outbox: string): Promise<AiReportManualResult> {
-    const pendingResult = await execFileAsync(pending, ['drain', '--max', '200', '--rounds', '20'], { timeout: 5 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 })
-    const outboxResult = await execFileAsync(outbox, ['resend', '--max', '200', '--rounds', '20'], { timeout: 5 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 })
-    const output = [pendingResult.stdout, pendingResult.stderr, outboxResult.stdout, outboxResult.stderr].filter(Boolean).join('\n').trim()
-    return { action: 'retry', processed: 1, message: '已触发本机 pending/outbox 重试；回执会异步更新。', output: output.slice(-12_000) }
+  private async runRetry(outbox: string): Promise<AiReportManualResult> {
+    const outboxResult = await execFileAsync(outbox, ['resend'], { timeout: 5 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 })
+    const output = [outboxResult.stdout, outboxResult.stderr].filter(Boolean).join('\n').trim()
+    return { action: 'retry', processed: 1, message: '已触发本机 outbox 重试；回执会异步更新。', output: output.slice(-12_000) }
   }
 
   private findTranscripts(directory: string, sessionIds: Set<string>): Map<string, string> {
