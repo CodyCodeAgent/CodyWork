@@ -169,6 +169,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
     } as never, settings, {
       provider: () => ({}) as never,
       enqueue: async () => ({ id: makeId('outbox'), remoteMessageId: 'remote-card', status: 'sent' }) as never,
+      addReceiptReaction: vi.fn(async () => 'reaction-received'),
       openUrl: () => 'http://localhost/conversation',
     })
     try {
@@ -217,11 +218,11 @@ describe('CodyWork channel end-to-end pipeline', () => {
     const enqueue = vi.fn(async () => ({ id: makeId('outbox'), remoteMessageId: 'remote-card', status: 'sent' }) as never)
     const projection = new ChannelProjectionService(db, repositories, conversations, workspaces,
       { expireTurn: vi.fn(), publish: vi.fn(), resolve: vi.fn() } as never,
-      { enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true, openUrl: () => 'http://localhost/conversation' } as never,
+      { enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true, finishReceiptReaction: vi.fn(async () => undefined), openUrl: () => 'http://localhost/conversation' } as never,
     )
     const settings = new ChannelSessionSettingsService(db, repositories, conversations, workspaces)
     const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, projection, settings, {
-      provider: () => ({}) as never, enqueue, openUrl: () => 'http://localhost/conversation',
+      provider: () => ({}) as never, enqueue, addReceiptReaction: vi.fn(async () => 'reaction-received'), openUrl: () => 'http://localhost/conversation',
     } as never)
     const claimed = repositories.inbox.claim(inbound(account.id, 'TRAE_LEGACY_EXECUTE', 'ou-trae-recovery')).item
 

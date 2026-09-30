@@ -618,10 +618,11 @@ export class ConversationService implements ConversationCommandGateway {
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
     const handle = this.handleFor(row)
-    const state = this.runtime.sessionSnapshot?.(handle) ?? null
+    const runtime = this.runtimeFor(row)
+    const state = runtime.sessionSnapshot?.(handle) ?? null
     if (state?.activeTurnId || state?.pendingRequestCount) throw new Error('会话正在执行或等待确认，不能压缩上下文')
-    if (!this.runtime.compactConversation) throw new Error('当前 Runtime 不支持手动压缩上下文')
-    await this.runtime.compactConversation(handle)
+    if (!runtime.compactConversation) throw new Error('当前 Runtime 不支持手动压缩上下文')
+    await runtime.compactConversation(handle)
     this.audit(conversationId, 'conversation.compacted', { nativeId: row.native_id })
   }
 
