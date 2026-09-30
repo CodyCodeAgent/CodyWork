@@ -1,4 +1,5 @@
 import type { ConversationPermissionMode } from '../db/index.js'
+import type { RuntimeSubmitMode } from '../runtime/protocol.js'
 
 /** The source that admitted a command into the shared native Codex Thread. */
 export type ConversationCommandOrigin =
@@ -33,7 +34,7 @@ export type ConversationCommand = {
   conversationId: string
   origin: ConversationCommandOrigin
   prompt: string
-  submitMode?: 'queue' | 'steer'
+  submitMode?: RuntimeSubmitMode
   executionProfile?: ConversationExecutionProfile
   settings?: ConversationCommandSettings
   localImages?: Array<{ path: string }>

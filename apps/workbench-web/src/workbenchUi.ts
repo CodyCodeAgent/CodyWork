@@ -4,7 +4,7 @@ import type { ConversationState } from '@codycodeagent/cody-web-core/conversatio
 export type HistoryMode = 'push' | 'replace' | 'none'
 export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings'
 export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions' | 'feishu' | 'smart-notifications'
-export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; conversationId: string | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
+export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; conversationId: string | null; filePath: string | null; fileLine: number | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
 
 export function skillSourceLabel(source: WorkspaceSkill['source'] | ComposerSkillSource): string {
@@ -68,6 +68,11 @@ export function canDeleteConversation(conversation: Conversation, total: number)
 export function deleteConversationTitle(conversation: Conversation, total: number): string {
   if (conversation.status === 'running' || conversation.status === 'awaiting_approval') return '执行中或待确认的会话不能删除'
   return conversation.scope === 'demand' && total <= 1 ? '每个 Demand 至少保留一个会话' : '删除会话'
+}
+
+/** Keeps Runtime migration extensible: every registered Runtime except the source is a target. */
+export function migrationRuntimeOptions<T extends { value: string }>(runtimes: T[], sourceRuntime: string | null | undefined): T[] {
+  return runtimes.filter(runtime => runtime.value !== sourceRuntime)
 }
 
 export function demandStatusLabel(status: Demand['status']): string {
@@ -141,7 +146,12 @@ export function parseWorkbenchRoute(search: string): WorkbenchRoute {
   const page: WorkbenchStaticPage = view === 'demands' || view === 'knowledge' || view === 'skills' || view === 'settings' ? view : 'dashboard'
   const section = params.get('settings')
   const settingsSection: WorkbenchSettingsSection = section === 'runtime' || section === 'quick-actions' || section === 'feishu' || section === 'smart-notifications' ? section : 'overview'
-  return { workspaceId: params.get('workspace'), demandId: params.get('demand'), conversationId: params.get('conversation'), page, settingsSection }
+  const fileLine = Number(params.get('line'))
+  return {
+    workspaceId: params.get('workspace'), demandId: params.get('demand'), conversationId: params.get('conversation'),
+    filePath: params.get('file'), fileLine: Number.isSafeInteger(fileLine) && fileLine > 0 ? fileLine : null,
+    page, settingsSection,
+  }
 }
 
 export function matchDemandRoute(demands: Demand[], id: string): Demand | undefined {

@@ -1,13 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
-import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from '../src/runtime/protocol.js'
+import { WORKBENCH_RUNTIME_PROTOCOL_VERSION, type RuntimeEvent } from '../src/runtime/protocol.js'
 import { CodyWorkCodexRuntime } from '../src/runtime/codex.js'
+import { CodyWorkTraeRuntime } from '../src/runtime/trae.js'
 import { CODY_WEB_CORE_VERSION } from '@codycodeagent/cody-web-core/runtime'
+import { createConversationState, reduceConversationEvents } from '@codycodeagent/cody-web-core/conversation'
 
 describe('generic runtime protocol', () => {
   it('normalizes context roots without treating them as a CodyWork sandbox', () => {
@@ -135,6 +137,12 @@ describe('generic runtime protocol', () => {
       source: 'vscode',
     })]))
     await expect(runtime.getComposerOptions(context)).resolves.toEqual({
+      provider: { type: 'codex', label: 'Codex' },
+      capabilities: {
+        modelSelection: true, reasoning: true, structuredSkills: true,
+        imageInput: true, nativeSessionList: true, planMode: true,
+        steer: true, append: false, questions: true, aiCodeReports: true,
+      },
       models: [{
         id: 'gpt-5.6-sol',
         label: 'GPT 5.6 Sol',
@@ -331,5 +339,138 @@ describe('generic runtime protocol', () => {
     await restartedRuntime.close()
     rmSync(root, { recursive: true, force: true })
     rmSync(appServerCwd, { recursive: true, force: true })
+  })
+
+  it('drives independent Trae ACP sessions without changing the Codex runtime contract', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-trae-adapter-'))
+    const fixture = fileURLToPath(new URL('./fixtures/trae-acp-runtime.mjs', import.meta.url))
+    const runtime = new CodyWorkTraeRuntime({ command: `${process.execPath} ${fixture}` })
+    const context = {
+      workspacePath: root, demandPath: root,
+      instructionBundle: { systemInstructions: 'CSR', sources: [], skills: [], sha256: 'instructions' },
+      effectivePolicy: { readableRoots: [root], writableRoots: [root], deniedRoots: [], shell: 'allowlist' as const, approval: 'workbench' as const, hash: 'policy' },
+    }
+    const first = await runtime.createConversation({ context })
+    const second = await runtime.createConversation({ context })
+    expect(first.nativeId).not.toBe(second.nativeId)
+    const [firstResult, secondResult] = await Promise.all([
+      runtime.sendTurn({ conversation: first, prompt: 'hello', settings: { model: 'Trae Fixture' } }),
+      runtime.sendTurn({ conversation: second, prompt: 'hello' }),
+    ])
+    expect(firstResult.finalText).toBe('TRAE_FIXTURE_OK')
+    expect(secondResult.events.map(event => event.type)).toEqual(expect.arrayContaining(['turn.started', 'tool.started', 'assistant.delta', 'assistant.completed', 'tool.completed', 'turn.completed']))
+    const firstTurnStarted = firstResult.events.find(event => event.type === 'turn.started')
+    const firstUserCompleted = firstResult.events.find(event => event.type === 'user.completed')
+    const firstTurnCompleted = firstResult.events.find(event => event.type === 'turn.completed')
+    const firstAssistantCompleted = firstResult.events.find(event => event.type === 'assistant.completed')
+    expect(firstTurnStarted).toMatchObject({ id: expect.any(String), threadId: first.nativeId, turnId: expect.any(String) })
+    expect(firstUserCompleted).toMatchObject({ id: expect.any(String), threadId: first.nativeId, turnId: firstTurnStarted?.turnId, itemId: firstTurnStarted?.turnId })
+    expect(firstTurnCompleted).toMatchObject({ id: expect.any(String), threadId: first.nativeId, turnId: firstTurnStarted?.turnId })
+    expect(firstAssistantCompleted).toMatchObject({ threadId: first.nativeId, turnId: firstTurnStarted?.turnId, data: { text: 'TRAE_FIXTURE_OK' } })
+    const browserCommandId = 'browser-command'
+    const browserTurn = runtime.submitTurn({ conversation: first, prompt: 'browser projection', clientCommandId: browserCommandId })
+    const browserResult = await browserTurn.completed
+    expect(browserResult.events.find(event => event.type === 'command.bound')).toMatchObject({
+      threadId: first.nativeId, turnId: browserCommandId, itemId: browserCommandId,
+      data: { clientCommandId: browserCommandId, nativeTurnId: browserCommandId },
+    })
+    const browserProjection = reduceConversationEvents(createConversationState(first.nativeId), [
+      {
+        id: `local-outbox:${browserCommandId}`,
+        type: 'user.completed',
+        threadId: first.nativeId,
+        itemId: browserCommandId,
+        atIso: new Date().toISOString(),
+        data: { text: 'browser projection', optimistic: true, localOutbox: 'queued' },
+      },
+      ...browserResult.events,
+    ])
+    expect(browserProjection.messages.find(message => message.id === `user:${browserCommandId}`)?.outbox).toBeUndefined()
+    const appendEvents: RuntimeEvent[] = []
+    const active = runtime.submitTurn({ conversation: first, prompt: 'LONG_RUNNING', onEvent: event => appendEvents.push(event) })
+    await vi.waitFor(() => expect(appendEvents.some(event => event.type === 'turn.started')).toBe(true))
+    const supplemental = runtime.submitTurn({ conversation: first, prompt: 'supplement the current task', mode: 'append', clientCommandId: 'append-command', onEvent: event => appendEvents.push(event) })
+    await expect(supplemental.started).resolves.toEqual({ threadId: first.nativeId, turnId: expect.any(String) })
+    await expect(supplemental.completed).resolves.toMatchObject({ conversation: first })
+    expect(appendEvents).toContainEqual(expect.objectContaining({ type: 'command.appended', itemId: 'append-command', data: { clientCommandId: 'append-command', delivery: 'acp_prompt' } }))
+    await expect(active.completed).resolves.toMatchObject({ conversation: first })
+
+    const fallbackEvents: RuntimeEvent[] = []
+    const activeForFallback = runtime.submitTurn({ conversation: first, prompt: 'LONG_RUNNING', onEvent: event => fallbackEvents.push(event) })
+    await vi.waitFor(() => expect(fallbackEvents.some(event => event.type === 'turn.started')).toBe(true))
+    const supplementalFallback = runtime.submitTurn({ conversation: first, prompt: 'REJECT_APPEND_ONCE', mode: 'append', clientCommandId: 'append-fallback', onEvent: event => fallbackEvents.push(event) })
+    await expect(supplementalFallback.completed).resolves.toMatchObject({ conversation: first })
+    expect(fallbackEvents).toContainEqual(expect.objectContaining({ type: 'command.requeued', itemId: 'append-fallback', data: expect.objectContaining({ reason: expect.stringContaining('已转入队列') }) }))
+    expect(fallbackEvents).toContainEqual(expect.objectContaining({ type: 'command.bound', itemId: 'append-fallback' }))
+    await expect(activeForFallback.completed).resolves.toMatchObject({ conversation: first })
+    const cancelledEvents: RuntimeEvent[] = []
+    const cancellable = runtime.submitTurn({ conversation: first, prompt: 'LONG_RUNNING', onEvent: event => cancelledEvents.push(event) })
+    await vi.waitFor(() => expect(cancelledEvents.some(event => event.type === 'turn.started')).toBe(true))
+    await expect(runtime.interrupt(first)).resolves.toEqual({ supported: true })
+    await expect(cancellable.completed).resolves.toMatchObject({ conversation: first })
+    expect(cancelledEvents.filter(event => event.type === 'turn.interrupted')).toHaveLength(1)
+    expect(cancelledEvents.some(event => event.type === 'turn.failed')).toBe(false)
+
+    const hungEvents: RuntimeEvent[] = []
+    const hung = runtime.submitTurn({ conversation: first, prompt: 'HANG_AFTER_CANCEL', onEvent: event => hungEvents.push(event) })
+    await vi.waitFor(() => expect(hungEvents.some(event => event.type === 'turn.started')).toBe(true))
+    await expect(runtime.interrupt(first)).resolves.toEqual({ supported: true })
+    await expect(hung.completed).resolves.toMatchObject({ conversation: first })
+    expect(hungEvents.filter(event => event.type === 'turn.interrupted')).toHaveLength(1)
+    expect(hungEvents.find(event => event.type === 'turn.interrupted')).toMatchObject({ data: { cause: 'cancel_timeout' } })
+    expect(hungEvents.some(event => event.type === 'turn.failed')).toBe(false)
+    await expect(runtime.resumeConversation({ conversationId: first.id, nativeId: first.nativeId, context })).resolves.toMatchObject({ id: first.id })
+    await expect(runtime.checkConnection()).resolves.toMatchObject({ runtimeVersion: 'traecli-acp', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION })
+    await expect(runtime.getComposerOptions(context)).resolves.toMatchObject({
+      provider: { type: 'trae', label: 'Trae ACP' },
+      capabilities: {
+        modelSelection: true, reasoning: false, structuredSkills: false,
+        imageInput: true, nativeSessionList: true, planMode: false,
+        steer: false, append: true, questions: false, aiCodeReports: true,
+      },
+      models: [expect.objectContaining({
+        id: 'trae-fixture', isDefault: true, supportedReasoningEfforts: [],
+        metadata: {
+          contextWindow: 272000, maxContextWindow: 800000, supportsMaxMode: true, loadPercent: 54,
+          weeklyQuota: { applies: true, isDepleted: false, usedPercent: 12, remainingPercent: 88, resetTime: 1791129599 },
+        },
+      })],
+    })
+    const rejectedEvents: Array<{ type: string; threadId: string; turnId?: string; itemId?: string }> = []
+    await expect(runtime.sendTurn({ conversation: first, prompt: 'invalid model', settings: { model: 'missing-model' }, onEvent: event => rejectedEvents.push(event) })).rejects.toThrow('当前 Trae ACP 不支持模型')
+    expect(rejectedEvents.map(event => event.type)).toEqual(expect.arrayContaining(['command.failed', 'turn.failed']))
+    const failedCommand = rejectedEvents.find(event => event.type === 'command.failed')
+    expect(failedCommand).toMatchObject({ threadId: first.nativeId, turnId: expect.any(String), itemId: expect.any(String) })
+    expect(failedCommand?.itemId).toBe(failedCommand?.turnId)
+    await expect(runtime.sendTurn({ conversation: first, prompt: 'no synthetic reasoning', settings: { reasoningEffort: 'medium' } })).rejects.toThrow('未提供推理程度配置')
+    await expect(runtime.sendTurn({ conversation: first, prompt: 'no synthetic plan', settings: { collaborationMode: 'plan' } })).rejects.toThrow('未提供 Plan 模式配置')
+    await expect(runtime.listNativeThreads({ context })).resolves.toEqual([expect.objectContaining({ nativeId: 'trae-saved-thread', preview: 'Trae saved session' })])
+    let approvalId = ''
+    const approvalEvents: RuntimeEvent[] = []
+    const approval = runtime.sendTurn({ conversation: first, prompt: 'APPROVAL', onEvent: event => {
+      approvalEvents.push(event)
+      if (event.type === 'approval.requested') approvalId = String(event.data.approvalId)
+    } })
+    await vi.waitFor(() => expect(approvalId).not.toBe(''))
+    await runtime.respondApproval(first, approvalId, 'allowed-once')
+    await expect(approval).resolves.toMatchObject({ finalText: 'TRAE_APPROVED' })
+    expect(approvalEvents.find(event => event.type === 'approval.resolved')).toMatchObject({
+      threadId: first.nativeId,
+      turnId: expect.any(String),
+      data: { approvalId, outcome: 'allowed-once', nativeOutcome: 'selected', optionId: 'allow-once' },
+    })
+    // The shared conversation reducer drives the approval card. Its pending
+    // list must settle as soon as the browser decision is accepted, before
+    // the native agent finishes its follow-up work.
+    expect(reduceConversationEvents(createConversationState(first.nativeId), approvalEvents).pendingRequests).toEqual([])
+    await expect(runtime.respondApproval(first, approvalId, 'allowed-once')).rejects.toThrow('待处理的 Trae 授权请求不存在')
+    await runtime.setPermission(first, 'yolo')
+    await expect(runtime.sendTurn({ conversation: first, prompt: 'APPROVAL' })).resolves.toMatchObject({ finalText: 'TRAE_APPROVED' })
+    await runtime.setPermission(first, 'read-only')
+    await expect(runtime.sendTurn({ conversation: first, prompt: 'APPROVAL' })).resolves.toMatchObject({ finalText: 'TRAE_REJECTED' })
+    const snapshot = await runtime.readConversationSnapshot({ conversationId: first.id, nativeId: first.nativeId, context })
+    expect(snapshot.events.some(event => event.type === 'assistant.delta')).toBe(true)
+    await runtime.close()
+    rmSync(root, { recursive: true, force: true })
   })
 })

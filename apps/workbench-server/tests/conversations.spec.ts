@@ -10,6 +10,11 @@ import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { ConversationService } from '../src/services/conversations.js'
 import { ConversationImageUploads } from '../src/services/imageUploads.js'
 import { startServer } from '../src/routes/index.js'
+import { createCodyWorkRuntimeRegistry } from '../src/runtime/registry.js'
+
+function runtimeRegistry(adapters: { codex: TestRuntimeAdapter; trae: TestRuntimeAdapter }) {
+  return createCodyWorkRuntimeRegistry('codex', adapters)
+}
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cody-conversations-'))
@@ -37,7 +42,8 @@ describe('conversation websocket control plane', () => {
     mkdirSync(baseline, { recursive: true })
     mkdirSync(join(root, 'worktrees', 'publish', 'services'), { recursive: true })
     const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
-    git(baseline, ['init', '-b', 'main'])
+    git(baseline, ['init'])
+    git(baseline, ['checkout', '-b', 'main'])
     git(baseline, ['config', 'user.email', 'test@example.com'])
     git(baseline, ['config', 'user.name', 'CodyWork Test'])
     writeFileSync(join(baseline, 'README.md'), '# baseline\n')
@@ -72,6 +78,256 @@ describe('conversation websocket control plane', () => {
 
     db.close()
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it('keeps each conversation on its stored runtime after the default changes', async () => {
+    class ProviderRuntime extends TestRuntimeAdapter {
+      readonly calls: string[] = []
+
+      override async createConversation(request: Parameters<TestRuntimeAdapter['createConversation']>[0]) {
+        this.calls.push(`create:${request.conversationId}`)
+        return super.createConversation(request)
+      }
+      override async resumeConversation(request: Parameters<TestRuntimeAdapter['resumeConversation']>[0]) {
+        this.calls.push(`resume:${request.conversationId}:${request.nativeId}`)
+        return super.resumeConversation(request)
+      }
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        this.calls.push(`send:${request.conversation.id}`)
+        return super.submitTurn(request)
+      }
+      override async renameConversation(conversation: Parameters<TestRuntimeAdapter['renameConversation']>[0], title: string) {
+        this.calls.push(`rename:${conversation.id}:${title}`)
+        return super.renameConversation(conversation, title)
+      }
+      override async interrupt(conversation: Parameters<TestRuntimeAdapter['interrupt']>[0]) {
+        this.calls.push(`interrupt:${conversation.id}`)
+        return super.interrupt(conversation)
+      }
+    }
+
+    const test = await fixture()
+    let defaultRuntime: 'codex' | 'trae' = 'codex'
+    const initialCodex = new ProviderRuntime()
+    const initialTrae = new ProviderRuntime()
+    const conversations = new ConversationService(test.db, runtimeRegistry({ codex: initialCodex, trae: initialTrae }), () => defaultRuntime)
+
+    const codexConversation = await conversations.create(test.workspaceId, test.demandId, 'Existing Codex')
+    defaultRuntime = 'trae'
+    const traeConversation = await conversations.create(test.workspaceId, test.demandId, 'New Trae')
+    expect(codexConversation.runtimeType).toBe('codex')
+    expect(traeConversation.runtimeType).toBe('trae')
+    expect(initialCodex.calls).toEqual([`create:${codexConversation.id}`])
+    expect(initialTrae.calls).toEqual([`create:${traeConversation.id}`])
+
+    // Simulate a service restart after the default has changed. Restoring and
+    // sending through the old row must still select Codex, not the new Trae
+    // default. The reverse must hold for the Trae row.
+    const restoredCodex = new ProviderRuntime()
+    const restoredTrae = new ProviderRuntime()
+    const restored = new ConversationService(test.db, runtimeRegistry({ codex: restoredCodex, trae: restoredTrae }), () => defaultRuntime)
+    await restored.history(test.workspaceId, codexConversation.id)
+    await restored.send(test.workspaceId, codexConversation.id, 'continue Codex')
+    await restored.rename(test.workspaceId, codexConversation.id, 'Codex renamed')
+    await restored.interrupt(test.workspaceId, codexConversation.id)
+    await restored.history(test.workspaceId, traeConversation.id)
+    await restored.send(test.workspaceId, traeConversation.id, 'continue Trae')
+
+    expect(restoredCodex.calls).toEqual(expect.arrayContaining([
+      `resume:${codexConversation.id}:${codexConversation.nativeId}`,
+      `send:${codexConversation.id}`,
+      `rename:${codexConversation.id}:Codex renamed`,
+      `interrupt:${codexConversation.id}`,
+    ]))
+    expect(restoredTrae.calls).toEqual(expect.arrayContaining([
+      `resume:${traeConversation.id}:${traeConversation.nativeId}`,
+      `send:${traeConversation.id}`,
+    ]))
+    expect(restoredCodex.calls).not.toEqual(expect.arrayContaining([`send:${traeConversation.id}`]))
+    expect(restoredTrae.calls).not.toEqual(expect.arrayContaining([`send:${codexConversation.id}`]))
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('uses the explicitly selected Runtime for create, list, and bind operations', async () => {
+    class TrackingRuntime extends TestRuntimeAdapter {
+      listCalls = 0
+      override async listNativeThreads(request: Parameters<TestRuntimeAdapter['listNativeThreads']>[0]) {
+        this.listCalls += 1
+        return super.listNativeThreads(request)
+      }
+    }
+
+    const test = await fixture()
+    const codex = new TrackingRuntime()
+    const trae = new TrackingRuntime()
+    const conversations = new ConversationService(test.db, runtimeRegistry({ codex, trae }), () => 'codex')
+
+    const created = await conversations.create(test.workspaceId, test.demandId, 'Direct Trae', 'browser', 'trae')
+    expect(created.runtimeType).toBe('trae')
+
+    await conversations.listAvailableNativeThreads(test.workspaceId, test.demandId, 'trae')
+    expect(trae.listCalls).toBe(1)
+    expect(codex.listCalls).toBe(0)
+
+    const bound = await conversations.bind(test.workspaceId, test.demandId, {
+      nativeId: 'thread-existing-123', runtimeType: 'trae', title: 'Trae history',
+    })
+    expect(bound.runtimeType).toBe('trae')
+    await expect(conversations.bind(test.workspaceId, test.demandId, {
+      nativeId: 'thread-existing-123', runtimeType: 'trae',
+    })).rejects.toThrow('已绑定到当前 Demand')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('migrates between Codex and Trae by preserving the source and sending a bounded no-execution handoff', async () => {
+    class CapturingRuntime extends TestRuntimeAdapter {
+      readonly prompts: string[] = []
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        this.prompts.push(request.prompt)
+        return super.submitTurn(request)
+      }
+    }
+
+    const test = await fixture()
+    const codex = new CapturingRuntime()
+    const trae = new CapturingRuntime()
+    const conversations = new ConversationService(test.db, runtimeRegistry({ codex, trae }), () => 'codex')
+    const source = await conversations.create(test.workspaceId, test.demandId, '跨底座上下文')
+    await conversations.send(test.workspaceId, source.id, '请保留这个关键结论')
+    await new Promise(resolve => setImmediate(resolve))
+
+    const migrated = await conversations.migrateRuntime(test.workspaceId, source.id, 'trae', true)
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(migrated).toMatchObject({
+      scope: source.scope,
+      demandId: source.demandId,
+      runtimeType: 'trae',
+      permissionMode: source.permissionMode,
+      title: '跨底座上下文 · 切换到 Trae',
+    })
+    expect(migrated.id).not.toBe(source.id)
+    expect(conversations.get(test.workspaceId, source.id)).toMatchObject({ runtimeType: 'codex', title: '跨底座上下文' })
+    expect(trae.prompts).toHaveLength(1)
+    expect(trae.prompts[0]).toContain('不要执行命令、修改文件、调用工具')
+    expect(trae.prompts[0]).toContain('请保留这个关键结论')
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'conversation.runtime_migration_started'").get(source.id)).toBeDefined()
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'conversation.runtime_migrated'").get(migrated.id)).toBeDefined()
+
+    await expect(conversations.migrateRuntime(test.workspaceId, source.id, 'codex', true)).rejects.toThrow('当前会话已使用目标 Runtime')
+    await expect(conversations.migrateRuntime(test.workspaceId, source.id, 'trae', false)).rejects.toThrow('切换 Runtime 需要明确确认')
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('recreates only a missing Trae ACP session after a service restart', async () => {
+    class ExpiredTraeRuntime extends TestRuntimeAdapter {
+      resumedNativeIds: string[] = []
+      createdConversationIds: string[] = []
+
+      override async resumeConversation(request: Parameters<TestRuntimeAdapter['resumeConversation']>[0]) {
+        this.resumedNativeIds.push(request.nativeId)
+        throw new Error('Resource not found')
+      }
+      override async createConversation(request: Parameters<TestRuntimeAdapter['createConversation']>[0]) {
+        this.createdConversationIds.push(request.conversationId ?? '')
+        const created = await super.createConversation(request)
+        return { ...created, nativeId: `recreated-${created.nativeId}` }
+      }
+    }
+
+    const test = await fixture()
+    const initialTrae = new TestRuntimeAdapter()
+    const initial = new ConversationService(test.db, runtimeRegistry({ codex: new TestRuntimeAdapter(), trae: initialTrae }), () => 'trae')
+    const conversation = await initial.create(test.workspaceId, test.demandId, 'Ephemeral Trae session')
+    const oldNativeId = conversation.nativeId
+
+    const recoveredTrae = new ExpiredTraeRuntime()
+    const recovered = new ConversationService(test.db, runtimeRegistry({ codex: new TestRuntimeAdapter(), trae: recoveredTrae }), () => 'trae')
+    await expect(recovered.history(test.workspaceId, conversation.id)).resolves.toEqual({ events: [], watermark: 0 })
+
+    const rebound = recovered.get(test.workspaceId, conversation.id)
+    expect(recoveredTrae.resumedNativeIds).toEqual([oldNativeId])
+    expect(recoveredTrae.createdConversationIds).toEqual([conversation.id])
+    expect(rebound.nativeId).not.toBe(oldNativeId)
+    expect(rebound.runtimeType).toBe('trae')
+    expect(test.db.db.prepare("SELECT action FROM conversation_audits WHERE conversation_id = ? AND action = 'conversation.trae_session_recreated'").get(conversation.id)).toBeDefined()
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('replays cached Trae UI events after a restart when ACP returns an empty snapshot', async () => {
+    class EmptySnapshotTraeRuntime extends TestRuntimeAdapter {
+      override async readConversationSnapshot() { return { events: [], watermark: 0 } }
+    }
+
+    const test = await fixture()
+    const initial = new ConversationService(test.db, runtimeRegistry({ codex: new TestRuntimeAdapter(), trae: new TestRuntimeAdapter() }), () => 'trae')
+    const conversation = await initial.create(test.workspaceId, test.demandId, 'Persistent Trae timeline')
+    await initial.send(test.workspaceId, conversation.id, 'remember this Trae response')
+    await new Promise(resolve => setImmediate(resolve))
+
+    const cachedCount = test.db.db.prepare('SELECT COUNT(*) AS count FROM trae_conversation_events WHERE conversation_id = ?')
+      .get(conversation.id) as { count: number }
+    expect(cachedCount.count).toBeGreaterThan(0)
+
+    // This adapter models ACP `session/load`: it resumes the native Session
+    // but cannot replay its former UI events. The service must hydrate from
+    // the Trae-only local cache instead.
+    const restarted = new ConversationService(test.db, runtimeRegistry({ codex: new TestRuntimeAdapter(), trae: new EmptySnapshotTraeRuntime() }), () => 'trae')
+    const history = await restarted.history(test.workspaceId, conversation.id)
+    expect(history.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'user.completed', data: expect.objectContaining({ text: 'remember this Trae response' }) }),
+      expect.objectContaining({ type: 'assistant.completed' }),
+      expect.objectContaining({ type: 'turn.completed' }),
+    ]))
+
+    // Keep a second row so product deletion is permitted, then prove that the
+    // cache stays local to the conversation and follows its FK cascade.
+    await restarted.create(test.workspaceId, test.demandId, 'Other Trae conversation')
+    await restarted.remove(test.workspaceId, conversation.id)
+    const afterDelete = test.db.db.prepare('SELECT COUNT(*) AS count FROM trae_conversation_events WHERE conversation_id = ?')
+      .get(conversation.id) as { count: number }
+    expect(afterDelete.count).toBe(0)
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('compacts Trae replay history into a handoff before clearing it locally', async () => {
+    const test = await fixture()
+    const runtime = new TestRuntimeAdapter()
+    const conversations = new ConversationService(test.db, runtimeRegistry({ codex: new TestRuntimeAdapter(), trae: runtime }), () => 'trae')
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Trae handoff cache')
+    await conversations.send(test.workspaceId, conversation.id, 'retain this context before cleaning')
+    await new Promise(resolve => setImmediate(resolve))
+
+    const before = conversations.traeCache(test.workspaceId, conversation.id)
+    expect(before).toMatchObject({ kind: 'trae' })
+    expect(before?.eventCount).toBeGreaterThan(3)
+    expect(before?.byteLength).toBeGreaterThan(0)
+
+    await expect(conversations.compactTraeCache(test.workspaceId, conversation.id, false)).rejects.toThrow('明确确认')
+    const compacted = await conversations.compactTraeCache(test.workspaceId, conversation.id, true)
+    expect(compacted).toMatchObject({ eventCount: 3, compactedAt: expect.any(String) })
+    const compactedHistory = await conversations.history(test.workspaceId, conversation.id)
+    expect(compactedHistory.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'user.completed', data: expect.objectContaining({ text: expect.stringContaining('交接摘要') }) }),
+      expect.objectContaining({ type: 'assistant.completed' }),
+    ]))
+
+    await expect(conversations.clearTraeCache(test.workspaceId, conversation.id, false)).rejects.toThrow('明确确认')
+    const cleared = await conversations.clearTraeCache(test.workspaceId, conversation.id, true)
+    expect(cleared).toMatchObject({ eventCount: 0, byteLength: 0 })
+    await expect(conversations.history(test.workspaceId, conversation.id)).resolves.toEqual({ events: [], watermark: 0 })
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
   })
 
   it('creates first-class Workspace sessions in YOLO and supports every native Codex permission mode', async () => {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ChannelInboundMessage, ChannelInboxItem } from '@codycodeagent/cody-web-core/channel'
 import { WorkbenchDb } from '../src/db/index.js'
 import { codyWorkConversationUrl, feishuProjectionBody } from '../src/services/channelBot.js'
-import { projectionCard } from '../src/services/channelFeishuRenderer.js'
+import { projectionCard, rewriteWorkspaceFileLinks } from '../src/services/channelFeishuRenderer.js'
 import { ChannelAccessService } from '../src/services/channelAccessService.js'
 import { ChannelAccountManager } from '../src/services/channelAccountManager.js'
 import { channelPrompt } from '../src/services/channelCommandAdapter.js'
@@ -37,7 +37,13 @@ function inbox(id: string, value: ChannelInboundMessage): ChannelInboxItem {
   return { id, message: value, conversationKey: 'feishu:account-1:private:chat-1:', status: 'received', createdAtIso: value.createdAtIso, updatedAtIso: value.createdAtIso }
 }
 
-function routerHarness(input: { message?: ChannelInboundMessage; account?: Record<string, unknown>; binding?: CodyWorkChannelBinding | null; profile?: Record<string, unknown> | null } = {}) {
+function routerHarness(input: {
+  message?: ChannelInboundMessage
+  account?: Record<string, unknown>
+  binding?: CodyWorkChannelBinding | null
+  profile?: Record<string, unknown> | null
+  conversation?: { id: string; runtimeType: 'codex' | 'trae' }
+} = {}) {
   const inbound = input.message ?? message()
   const claimed = inbox('inbox-1', inbound)
   const account = { id: 'account-1', enabled: true, allowAllUsers: true, allowAllConversations: false, allowedUserIds: [], allowedConversationIds: [], groupMentionMode: 'always', ...input.account }
@@ -47,6 +53,9 @@ function routerHarness(input: { message?: ChannelInboundMessage; account?: Recor
     getInbox: vi.fn(() => claimed),
     updateInbox: vi.fn((_id: string, status: string) => ({ ...claimed, status })), audit: vi.fn(),
     getBinding: vi.fn(() => input.binding ?? binding('binding-1')),
+    updateBindingConversation: vi.fn((_accountId: string, _bindingId: string, conversationId: string) => ({
+      ...(input.binding ?? binding('binding-1')), conversationId, model: '', reasoningEffort: '',
+    })),
     claimAction: vi.fn(() => ({ id: 'action-1', created: true, status: 'action_received' })), finishAction: vi.fn(),
   }
   const access = { request: vi.fn(), handleAction: vi.fn() }
@@ -58,8 +67,16 @@ function routerHarness(input: { message?: ChannelInboundMessage; account?: Recor
     submitInbox: vi.fn(), observe: vi.fn(), detachBindingObservation: vi.fn(),
     openUrl: vi.fn(() => ''), accountState: vi.fn(() => 'connected'), retryOutbox: vi.fn(), fail: vi.fn(),
   }
-  const router = new ChannelRouter(new ChannelRepositories(store as never), {} as never, access as never, requests as never, bindings as never, settings as never, hooks as never)
-  return { router, inbound, claimed, account, store, access, bindings, settings, hooks }
+  const conversations = {
+    get: vi.fn(() => input.conversation ?? { id: 'conversation-1', runtimeType: 'codex' }),
+    runtimeDescriptors: vi.fn(() => [
+      { id: 'codex', label: 'Codex' },
+      { id: 'trae', label: 'Trae ACP' },
+    ]),
+    migrateRuntime: vi.fn(),
+  }
+  const router = new ChannelRouter(new ChannelRepositories(store as never), conversations as never, access as never, requests as never, bindings as never, settings as never, hooks as never)
+  return { router, inbound, claimed, account, store, conversations, access, bindings, settings, hooks }
 }
 
 function findActionValue(value: unknown, action: string): Record<string, unknown> | null {
@@ -130,6 +147,16 @@ describe('CodyWork channel architecture and lifecycle', () => {
     expect(feishuProjectionBody({ threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true, revision: 1, assistantText: 'Done\n\n![OK](/safe/a.png)', assistantImages: ['/safe/a.png'], error: '' })).toBe('Done\n\n🖼️ OK')
   })
 
+  it('rewrites local Markdown links into validated CodyWork preview deep links', () => {
+    const result = rewriteWorkspaceFileLinks(
+      '[service.go](/data00/home/project/service.go#L42) · [guide](https://example.com/guide)',
+      'http://localhost:3001/?workspace=ws-1&demand=demand-1&conversation=conversation-1',
+    )
+    expect(result).toContain('file=%2Fdata00%2Fhome%2Fproject%2Fservice.go')
+    expect(result).toContain('line=42')
+    expect(result).toContain('[guide](https://example.com/guide)')
+  })
+
   it('does not render a waiting message after an empty turn has completed', () => {
     const card = projectionCard({
       threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true,
@@ -153,9 +180,25 @@ describe('CodyWork channel architecture and lifecycle', () => {
     expect(elements[0]).toMatchObject({ tag: 'markdown', content: '完成' })
     expect(elements.at(-1)).toMatchObject({
       tag: 'markdown',
-      content: '---\nCodyWork · AI Hub · 灵活返佣审批流调整\nGPT 6 Astra · 推理 高 · YOLO\n问题：build it',
+      content: '---\nCodyWork · Codex · AI Hub · 灵活返佣审批流调整\nGPT 6 Astra · 推理 高 · YOLO\n问题：build it',
     })
     expect(text).not.toContain('运行配置')
+  })
+
+  it('adds a model-picker action to live Feishu turn cards', () => {
+    const card = projectionCard({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'running', terminal: false,
+      revision: 1, assistantText: '', assistantImages: [], error: '',
+    }, 'build it', '', undefined, { bindingId: 'binding-1' })
+    expect(findActionValue(card, 'channel.model_picker')).toMatchObject({ bindingId: 'binding-1' })
+  })
+
+  it('adds a runtime-migration action to live Feishu turn cards', () => {
+    const card = projectionCard({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'running', terminal: false,
+      revision: 1, assistantText: '', assistantImages: [], error: '',
+    }, 'build it', '', undefined, { bindingId: 'binding-1', runtimePicker: true })
+    expect(findActionValue(card, 'channel.runtime_picker')).toMatchObject({ bindingId: 'binding-1' })
   })
 
   it('renders assistant pipe tables as native Feishu tables without losing CodyWork chrome', () => {
@@ -167,15 +210,17 @@ describe('CodyWork channel architecture and lifecycle', () => {
       permissionLabel: 'YOLO', workspaceName: 'AI Hub', demandName: '飞书表格',
     })
     const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements
-    expect(card).toMatchObject({ schema: '2.0', header: { template: 'green', title: { content: 'CodyWork · 已完成' } } })
+    expect(card).toMatchObject({ schema: '2.0', header: { template: 'green', title: { content: 'CodyWork · Codex · 已完成' } } })
     expect(elements.find(element => element.tag === 'table')).toMatchObject({
       columns: [{ display_name: '项目' }, { display_name: '状态' }],
       rows: [{ c0: 'Core', c1: '完成' }],
     })
-    expect(elements.find(element => element.tag === 'action')).toMatchObject({
-      actions: [{ tag: 'button', type: 'primary', url: 'https://work.example/demand/1' }],
+    expect(elements.find(element => element.tag === 'button')).toMatchObject({
+      type: 'primary',
+      behaviors: [{ type: 'open_url', default_url: 'https://work.example/demand/1' }],
     })
-    expect(JSON.stringify(elements.at(-1))).toContain('CodyWork · AI Hub · 飞书表格')
+    expect(JSON.stringify(card)).not.toContain('"tag":"action"')
+    expect(JSON.stringify(elements.at(-1))).toContain('CodyWork · Codex · AI Hub · 飞书表格')
   })
 
   it('opens a two-step /model picker and confirms the persisted selection', async () => {
@@ -204,6 +249,54 @@ describe('CodyWork channel architecture and lifecycle', () => {
     expect(test.settings.select).toHaveBeenCalledWith(currentBinding.id, currentBinding.ownerIdentity, model.id, 'medium')
     expect(JSON.stringify(test.hooks.enqueue.mock.calls.at(-1)?.[1])).toContain('模型已更新')
     expect(JSON.stringify(test.hooks.enqueue.mock.calls.at(-1)?.[1])).toContain('中')
+  })
+
+  it('opens the same model picker from the live-turn card action', async () => {
+    const currentBinding = binding('binding-1')
+    const test = routerHarness({ binding: currentBinding })
+    const model = { id: 'trae-fixture', label: 'Trae Fixture', description: '', isDefault: true, defaultReasoningEffort: '', supportedReasoningEfforts: [] }
+    test.settings.resolve.mockResolvedValue({
+      models: [model], model: model.id, modelLabel: model.label, reasoningEffort: '', reasoningLabel: '默认',
+      permissionLabel: 'YOLO', workspaceName: 'AI Hub', demandName: '需求开发',
+    })
+
+    const result = await test.router.onAction('account-1', { eventId: 'open-model-picker', actorId: currentBinding.ownerIdentity, remoteMessageId: 'turn-card', value: { action: 'channel.model_picker', bindingId: currentBinding.id } })
+    expect(JSON.stringify(result)).toContain('channel.model_select')
+    expect(JSON.stringify(result)).toContain('Trae Fixture')
+  })
+
+  it('opens a runtime picker through /runtime and migrates the Feishu binding to the new conversation', async () => {
+    const currentBinding = binding('binding-1')
+    const incoming = message('/runtime', 'runtime-command')
+    const test = routerHarness({ message: incoming, binding: currentBinding, conversation: { id: currentBinding.conversationId, runtimeType: 'codex' } })
+    const migrated = { id: 'conversation-trae', runtimeType: 'trae' }
+    test.conversations.migrateRuntime.mockResolvedValue(migrated)
+
+    await test.router.onMessage(incoming)
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls[0]?.[1])).toContain('channel.runtime_select')
+    expect(JSON.stringify(test.hooks.enqueue.mock.calls[0]?.[1])).toContain('Trae ACP')
+
+    const result = await test.router.onAction('account-1', {
+      eventId: 'runtime-select', actorId: currentBinding.ownerIdentity, remoteMessageId: 'runtime-card',
+      value: { action: 'channel.runtime_select', bindingId: currentBinding.id, targetRuntimeType: 'trae' },
+    })
+    expect(test.conversations.migrateRuntime).toHaveBeenCalledWith(currentBinding.workspaceId, currentBinding.conversationId, 'trae', true)
+    expect(test.hooks.detachBindingObservation).toHaveBeenCalledWith(currentBinding)
+    expect(test.store.updateBindingConversation).toHaveBeenCalledWith('account-1', currentBinding.id, migrated.id)
+    expect(test.hooks.observe).toHaveBeenCalledWith(expect.objectContaining({ conversationId: migrated.id, model: '', reasoningEffort: '' }))
+    expect(JSON.stringify(result)).toContain('Runtime 已切换')
+  })
+
+  it('rejects runtime migration from an actor who does not own the Feishu binding', async () => {
+    const currentBinding = binding('binding-1')
+    const test = routerHarness({ binding: currentBinding })
+    const result = await test.router.onAction('account-1', {
+      eventId: 'runtime-denied', actorId: 'ou_not_owner', remoteMessageId: 'runtime-card',
+      value: { action: 'channel.runtime_select', bindingId: currentBinding.id, targetRuntimeType: 'trae' },
+    })
+    expect(result).toMatchObject({ toast: { type: 'error' } })
+    expect(test.conversations.migrateRuntime).not.toHaveBeenCalled()
+    expect(test.store.updateBindingConversation).not.toHaveBeenCalled()
   })
 
   it('routes unauthorized private traffic to access approval, not Codex', async () => {

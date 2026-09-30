@@ -61,6 +61,12 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
 
   async getComposerOptions() {
     return {
+      provider: { type: 'codex', label: 'Codex' },
+      capabilities: {
+        modelSelection: true, reasoning: true, structuredSkills: true,
+        imageInput: true, nativeSessionList: true, planMode: false,
+        steer: true, append: false, questions: true, aiCodeReports: true,
+      },
       models: [{
         id: 'gpt-test', label: 'GPT Test', description: 'deterministic test model', isDefault: true,
         defaultReasoningEffort: 'high' as const, supportedReasoningEfforts: ['medium', 'high'] as Array<'medium' | 'high'>,
@@ -118,7 +124,7 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     emit('command.queued', { clientCommandId, text: request.prompt }, { native: false, turnId: '', itemId: clientCommandId })
     emit('command.bound', { clientCommandId, nativeTurnId: turnId }, { native: false, itemId: clientCommandId })
     const completed = Promise.resolve().then(() => {
-      emit('user.completed', { text: request.prompt, ...(request.localImages?.length ? { images: request.localImages.map(image => image.path) } : {}) })
+      emit('user.completed', { text: request.prompt, ...(request.localImages?.length ? { images: request.localImages.map(image => image.path) } : {}) }, { itemId: clientCommandId })
       emit('turn.started', { prompt: request.prompt })
       emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
       const context = this.contexts.get(request.conversation.id)

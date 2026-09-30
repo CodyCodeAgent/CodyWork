@@ -30,12 +30,21 @@ export interface AiReportCapability {
   exportAvailable: boolean
   retryAvailable: boolean
   message: string
+  sources: AiReportCapabilitySource[]
+}
+
+export interface AiReportCapabilitySource {
+  id: 'codex' | 'trae'
+  label: string
+  state: AiReportCapabilityState
+  message: string
 }
 
 export interface AiReportConversationSummary {
   conversationId: string
   nativeSessionId: string
   title: string
+  runtimeType: string
   acceptedEvents: number
   acceptedCodeEvents: number
   additions: number
@@ -52,10 +61,20 @@ export interface AiReportReceiptView {
   model: string
   filePath: string
   status: string
+  eventCount: number
   additions: number
   deletions: number
   eventTime: string
   receivedAt: string
+}
+
+export interface AiReportWorktreeChanges {
+  available: boolean
+  additions: number
+  deletions: number
+  repositoriesChecked: number
+  repositoriesTotal: number
+  note: string
 }
 
 export interface AiReportDemandSummary {
@@ -66,8 +85,10 @@ export interface AiReportDemandSummary {
   additions: number
   deletions: number
   netLines: number
+  lineStatsAvailable: boolean
   effectiveLines: number | null
   effectiveLinesNote: string
+  worktreeChanges: AiReportWorktreeChanges
   pending: number
   retrying: number
   lastSuccessAt: string | null
@@ -88,6 +109,7 @@ interface AiReportServiceOptions {
   home?: string
   codexHome?: string
   reportHome?: string
+  traeReportHome?: string
   exportBin?: string
   outboxBin?: string
 }
@@ -96,6 +118,7 @@ interface DemandConversationRow {
   id: string
   native_id: string
   title: string
+  runtime_type: string
 }
 
 interface DemandRepositoryRow {
@@ -114,6 +137,10 @@ interface ReporterQueueRecord {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+function asPositiveInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 1
 }
 
 function asObject(value: unknown): JsonRecord | null {
@@ -193,6 +220,10 @@ function parseReporterLogLine(line: string): JsonRecord | null {
   try { return asObject(JSON.parse(raw)) } catch { return null }
 }
 
+function parseJsonLogLine(line: string): JsonRecord | null {
+  try { return asObject(JSON.parse(line)) } catch { return null }
+}
+
 function sessionIdFromQueueRecord(record: ReporterQueueRecord): string {
   return asString(record.session_id)
     || asString(record.params?.session_id)
@@ -231,6 +262,18 @@ function parseGitDiffAddedLines(diff: string): Map<string, Map<string, number>> 
   return result
 }
 
+function gitNumstat(diff: string): { additions: number; deletions: number } {
+  let additions = 0
+  let deletions = 0
+  for (const line of diff.split(/\r?\n/u)) {
+    const [added, deleted] = line.split('\t', 3)
+    if (!/^\d+$/u.test(added ?? '') || !/^\d+$/u.test(deleted ?? '')) continue
+    additions += Number(added)
+    deletions += Number(deleted)
+  }
+  return { additions, deletions }
+}
+
 function normalizeRepoRelativePath(filePath: string, repository: DemandRepositoryRow, diffFiles: Set<string>): string | null {
   if (!filePath || filePath === '(unknown)') return null
   const normalized = filePath.replaceAll('\\', '/')
@@ -247,6 +290,7 @@ export class AiCodeReportService {
   readonly home: string
   readonly codexHome: string
   readonly reportHome: string
+  readonly traeReportHome: string
   private readonly exportBinOverride?: string
   private readonly outboxBinOverride?: string
   private manualAction: Promise<AiReportManualResult> | null = null
@@ -255,11 +299,32 @@ export class AiCodeReportService {
     this.home = options.home ?? process.env.CODYWORK_AI_REPORT_USER_HOME?.trim() ?? homedir()
     this.codexHome = options.codexHome ?? process.env.CODYWORK_CODEX_HOME?.trim() ?? join(this.home, '.codex')
     this.reportHome = options.reportHome ?? process.env.CODYWORK_AI_REPORT_HOME?.trim() ?? join(this.home, '.ai-code-report')
+    this.traeReportHome = options.traeReportHome ?? process.env.CODYWORK_TRAE_AI_REPORT_HOME?.trim() ?? process.env.AI_CONTRIBUTION_LOG_DIR?.trim() ?? join(this.home, '.trae', 'hooks', 'ai-contribution-v2')
     this.exportBinOverride = options.exportBin ?? process.env.CODYWORK_AI_REPORT_EXPORT_BIN?.trim()
     this.outboxBinOverride = options.outboxBin ?? process.env.CODYWORK_AI_REPORT_OUTBOX_BIN?.trim()
   }
 
   capability(): AiReportCapability {
+    const codex = this.codexCapability()
+    const trae = this.traeCapability()
+    const available = [codex, trae].filter(source => source.state === 'ready')
+    const partial = [codex, trae].some(source => source.state === 'partial' || source.state === 'unavailable')
+    const state: AiReportCapabilityState = available.length > 0 ? 'ready' : partial ? 'partial' : 'not_installed'
+    const message = available.length > 0
+      ? `${available.map(source => source.label).join('、')}上报回执可读取；CodyWork 不保存代码正文。`
+      : '当前机器未发现可读取的 AI 代码上报回执；不影响 CodyWork 使用。'
+    return {
+      state,
+      hooks: codex.state === 'not_installed' ? [] : [...REQUIRED_CODEX_HOOKS],
+      missingHooks: codex.state === 'partial' ? [...REQUIRED_CODEX_HOOKS] : [],
+      exportAvailable: codex.exportAvailable,
+      retryAvailable: codex.retryAvailable,
+      message,
+      sources: [codex, trae],
+    }
+  }
+
+  private codexCapability(): AiReportCapabilitySource & { hooks: string[]; missingHooks: string[]; exportAvailable: boolean; retryAvailable: boolean } {
     const configPath = join(this.codexHome, 'hooks.json')
     let commands = new Map<string, string[]>()
     try { commands = hookCommands(JSON.parse(readFileSync(configPath, 'utf8'))) } catch { /* optional capability */ }
@@ -268,15 +333,21 @@ export class AiCodeReportService {
     const exportAvailable = Boolean(this.exportBin())
     const retryAvailable = Boolean(this.outboxBin())
     if (hooks.length === 0) {
-      return { state: 'not_installed', hooks: [], missingHooks: [...REQUIRED_CODEX_HOOKS], exportAvailable, retryAvailable, message: '当前机器没有启用 AI 代码上报 Hook；不影响 CodyWork 使用。' }
+      return { id: 'codex', label: 'Codex Hook', state: 'not_installed', hooks: [], missingHooks: [...REQUIRED_CODEX_HOOKS], exportAvailable, retryAvailable, message: '未发现 Codex 上报 Hook。' }
     }
     if (missingHooks.length > 0) {
-      return { state: 'partial', hooks, missingHooks, exportAvailable, retryAvailable, message: `上报 Hook 不完整，缺少 ${missingHooks.join('、')}；部分命令行修改可能无法采集。` }
+      return { id: 'codex', label: 'Codex Hook', state: 'partial', hooks, missingHooks, exportAvailable, retryAvailable, message: `Codex Hook 不完整，缺少 ${missingHooks.join('、')}。` }
     }
     if (!exportAvailable) {
-      return { state: 'unavailable', hooks, missingHooks: [], exportAvailable, retryAvailable, message: '上报 Hook 已配置，但本机缺少手动补报命令。自动上报不受影响。' }
+      return { id: 'codex', label: 'Codex Hook', state: 'unavailable', hooks, missingHooks: [], exportAvailable, retryAvailable, message: 'Codex Hook 已配置，但缺少手动补扫命令。' }
     }
-    return { state: 'ready', hooks, missingHooks: [], exportAvailable, retryAvailable, message: '完整 Hook 已启用；CodyWork 只读取本地回执和派生统计。' }
+    return { id: 'codex', label: 'Codex Hook', state: 'ready', hooks, missingHooks: [], exportAvailable, retryAvailable, message: 'Codex Hook 回执可读取。' }
+  }
+
+  private traeCapability(): AiReportCapabilitySource {
+    const reportLog = join(this.traeReportHome, 'reports.jsonl')
+    if (!existsSync(reportLog)) return { id: 'trae', label: 'TraeX AI Contribution', state: 'not_installed', message: '未发现 TraeX ai-contribution 回执。' }
+    return { id: 'trae', label: 'TraeX AI Contribution', state: 'ready', message: 'TraeX ai-contribution 生产回执可读取。' }
   }
 
   summary(workspace: WorkspaceRow, demandId: string): AiReportDemandSummary {
@@ -288,18 +359,25 @@ export class AiCodeReportService {
     const nativeIds = new Set(conversations.map(item => item.native_id))
     const receiptRows = nativeIds.size === 0 ? [] : this.receiptsForSessions([...nativeIds])
     const successful = receiptRows.filter(row => row.report_status === 'ok' && row.event_type !== 'dev_agent_trace')
-    const codeRows = successful.filter(row => row.event_type === 'dev_agent_tool_call' && row.additions + row.deletions > 0)
+    const codeRows = successful.filter(row => (
+      (row.event_type === 'dev_agent_tool_call' && row.additions + row.deletions > 0)
+      || row.event_type === 'ai_contribution_delivery'
+    ))
     const queue = this.queueCounts(nativeIds)
     const conversationByNativeId = new Map(conversations.map(item => [item.native_id, item]))
     const byConversation = conversations.map(conversation => {
       const rows = successful.filter(row => row.native_session_id === conversation.native_id)
-      const code = rows.filter(row => row.event_type === 'dev_agent_tool_call' && row.additions + row.deletions > 0)
+      const code = rows.filter(row => (
+        (row.event_type === 'dev_agent_tool_call' && row.additions + row.deletions > 0)
+        || row.event_type === 'ai_contribution_delivery'
+      ))
       return {
         conversationId: conversation.id,
         nativeSessionId: conversation.native_id,
         title: conversation.title,
-        acceptedEvents: rows.length,
-        acceptedCodeEvents: code.length,
+        runtimeType: conversation.runtime_type,
+        acceptedEvents: rows.reduce((sum, row) => sum + row.event_count, 0),
+        acceptedCodeEvents: code.reduce((sum, row) => sum + row.event_count, 0),
         additions: code.reduce((sum, row) => sum + row.additions, 0),
         deletions: code.reduce((sum, row) => sum + row.deletions, 0),
         lastSuccessAt: rows.map(row => row.received_at).sort().at(-1) ?? null,
@@ -308,6 +386,7 @@ export class AiCodeReportService {
     const additions = codeRows.reduce((sum, row) => sum + row.additions, 0)
     const deletions = codeRows.reduce((sum, row) => sum + row.deletions, 0)
     const effective = this.effectiveLines(demandId, codeRows)
+    const worktreeChanges = this.worktreeChanges(demandId)
     const recent = successful.slice(0, MAX_RECENT_RECEIPTS).map(row => {
       const conversation = conversationByNativeId.get(row.native_session_id)
       return {
@@ -319,12 +398,14 @@ export class AiCodeReportService {
         model: row.model,
         filePath: relativeDisplayPath(row.file_path),
         status: row.report_status,
+        eventCount: row.event_count,
         additions: row.additions,
         deletions: row.deletions,
         eventTime: row.event_time,
         receivedAt: row.received_at,
       }
     })
+    const lineStatsAvailable = codeRows.some(row => row.event_type === 'dev_agent_tool_call' && row.additions + row.deletions > 0)
     let state: AiReportState = successful.length > 0 ? 'healthy' : 'empty'
     if (capability.state === 'not_installed') state = 'not_installed'
     else if (queue.retrying > 0) state = 'retrying'
@@ -333,13 +414,15 @@ export class AiCodeReportService {
     return {
       state,
       capability,
-      acceptedEvents: successful.length,
-      acceptedCodeEvents: codeRows.length,
+      acceptedEvents: successful.reduce((sum, row) => sum + row.event_count, 0),
+      acceptedCodeEvents: codeRows.reduce((sum, row) => sum + row.event_count, 0),
       additions,
       deletions,
       netLines: additions - deletions,
+      lineStatsAvailable,
       effectiveLines: effective.lines,
       effectiveLinesNote: effective.note,
+      worktreeChanges,
       pending: queue.pending,
       retrying: queue.retrying,
       lastSuccessAt: successful.map(row => row.received_at).sort().at(-1) ?? null,
@@ -356,6 +439,7 @@ export class AiCodeReportService {
     if (!executable) throw new Error('当前机器未安装 ai-report-export，无法手动补报。')
     if (this.manualAction) throw new Error('已有代码上报操作正在执行，请稍后再试。')
     const conversations = this.demandConversations(workspace.id, demandId)
+      .filter(conversation => conversation.runtime_type === 'codex')
     const task = this.runBackfill(executable, conversations)
     this.manualAction = task
     try { return await task } finally { this.manualAction = null }
@@ -371,8 +455,15 @@ export class AiCodeReportService {
   }
 
   private demandConversations(workspaceId: string, demandId: string): DemandConversationRow[] {
-    return this.database.db.prepare("SELECT id, native_id, title FROM conversations WHERE workspace_id = ? AND demand_id = ? AND scope = 'demand' ORDER BY created_at")
+    return this.database.db.prepare("SELECT id, native_id, title, runtime_type FROM conversations WHERE workspace_id = ? AND demand_id = ? AND scope = 'demand' ORDER BY created_at")
       .all(workspaceId, demandId) as unknown as DemandConversationRow[]
+  }
+
+  private demandRepositories(demandId: string): DemandRepositoryRow[] {
+    return this.database.db.prepare(`SELECT repositories.id, repositories.name, demand_repositories.worktree_path, demand_repositories.base_commit
+      FROM demand_repositories JOIN repositories ON repositories.id = demand_repositories.repository_id
+      WHERE demand_repositories.demand_id = ? ORDER BY repositories.name`)
+      .all(demandId) as unknown as DemandRepositoryRow[]
   }
 
   private receiptsForSessions(sessionIds: string[]): AiReportReceiptRow[] {
@@ -382,12 +473,21 @@ export class AiCodeReportService {
   }
 
   private ingestReceipts(): void {
-    if (!existsSync(this.reportHome)) return
-    const files = readdirSync(this.reportHome).filter(name => /^tea-reporter-events-\d{4}-\d{2}-\d{2}\.log$/u.test(name)).sort()
-    for (const name of files) this.ingestLogFile(join(this.reportHome, name))
+    if (existsSync(this.reportHome)) {
+      const files = readdirSync(this.reportHome).filter(name => /^tea-reporter-events-\d{4}-\d{2}-\d{2}\.log$/u.test(name)).sort()
+      for (const name of files) this.ingestLogFile(join(this.reportHome, name), parseReporterLogLine, payload => {
+        if (payload.phase === 'report_result') this.upsertReceipt(payload)
+      })
+    }
+    if (existsSync(this.traeReportHome)) {
+      for (const name of ['reports.jsonl.1', 'reports.jsonl']) {
+        const path = join(this.traeReportHome, name)
+        if (existsSync(path)) this.ingestLogFile(path, parseJsonLogLine, payload => this.upsertTraeReceipt(payload))
+      }
+    }
   }
 
-  private ingestLogFile(path: string): void {
+  private ingestLogFile(path: string, parseLine: (line: string) => JsonRecord | null, consume: (payload: JsonRecord) => void): void {
     const stat = statSync(path)
     const inode = String(stat.ino)
     const cursor = this.database.db.prepare('SELECT inode, byte_offset FROM ai_report_log_cursors WHERE path = ?').get(path) as { inode: string; byte_offset: number } | undefined
@@ -406,8 +506,8 @@ export class AiCodeReportService {
     this.database.db.exec('BEGIN IMMEDIATE')
     try {
       for (const line of chunk.split('\n')) {
-        const payload = parseReporterLogLine(line)
-        if (payload?.phase === 'report_result') this.upsertReceipt(payload)
+        const payload = parseLine(line)
+        if (payload) consume(payload)
       }
       this.database.db.prepare(`INSERT INTO ai_report_log_cursors (path, inode, byte_offset, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET inode = excluded.inode, byte_offset = excluded.byte_offset, updated_at = excluded.updated_at`)
@@ -430,22 +530,54 @@ export class AiCodeReportService {
     const eventTime = asString(payload.event_time) || asString(payload.timestamp) || receivedAt
     this.database.db.prepare(`INSERT INTO ai_report_receipts (
       delivery_id, native_session_id, event_type, tool_name, source, model, user_id, file_path,
-      report_status, capture_status, capture_reason, additions, deletions, added_line_hashes_json,
+      report_status, capture_status, capture_reason, event_count, additions, deletions, added_line_hashes_json,
       event_time, received_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(delivery_id) DO UPDATE SET
       native_session_id = excluded.native_session_id, event_type = excluded.event_type,
       tool_name = excluded.tool_name, source = excluded.source, model = excluded.model,
       user_id = excluded.user_id, file_path = excluded.file_path, report_status = excluded.report_status,
-      capture_status = excluded.capture_status, capture_reason = excluded.capture_reason,
+      capture_status = excluded.capture_status, capture_reason = excluded.capture_reason, event_count = excluded.event_count,
       additions = excluded.additions, deletions = excluded.deletions,
       added_line_hashes_json = excluded.added_line_hashes_json, event_time = excluded.event_time,
       received_at = excluded.received_at, updated_at = excluded.updated_at`)
       .run(
         deliveryId, nativeSessionId, asString(payload.event), asString(payload.name), asString(payload.source),
         asString(payload.model) || asString(payload.model_name), asString(payload.user_unique_id) || asString(payload.user),
-        asString(payload.file_path), asString(payload.report_status), asString(payload.capture_status), asString(payload.capture_reason),
+        asString(payload.file_path), asString(payload.report_status), asString(payload.capture_status), asString(payload.capture_reason), 1,
         stats.additions, stats.deletions, JSON.stringify(stats.addedLineHashes), eventTime, receivedAt, nowIso(),
+      )
+  }
+
+  /**
+   * TraeX owns its reporting queue and only keeps delivery metadata after a
+   * successful production send. Import that bounded receipt, never its code
+   * payload or plugin queue records.
+   */
+  private upsertTraeReceipt(payload: JsonRecord): void {
+    if (
+      asString(payload.event) !== 'ai_contribution_delivery'
+      || asString(payload.transport) !== 'mcs_production'
+      || asString(payload.status) !== 'accepted'
+      || payload.httpStatus !== 200
+      || payload.responseCode !== 0
+    ) return
+    const batchId = asString(payload.batchId)
+    const nativeSessionId = asString(payload.sessionId)
+    if (!batchId || !nativeSessionId) return
+    const receivedAt = asString(payload.ts) || asString(payload.timestamp) || nowIso()
+    const eventTime = asString(payload.eventTime) || receivedAt
+    this.database.db.prepare(`INSERT INTO ai_report_receipts (
+      delivery_id, native_session_id, event_type, tool_name, source, model, user_id, file_path,
+      report_status, capture_status, capture_reason, event_count, additions, deletions, added_line_hashes_json,
+      event_time, received_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, '', '', 'ok', 'production_accepted', '', ?, 0, 0, '[]', ?, ?, ?)
+    ON CONFLICT(delivery_id) DO UPDATE SET
+      native_session_id = excluded.native_session_id, event_count = excluded.event_count,
+      event_time = excluded.event_time, received_at = excluded.received_at, updated_at = excluded.updated_at`)
+      .run(
+        `traex:${batchId}`, nativeSessionId, 'ai_contribution_delivery', 'TraeX ai-contribution',
+        'traex_ai_contribution', 'Trae ACP', asPositiveInteger(payload.count), eventTime, receivedAt, nowIso(),
       )
   }
 
@@ -473,10 +605,11 @@ export class AiCodeReportService {
 
   private effectiveLines(demandId: string, receipts: AiReportReceiptRow[]): { lines: number | null; note: string } {
     if (receipts.length === 0) return { lines: 0, note: '当前没有已接收的代码 patch。' }
-    const repositories = this.database.db.prepare(`SELECT repositories.id, repositories.name, demand_repositories.worktree_path, demand_repositories.base_commit
-      FROM demand_repositories JOIN repositories ON repositories.id = demand_repositories.repository_id
-      WHERE demand_repositories.demand_id = ? ORDER BY repositories.name`)
-      .all(demandId) as unknown as DemandRepositoryRow[]
+    const patchReceipts = receipts.filter(receipt => receipt.event_type === 'dev_agent_tool_call' && receipt.additions + receipt.deletions > 0)
+    if (patchReceipts.length === 0) {
+      return { lines: null, note: 'TraeX 生产回执仅保留代码事件数量，不保留 patch 行级信息。' }
+    }
+    const repositories = this.demandRepositories(demandId)
     if (repositories.length === 0) return { lines: null, note: '需求没有可用于核对的 Git Worktree。' }
     const states: Array<{ repository: DemandRepositoryRow; current: Map<string, Map<string, number>>; diffFiles: Set<string> }> = []
     for (const repository of repositories) {
@@ -488,7 +621,7 @@ export class AiCodeReportService {
     }
     if (states.length === 0) return { lines: null, note: '无法读取 Worktree Git diff，暂不能计算当前有效行数。' }
     const reportedByRepository = new Map<string, Map<string, Map<string, number>>>()
-    for (const receipt of receipts) {
+    for (const receipt of patchReceipts) {
       const candidates = states.flatMap(state => {
         const relativePath = normalizeRepoRelativePath(receipt.file_path, state.repository, state.diffFiles)
         return relativePath ? [{ state, relativePath }] : []
@@ -511,7 +644,44 @@ export class AiCodeReportService {
       for (const [file, reported] of files) total += countIntersection(reported, state.current.get(file) ?? new Map())
     }
     const qualifier = states.length < repositories.length ? `；${repositories.length - states.length} 个 Repo 暂时无法核对` : ''
-    return { lines: total, note: `按 TEA 已接收 patch 与需求基线 diff 的非空行交集计算${qualifier}。` }
+    const traeOnlyCount = receipts.filter(receipt => receipt.source === 'traex_ai_contribution').reduce((sum, receipt) => sum + receipt.event_count, 0)
+    const traeNote = traeOnlyCount > 0 ? `；另有 ${traeOnlyCount} 条 TraeX 代码事件不含 patch 行级信息` : ''
+    return { lines: total, note: `按 TEA 已接收 patch 与需求基线 diff 的非空行交集计算${qualifier}${traeNote}。` }
+  }
+
+  /**
+   * A transparent workspace-wide metric for Runtimes whose production receipt
+   * intentionally omits patch text. It is never presented as AI attribution.
+   */
+  private worktreeChanges(demandId: string): AiReportWorktreeChanges {
+    const repositories = this.demandRepositories(demandId)
+    if (repositories.length === 0) {
+      return { available: false, additions: 0, deletions: 0, repositoriesChecked: 0, repositoriesTotal: 0, note: '需求没有可读取的 Git Worktree。' }
+    }
+    let additions = 0
+    let deletions = 0
+    let repositoriesChecked = 0
+    for (const repository of repositories) {
+      try {
+        const { stdout } = execFileSyncSafe('git', ['-C', repository.worktree_path, 'diff', '--numstat', '--no-renames', repository.base_commit, '--', '.'])
+        const stats = gitNumstat(stdout)
+        additions += stats.additions
+        deletions += stats.deletions
+        repositoriesChecked += 1
+      } catch { /* a missing or malformed worktree must not hide other repositories */ }
+    }
+    if (repositoriesChecked === 0) {
+      return { available: false, additions: 0, deletions: 0, repositoriesChecked, repositoriesTotal: repositories.length, note: '无法读取需求 Worktree 的 Git diff。' }
+    }
+    const qualifier = repositoriesChecked < repositories.length ? `；${repositories.length - repositoriesChecked} 个 Repo 暂无法读取` : ''
+    return {
+      available: true,
+      additions,
+      deletions,
+      repositoriesChecked,
+      repositoriesTotal: repositories.length,
+      note: `相对需求基线的当前 Git 工作区变更，可能包含人工修改，未按 AI 归因${qualifier}。`,
+    }
   }
 
   private exportBin(): string | null {

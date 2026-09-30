@@ -20,13 +20,13 @@ describe('workspace-only server primitives', () => {
     db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
       .run(makeId('ws'), 'demo', '/tmp/demo', now, now)
     const tables = db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]
-    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_audits', 'conversation_images', 'quick_actions', 'quick_action_skills', 'quick_action_scenes', 'smart_notification_settings', 'ai_report_receipts', 'ai_report_log_cursors', 'runtime_settings', 'dashboard_snapshots', 'auth_sessions', 'channel_accounts', 'channel_bindings', 'channel_group_profiles', 'channel_inbox', 'channel_outbox', 'channel_turn_links', 'channel_presentations', 'channel_interactive_requests', 'channel_access_requests', 'channel_audit_events'])
+    expect(tables.map(table => table.name)).toEqual(['workspaces', 'repositories', 'demands', 'demand_repositories', 'demand_operations', 'conversations', 'conversation_audits', 'trae_conversation_events', 'trae_conversation_cache_state', 'conversation_images', 'quick_actions', 'quick_action_skills', 'quick_action_scenes', 'smart_notification_settings', 'ai_report_receipts', 'ai_report_log_cursors', 'runtime_settings', 'dashboard_snapshots', 'auth_sessions', 'channel_accounts', 'channel_bindings', 'channel_group_profiles', 'channel_inbox', 'channel_outbox', 'channel_turn_links', 'channel_presentations', 'channel_interactive_requests', 'channel_access_requests', 'channel_audit_events'])
     const conversationColumns = db.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
     expect(conversationColumns.map(column => column.name)).not.toEqual(expect.arrayContaining(['provider', 'last_event_id', 'goal_json', 'plan_json']))
     db.close()
   })
 
-  it('cuts runtime settings over to the single Codex command without losing it', () => {
+  it('migrates legacy runtime settings to the extensible runtime selector without losing Codex command', () => {
     const root = mkdtempSync(join(tmpdir(), 'codywork-db-migration-'))
     const path = join(root, 'workspace.db')
     const legacy = new DatabaseSync(path)
@@ -47,9 +47,56 @@ describe('workspace-only server primitives', () => {
     legacy.close()
     const db = new WorkbenchDb(path)
     const columns = db.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name: string }[]
-    expect(columns.map(column => column.name)).toEqual(['id', 'codex_command', 'updated_at'])
-    const row = db.db.prepare('SELECT * FROM runtime_settings WHERE id = 1').get() as { codex_command: string }
-    expect(row.codex_command).toBe('custom-codex app-server --stdio')
+    expect(columns.map(column => column.name)).toEqual(['id', 'runtime_type', 'commands_json', 'updated_at'])
+    const row = db.db.prepare('SELECT * FROM runtime_settings WHERE id = 1').get() as { runtime_type: string; commands_json: string }
+    expect(row.runtime_type).toBe('codex')
+    expect(JSON.parse(row.commands_json)).toEqual({ codex: 'custom-codex app-server --stdio' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('migrates existing conversations to Codex and scopes native ids by runtime', () => {
+    const root = mkdtempSync(join(tmpdir(), 'codywork-conversation-runtime-'))
+    const path = join(root, 'workspace.db')
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, last_opened_at TEXT NOT NULL);
+      CREATE TABLE demands (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name TEXT NOT NULL, branch_name TEXT NOT NULL, worktree_key TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL DEFAULT 'demand' CHECK (scope IN ('demand', 'workspace')),
+        demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        native_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
+        status TEXT NOT NULL DEFAULT 'idle',
+        permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+        policy_hash TEXT NOT NULL,
+        instruction_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL)),
+        UNIQUE(native_id)
+      );
+      INSERT INTO workspaces VALUES ('ws-runtime', 'Runtime migration', '/tmp/runtime-migration', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+      INSERT INTO demands VALUES ('demand-runtime', 'ws-runtime', 'Runtime migration', 'runtime', 'runtime', 'in_progress', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+      INSERT INTO conversations VALUES ('conversation-codex', 'demand', 'demand-runtime', 'ws-runtime', 'native-shared', 'Legacy Codex', 'browser', 'idle', 'workspace-write', 'policy', 'instructions', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+    `)
+    legacy.close()
+
+    const db = new WorkbenchDb(path)
+    expect(db.db.prepare('SELECT runtime_type FROM conversations WHERE id = ?').get('conversation-codex')).toEqual({ runtime_type: 'codex' })
+    expect(() => db.db.prepare(`
+      INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, runtime_type, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at)
+      VALUES ('conversation-trae', 'demand', 'demand-runtime', 'ws-runtime', 'native-shared', 'trae', 'Trae session', 'browser', 'idle', 'workspace-write', 'policy', 'instructions', '2026-09-02T00:00:00.000Z', '2026-09-02T00:00:00.000Z')
+    `).run()).not.toThrow()
+    expect(db.db.prepare('SELECT runtime_type, native_id FROM conversations ORDER BY runtime_type').all()).toEqual([
+      { runtime_type: 'codex', native_id: 'native-shared' },
+      { runtime_type: 'trae', native_id: 'native-shared' },
+    ])
+    expect(db.db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
     db.close()
     rmSync(root, { recursive: true, force: true })
   })

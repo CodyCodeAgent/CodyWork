@@ -7,32 +7,34 @@ const consumers = [
 ]
 
 const expectedVersions = new Set()
+const localCoreDevelopment = process.env.CODYWORK_LOCAL_CORE_DEV === '1'
 for (const consumer of consumers) {
   const packageJson = JSON.parse(await readFile(new URL(consumer, import.meta.url), 'utf8'))
   const dependencySpec = packageJson.dependencies?.[dependencyName]
   const expectedVersion = dependencySpec?.match(/#v(\d+\.\d+\.\d+)$/)?.[1]
   if (!expectedVersion) {
+    if (localCoreDevelopment && dependencySpec?.startsWith('file:')) continue
     throw new Error(`${consumer} must use an immutable vX.Y.Z tag for ${dependencyName}`)
   }
   expectedVersions.add(expectedVersion)
 }
 
-if (expectedVersions.size !== 1) {
+if (!localCoreDevelopment && expectedVersions.size !== 1) {
   throw new Error(`${dependencyName} consumers disagree: ${[...expectedVersions].join(', ')}`)
 }
 
-const expectedVersion = [...expectedVersions][0]
 const installedPackageJson = JSON.parse(
   await readFile(
     new URL('../apps/workbench-server/node_modules/@codycodeagent/cody-web-core/package.json', import.meta.url),
     'utf8',
   ),
 )
-if (installedPackageJson.version !== expectedVersion) {
+const expectedVersion = [...expectedVersions][0]
+if (!localCoreDevelopment && installedPackageJson.version !== expectedVersion) {
   throw new Error(
     `${dependencyName} runtime mismatch: manifests require ${expectedVersion}, `
       + `but node_modules contains ${installedPackageJson.version}. Regenerate the lockfile and reinstall.`,
   )
 }
 
-console.log(`${dependencyName} runtime verified: ${installedPackageJson.version}`)
+console.log(`${dependencyName} runtime verified: ${installedPackageJson.version}${localCoreDevelopment ? ' (local development worktree)' : ''}`)

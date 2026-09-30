@@ -8,6 +8,9 @@ export type RuntimeShellPolicy = 'disabled' | 'allowlist' | 'full'
 export type RuntimeApprovalMode = 'runtime' | 'workbench' | 'none'
 export type RuntimePermissionMode = 'read-only' | 'workspace-write' | 'yolo'
 export type RuntimeCollaborationMode = 'default' | 'plan'
+/** Delivery policy for a new composer message. `append` supplements the
+ * currently running task and must be explicitly advertised by the Runtime. */
+export type RuntimeSubmitMode = 'queue' | 'steer' | 'append'
 
 export interface CodexRuntimeInfo {
   runtimeVersion: string
@@ -108,7 +111,7 @@ export interface SendTurnRequest {
   clientCommandId?: string
   /** Turn-scoped source policy. It never mutates the shared conversation default. */
   executionProfile?: { permissionMode: RuntimePermissionMode }
-  mode?: 'queue' | 'steer'
+  mode?: RuntimeSubmitMode
   settings?: {
     model?: string
     reasoningEffort?: ReasoningEffort
@@ -122,10 +125,29 @@ export interface SendTurnRequest {
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
+/** Provider-reported, non-sensitive model status used to help a user select a
+ * model. All fields are optional because ACP does not standardize them. */
+export interface RuntimeModelMetadata {
+  contextWindow?: number
+  maxContextWindow?: number
+  supportsMaxMode?: boolean
+  /** A provider's current load percentage, sampled when composer options load. */
+  loadPercent?: number
+  weeklyQuota?: {
+    applies: boolean
+    isDepleted: boolean
+    usedPercent?: number
+    remainingPercent?: number
+    /** Unix timestamp in seconds supplied by the provider. */
+    resetTime?: number
+  }
+}
+
 export interface RuntimeModelOption {
   id: string
   label: string
   description: string
+  metadata?: RuntimeModelMetadata
   isDefault: boolean
   defaultReasoningEffort: ReasoningEffort
   supportedReasoningEfforts: ReasoningEffort[]
@@ -152,6 +174,27 @@ export interface RuntimeSkillCatalogRequest {
 }
 
 export interface RuntimeComposerOptions {
+  /** Stable provider identity used to keep the Composer honest when a
+   * workspace contains conversations from more than one runtime. */
+  provider: {
+    type: string
+    label: string
+  }
+  /** Explicitly advertised product affordances. A missing control is safer
+   * than showing a Codex feature which the selected runtime cannot honor. */
+  capabilities: {
+    modelSelection: boolean
+    reasoning: boolean
+    structuredSkills: boolean
+    imageInput: boolean
+    nativeSessionList: boolean
+    planMode: boolean
+    steer: boolean
+    /** Runtime accepts a supplemental prompt while its current task runs. */
+    append: boolean
+    questions: boolean
+    aiCodeReports: boolean
+  }
   /** Provider-authoritative model capabilities. UI controls must not invent
    * reasoning combinations that the selected model does not advertise. */
   models: RuntimeModelOption[]
@@ -164,6 +207,23 @@ export interface RuntimeComposerOptions {
     model?: string
     reasoningEffort?: ReasoningEffort | ''
   }>
+}
+
+/** Product-facing Runtime extensions. Core carries this opaque capability
+ * payload through its registry, while CodyWork decides how to render it. */
+export interface CodyWorkRuntimeCapabilities {
+  cache?: {
+    kind: string
+    label: string
+    description: string
+  }
+}
+
+export interface RuntimeDescriptorView {
+  id: string
+  label: string
+  description?: string
+  capabilities?: CodyWorkRuntimeCapabilities
 }
 
 export interface SendTurnResult {
@@ -215,6 +275,8 @@ export interface RuntimeAccountRateLimits {
 /** CodyWork's product port to the shared Codex runtime. */
 export interface CodyWorkRuntime {
   getInfo(): Promise<CodexRuntimeInfo>
+  /** Performs a provider-owned connectivity probe when one is available. */
+  checkConnection?(): Promise<CodexRuntimeInfo>
   checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult>
   initializeWorkspace(request: WorkspaceInitializationRequest): Promise<WorkspaceInitializationResult>
   createConversation(request: CreateConversationRequest): Promise<ConversationHandle>

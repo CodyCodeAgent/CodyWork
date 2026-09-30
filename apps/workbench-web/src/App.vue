@@ -44,6 +44,7 @@
           <section class="settings-intro"><div><div class="card-kicker">CODEX RUNTIME</div><h2>App Server 运行状态</h2><p>CodyWork 只展示 Core 的权威状态，不自行重启或复制 Runtime 状态。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
           <div class="runtime-settings-grid">
             <article class="settings-card runtime-config-card"><div class="settings-card-head"><div><div class="card-kicker">APP SERVER</div><h3>启动配置</h3></div><button class="btn" type="button" :disabled="loadingRuntimeDetails" @click="loadRuntimeDetails">{{ loadingRuntimeDetails ? '刷新中…' : '刷新状态' }}</button></div><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label>启动命令</label><input v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><div class="runtime-actions"><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button><button class="btn" type="button" :disabled="reloadingMcp" @click="reloadRuntimeMcp">{{ reloadingMcp ? '刷新中…' : '刷新 MCP Server' }}</button></div></article>
+            <article class="settings-card"><div class="card-kicker">RUNTIME</div><h3>{{ selectedRuntimeDescriptor?.label ?? runtimeType }}</h3><p>{{ selectedRuntimeDescriptor?.description ?? '选择新建会话默认使用的 Runtime。' }}</p><label>默认运行时</label><select v-model="runtimeType" class="input"><option v-for="option in runtimeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></article>
             <article class="settings-card"><div class="settings-card-head"><div><div class="card-kicker">HEALTH</div><h3>进程诊断</h3></div><span class="runtime-mini-state">PID {{ runtimeDiagnostics?.pid ?? '—' }}</span></div><div v-if="runtimeDiagnostics" class="runtime-facts"><div><span>生命周期</span><strong>{{ runtimeDiagnostics.lifecycle }}</strong></div><div><span>启动次数</span><strong>{{ runtimeDiagnostics.startCount }}</strong></div><div><span>RPC 成功</span><strong>{{ runtimeDiagnostics.completedClientRequestCount }}</strong></div><div><span>RPC 失败</span><strong>{{ runtimeDiagnostics.failedClientRequestCount }}</strong></div></div><p v-else class="settings-note">Runtime 尚未产生诊断快照。</p><p v-if="runtimeDiagnostics?.unavailableReason" class="runtime-warning">{{ runtimeDiagnostics.unavailableReason }}</p></article>
             <article class="settings-card runtime-usage-card"><div class="settings-card-head"><div><div class="card-kicker">ACCOUNT USAGE</div><h3>Codex 用量</h3></div><span v-if="runtimeRateLimits?.resetCreditsAvailable !== null && runtimeRateLimits?.resetCreditsAvailable !== undefined" class="runtime-mini-state">Reset {{ runtimeRateLimits.resetCreditsAvailable }}</span></div><div v-if="runtimeRateLimits?.buckets.length" class="runtime-rate-list"><div v-for="bucket in runtimeRateLimits.buckets" :key="bucket.id" class="runtime-rate-row"><div><strong>{{ bucket.name }}</strong><small>{{ bucket.planType || bucket.id }}</small></div><div class="runtime-rate-window"><span v-if="bucket.primary">{{ formatRuntimeWindow(bucket.primary) }}</span><span v-if="bucket.secondary">{{ formatRuntimeWindow(bucket.secondary) }}</span></div></div></div><p v-else class="settings-note">当前账户没有可展示的用量窗口。</p></article>
             <article v-if="runtimeFailureReport" class="settings-card runtime-failure-card"><div class="settings-card-head"><div><div class="card-kicker">LAST FAILURE</div><h3>{{ runtimeFailureReport.phase }} · {{ runtimeFailureReport.cause }}</h3></div><time>{{ formatRuntimeTime(runtimeFailureReport.capturedAtIso) }}</time></div><p class="runtime-failure-message">{{ runtimeFailureReport.message }}</p><ul v-if="runtimeFailureReport.hints.length"><li v-for="hint in runtimeFailureReport.hints" :key="hint">{{ hint }}</li></ul><details v-if="runtimeFailureReport.recentLogs.length"><summary>查看最近 Runtime 日志</summary><pre>{{ runtimeFailureReport.recentLogs.map(entry => `${entry.atIso} [${entry.level}] ${entry.message}`).join('\n') }}</pre></details></article>
@@ -58,15 +59,15 @@
       <section v-else-if="activePage === 'chat' && (selectedDemand || isWorkspaceConversationPage)" class="demand-chat-page">
         <header class="topbar chat-topbar">
           <div v-if="selectedDemand"><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
-          <div v-else><button class="back-link" @click="returnToWorkspace">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 Codex</strong><span>默认 YOLO，可切换只读或 Normal；支持文件、Git、CLI 与全局 Skill</span></div></div>
-          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button v-if="selectedDemand" :class="['btn', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" title="查看当前需求的 AI 代码上报回执和行数" @click="openAiCodeReport"><span class="ai-report-trigger-dot" />代码上报</button><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" title="将当前会话导出为飞书文档" @click="openConversationShare">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="settleConversation" @compact="compactConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand" class="btn" @click="openBindConversation">绑定 Thread</button><button class="btn" :disabled="creatingConversation" @click="createConversation">{{ creatingConversation ? '创建中…' : '＋ 新会话' }}</button></div>
+          <div v-else><button class="back-link" @click="returnToWorkspace">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 {{ activeRuntimeLabel }}</strong><span>默认 YOLO，可切换只读或 Normal；可用能力以当前 Runtime 声明为准</span></div></div>
+          <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button v-if="selectedConversation && traeCache" :class="['runtime-base-badge', activeRuntimeType, 'runtime-cache-trigger']" type="button" :title="traeCacheBadgeTitle" @click="openTraeCacheDialog"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><small>SESSION · 缓存</small></button><span v-else-if="selectedConversation" :class="['runtime-base-badge', activeRuntimeType]"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><small>NATIVE SESSION</small></span><button v-if="selectedConversation && runtimeOptions.length > 1" class="btn runtime-migrate-trigger" type="button" :disabled="!canMigrateConversation(selectedConversation)" @click="openRuntimeMigration()">切换 Runtime</button><button v-if="selectedDemand && runtimeCapabilities.aiCodeReports" :class="['btn', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" @click="openAiCodeReport"><span class="ai-report-trigger-dot" />代码上报</button><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" @click="openConversationShare">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="settleConversation" @compact="compactConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand && runtimeCapabilities.nativeSessionList" class="btn" @click="openBindConversation">绑定会话</button><span v-else-if="selectedDemand" class="runtime-unavailable-note">不支持绑定历史会话</span><button class="btn" :disabled="creatingConversation" @click="openCreateConversation">＋ 新会话</button></div>
         </header>
         <div class="chat-layout">
           <aside :class="['conversation-sidebar', { collapsed: conversationSidebarCollapsed }]">
             <button v-if="conversationSidebarCollapsed" class="conversation-panel-toggle rail" type="button" :aria-label="'展开会话列表'" aria-expanded="false" title="展开会话列表" @click="setConversationSidebarCollapsed(false)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg><span>会话</span></button>
             <template v-else>
             <div class="conversation-head"><div><div class="card-kicker">SESSIONS</div><strong>会话</strong></div><button class="conversation-panel-toggle" type="button" :aria-label="'收起会话列表'" aria-expanded="true" title="收起会话列表" @click="setConversationSidebarCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></button></div>
-            <div class="conversation-demand"><strong>{{ selectedDemand?.name ?? workspace?.name }}</strong><small>{{ selectedDemand ? (selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo') : 'Workspace 根目录 · 完整 Codex 能力' }}</small></div>
+            <div class="conversation-demand"><strong>{{ selectedDemand?.name ?? workspace?.name }}</strong><small>{{ selectedDemand ? (selectedDemand.repositories.map((repo) => repo.name).join(' · ') || '尚未添加 Repo') : `Workspace 根目录 · ${activeRuntimeLabel} 能力` }}</small></div>
             <div class="conversation-list" role="list" :aria-label="selectedDemand ? 'Demand 会话' : 'Workspace 会话'">
               <div v-for="conversation in conversations" :key="conversation.id" :class="['conversation-row-wrap', { active: conversation.id === selectedConversation?.id, editing: renamingConversationId === conversation.id }]" role="listitem">
                 <form v-if="renamingConversationId === conversation.id" class="conversation-rename-editor" @submit.prevent="saveConversationRename(conversation)">
@@ -80,11 +81,17 @@
                 </form>
                 <template v-else>
                   <div :class="['conversation-row', { active: conversation.id === selectedConversation?.id }]">
-                    <button class="conversation-row-main" type="button" :aria-label="conversationRowAriaLabel(conversation)" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', displayConversationStatus(conversation)]" /><span><span class="conversation-title-line"><strong>{{ conversation.title }}</strong></span><small>{{ statusLabel(displayConversationStatus(conversation)) }}</small></span></button>
-                    <button v-if="conversationChannelBadge(conversation, bindingsForConversation(conversation))" class="conversation-channel-button" type="button" :aria-label="`${conversationChannelBadge(conversation, bindingsForConversation(conversation))?.label}：查看详情`" :title="conversationChannelBadge(conversation, bindingsForConversation(conversation))?.detail" @click.stop="openChannelBindingDialog(conversation)"><span class="conversation-channel-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v3M7 9h10a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Z" /><path d="M8 20v1M16 20v1" /><circle cx="9" cy="14" r="1" /><circle cx="15" cy="14" r="1" /></svg></span></button>
+                    <button class="conversation-row-main" type="button" :aria-label="conversationRowAriaLabel(conversation)" :title="conversationRowTooltip(conversation)" @click="openConversation(conversation)" @dblclick.stop="startConversationRename(conversation)"><span :class="['conversation-status', displayConversationStatus(conversation)]" /><span><span class="conversation-title-line"><strong>{{ conversation.title }}</strong><span :class="['conversation-runtime-pill', conversation.runtimeType]" :title="runtimeBaseDescription(conversation.runtimeType)">{{ runtimeBaseLabel(conversation.runtimeType) }}</span></span><small>{{ statusLabel(displayConversationStatus(conversation)) }} · Native Session</small></span></button>
+                    <details class="conversation-actions-menu" @click.stop>
+                      <summary :aria-label="`会话操作：${conversation.title}`" title="会话操作"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg></summary>
+                      <div class="conversation-actions-popover">
+                        <button v-if="conversationChannelBadge(conversation, bindingsForConversation(conversation))" class="conversation-menu-action" type="button" :aria-label="`${conversationChannelBadge(conversation, bindingsForConversation(conversation))?.label}：查看详情`" :title="conversationChannelBadge(conversation, bindingsForConversation(conversation))?.detail" @click.stop="openChannelBindingDialog(conversation)"><span class="conversation-channel-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v3M7 9h10a3 3 0 0 1 3 3v5a3 3 0 0 1 3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3Z" /><path d="M8 20v1M16 20v1" /><circle cx="9" cy="14" r="1" /><circle cx="15" cy="14" r="1" /></svg></span><span>飞书机器人</span></button>
+                        <button v-if="runtimeOptions.length > 1" class="conversation-menu-action" type="button" :disabled="!canMigrateConversation(conversation)" :title="canMigrateConversation(conversation) ? '保留原会话，创建携带历史交接的目标 Runtime 会话' : '会话正在执行或等待审批，完成后才能切换 Runtime'" @click.stop="openRuntimeMigration(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10M17 7l-4 4M17 17l-4-4M7 12H4m16 0h-3" /></svg><span>带交接切换 Runtime</span></button>
+                        <button class="conversation-menu-action" type="button" :aria-label="`重命名会话：${conversation.title}`" @click.stop="startConversationRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.5-1 9.8-9.8a2 2 0 0 0 0-2.8l-.7-.7a2 2 0 0 0-2.8 0L5 15.5 4 20Z" /></svg><span>重命名</span></button>
+                        <button class="conversation-menu-action danger" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg><span>删除会话</span></button>
+                      </div>
+                    </details>
                   </div>
-                  <button class="conversation-edit-action rename" type="button" :aria-label="`重命名会话：${conversation.title}`" title="重命名会话" @click.stop="startConversationRename(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.5-1 9.8-9.8a2 2 0 0 0 0-2.8l-.7-.7a2 2 0 0 0-2.8 0L5 15.5 4 20Z" /></svg></button>
-                  <button class="conversation-delete" type="button" :disabled="!canDeleteConversation(conversation)" :title="deleteConversationTitle(conversation)" :aria-label="`删除会话：${conversation.title}`" @click.stop="requestDeleteConversation(conversation)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M9 7l1-2h4l1 2m-9 0 1 13h10l1-13" /></svg></button>
                 </template>
               </div>
             </div>
@@ -93,11 +100,13 @@
           <section class="chat-main">
             <div ref="scrollArea" class="chat-scroll" @scroll="onScroll">
               <button v-if="hiddenConversationEntryCount > 0" class="chat-history-button" type="button" @click="showEarlierConversationEntries">显示更早的 {{ Math.min(hiddenConversationEntryCount, 80) }} 项</button>
-              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>{{ selectedDemand ? '开始这个需求的开发' : '使用这个 Workspace' }}</h2><p>{{ selectedDemand ? '描述目标即可。Codex 会在当前 Demand 目录执行，实际读写、CLI 与审批权限以你选择的 Codex 模式为准。' : '描述目标即可。Codex 会在 Workspace 根目录执行，并遵循根目录及目标目录链上的 AGENTS.md。' }}</p></div></template></CodyConversation>
+              <CodyConversation variant="embedded" :entries="sharedConversationEntries" @copy="copyConversationText" @retry-message="retryFailedMessage" @resolve-approval="resolveTimelineApproval" @resolve-question="resolveTimelineQuestion" @open-file="openConversationFile"><template #empty><div class="chat-empty"><span class="workspace-large-mark">CW</span><h2>{{ selectedDemand ? '开始这个需求的开发' : '使用这个 Workspace' }}</h2><p>{{ selectedDemand ? `描述目标即可。${activeRuntimeLabel} 会在当前 Demand 目录执行，实际读写、CLI 与审批权限以当前会话的 Runtime 模式为准。` : `描述目标即可。${activeRuntimeLabel} 会在 Workspace 根目录执行，并遵循根目录及目标目录链上的 AGENTS.md。` }}</p></div></template></CodyConversation>
             </div>
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
-            <div class="composer">
-              <div class="composer-hint">{{ selectedCollaborationModeKind === 'plan' ? 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。' : permission === 'yolo' ? 'Codex YOLO：使用当前服务账号的完整系统权限执行，不受 CodyWork 目录边界限制。输入 $ 可引用多个 Skill。' : permission === 'workspace-write' ? 'Codex Normal：使用原生 workspace-write 与审批机制。输入 $ 可引用多个 Skill。' : 'Codex 只读：允许读取和查询，但不能修改文件。输入 $ 可引用多个 Skill。' }}</div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="true" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="isRunning ? (selectedSubmitMode === 'steer' ? '描述引导…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）' : '描述下一步…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 排队）') : '描述你希望完成的事情…（可粘贴或拖入图片；输入 $ 引用 Skill；Enter 换行，Control + Enter 发送）'" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectedSubmitMode = $event === 'steer' ? 'steer' : 'queue'" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt" />
+            <div v-if="composerCollapsed" class="composer-restore-row"><button class="composer-restore" type="button" aria-label="展开消息输入区" aria-expanded="false" title="展开输入区" @click="setComposerCollapsed(false)"><span>展开输入区</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg></button></div>
+            <div v-else :class="['composer', { 'composer--without-reasoning': composerReasoningOptions.length === 0 }]">
+              <div class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div><button class="chat-panel-collapse" type="button" aria-label="收起消息输入区" aria-expanded="true" title="收起输入区" @click="setComposerCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></button></div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt" />
+              <div v-if="selectedModelDetails" class="composer-model-detail" :title="selectedModelDetails" role="status">当前模型 · {{ selectedModelDetails }}</div>
             </div>
           </section>
         </div>
@@ -109,10 +118,62 @@
     <ConversationChannelDialog :visible="Boolean(channelDialogConversation)" :conversation="channelDialogConversation" :bindings="channelDialogBindings" :loading="channelDialogLoading" :error="channelDialogError" :message="channelBindingMessage" :unbinding-id="unbindingChannelId" @close="closeChannelBindingDialog" @copy="copyChannelConversationLink" @unbind="unbindChannel" />
     <ConversationShareDialog :visible="showConversationShare" :title="conversationShareTitle" :account-id="conversationShareAccountId" :accounts="conversationShareAccounts" :sharing="sharingConversation" :error="conversationShareError" :result="conversationShareResult" @close="closeConversationShare" @share="shareConversation" @copy="copyConversationShareLink" @update:title="conversationShareTitle = $event" @update:account-id="conversationShareAccountId = $event" />
     <AiCodeReportDialog :visible="showAiCodeReport" :summary="aiReportSummary" :loading="aiReportLoading" :action="aiReportAction" :error="aiReportError" :message="aiReportMessage" @close="closeAiCodeReport" @refresh="loadAiCodeReport" @backfill="backfillAiCodeReport" @retry="retryAiCodeReport" />
+    <div v-if="conversationFilePreview || conversationFilePreviewLoading || conversationFilePreviewError" class="modal-backdrop">
+      <section ref="conversationFilePreviewModal" class="modal-card conversation-file-preview-modal" role="dialog" aria-modal="true" aria-labelledby="conversation-file-preview-title">
+        <div class="modal-head"><div><div class="eyebrow">WORKSPACE FILE</div><div class="conversation-file-preview-title-row"><h2 id="conversation-file-preview-title">{{ conversationFilePreview?.name ?? '文件预览' }}</h2><span v-if="conversationFilePreview" class="conversation-file-preview-type">{{ conversationFilePreview.extension || 'text' }}</span></div></div><div class="conversation-file-preview-actions"><button class="icon-button" :aria-label="conversationFilePreviewFullscreen ? '退出全屏查看' : '全屏查看文件'" :title="conversationFilePreviewFullscreen ? '退出全屏' : '全屏查看'" @click="toggleConversationFilePreviewFullscreen"><svg v-if="conversationFilePreviewFullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v6H3M3 3l6 6m6-6v6h6m0-6-6 6M9 21v-6H3m0 6 6-6m6 6v-6h6m0 6-6-6" /></svg><svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H3v6m0-6 6 6m6-6h6v6m0-6-6 6M9 21H3v-6m0 6 6-6m6 6h6v-6m0 6-6-6" /></svg></button><button class="icon-button" aria-label="关闭文件预览弹窗" @click="closeConversationFilePreview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div></div>
+        <p v-if="conversationFilePreview" class="conversation-file-preview-path" :title="conversationFilePreview.path">{{ conversationFilePreview.relativePath }}<span v-if="conversationFilePreviewLine > 1"> · 第 {{ conversationFilePreviewLine }} 行</span></p>
+        <p v-if="conversationFilePreviewLoading" class="conversation-file-preview-state">正在读取工作区文件…</p>
+        <p v-else-if="conversationFilePreviewError" class="form-error" role="alert">{{ conversationFilePreviewError }}</p>
+        <template v-else-if="conversationFilePreview">
+          <div class="conversation-file-preview-tabs" role="tablist" aria-label="文件查看模式">
+            <button :class="{ active: conversationFilePreviewMode === 'file' }" type="button" role="tab" aria-controls="conversation-file-preview-content" :aria-selected="conversationFilePreviewMode === 'file'" @click="conversationFilePreviewMode = 'file'">完整文件</button>
+            <button :class="{ active: conversationFilePreviewMode === 'diff' }" type="button" role="tab" aria-controls="conversation-file-preview-content" :aria-selected="conversationFilePreviewMode === 'diff'" :disabled="!conversationFilePreview.diff.available" :title="conversationFilePreview.diff.available ? `相对 ${conversationFilePreview.diff.base === 'untracked' ? '空文件（未跟踪）' : 'HEAD'} 的改动` : '当前文件相对 HEAD 没有可用 Diff'" @click="conversationFilePreviewMode = 'diff'">变更 Diff</button>
+            <template v-if="conversationFilePreviewMode === 'diff'">
+              <span class="conversation-file-preview-divider" aria-hidden="true"></span>
+              <button :class="{ active: conversationFileDiffLayout === 'split' }" type="button" title="左侧为改动前，右侧为当前文件" @click="conversationFileDiffLayout = 'split'">左右</button>
+              <button :class="{ active: conversationFileDiffLayout === 'unified' }" type="button" title="按原始补丁顺序上下显示" @click="conversationFileDiffLayout = 'unified'">上下</button>
+              <button :class="{ active: conversationFilePreviewWrap }" type="button" title="长行在各自面板内自动换行" @click="conversationFilePreviewWrap = true">折行</button>
+              <button :class="{ active: !conversationFilePreviewWrap }" type="button" title="保留原始长行；左右两栏可独立滚动查看" @click="conversationFilePreviewWrap = false">不折行</button>
+              <button :class="{ active: conversationFileDiffLinkedScroll }" type="button" :title="conversationFileDiffLinkedScroll ? '两栏纵向滚动按同一 Diff 行联合对齐；点击改为独立滚动' : '左右两栏独立纵向滚动；点击启用按 Diff 行联合对齐'" @click="conversationFileDiffLinkedScroll = !conversationFileDiffLinkedScroll">{{ conversationFileDiffLinkedScroll ? '联合滚动' : '独立滚动' }}</button>
+              <label class="conversation-file-context-control" title="每个变更块上方保留的未修改行数">上方 <select v-model.number="conversationFileDiffBefore"><option :value="0">0 行</option><option :value="3">3 行</option><option :value="10">10 行</option><option :value="20">20 行</option><option :value="50">50 行</option><option :value="100">100 行</option></select></label>
+              <label class="conversation-file-context-control" title="每个变更块下方保留的未修改行数">下方 <select v-model.number="conversationFileDiffAfter"><option :value="0">0 行</option><option :value="3">3 行</option><option :value="10">10 行</option><option :value="20">20 行</option><option :value="50">50 行</option><option :value="100">100 行</option></select></label>
+            </template>
+            <small>{{ filePreviewModeHint }}</small>
+          </div>
+          <div id="conversation-file-preview-content" :class="['conversation-file-preview-content', { 'split-view': conversationFilePreviewMode === 'diff' && conversationFileDiffLayout === 'split' }]">
+            <CodyMarkdown v-if="isMarkdownFilePreview && conversationFilePreviewMode === 'file'" :text="conversationFilePreview.content" @open-file="openConversationFile" />
+            <div v-else-if="conversationFilePreviewMode === 'diff' && conversationFileDiffLayout === 'split'" :class="['conversation-file-diff-split', { wrap: conversationFilePreviewWrap }]">
+              <section class="conversation-file-diff-pane" aria-label="改动前文件">
+                <header>改动前</header>
+                <div ref="conversationFileDiffOldScroll" class="conversation-file-diff-pane-scroll" @scroll="syncConversationFileDiffScroll('old', $event)">
+                  <div v-for="row in filePreviewSplitRows" :key="`old:${row.key}`" :data-diff-row="row.key" :class="['conversation-file-diff-pane-row', row.kind]">
+                    <div v-if="row.kind === 'meta' || row.kind === 'hunk'" class="conversation-file-diff-pane-meta"><code>{{ row.label }}</code></div>
+                    <template v-else><span>{{ row.oldLine ?? '' }}</span><code>{{ row.oldText ?? ' ' }}</code></template>
+                  </div>
+                </div>
+              </section>
+              <section class="conversation-file-diff-pane" aria-label="当前文件">
+                <header>当前文件</header>
+                <div ref="conversationFileDiffNewScroll" class="conversation-file-diff-pane-scroll" @scroll="syncConversationFileDiffScroll('new', $event)">
+                  <div v-for="row in filePreviewSplitRows" :key="`next:${row.key}`" :data-diff-row="row.key" :class="['conversation-file-diff-pane-row', row.kind]">
+                    <div v-if="row.kind === 'meta' || row.kind === 'hunk'" class="conversation-file-diff-pane-meta"><code>{{ row.label }}</code></div>
+                    <template v-else><span>{{ row.newLine ?? '' }}</span><code>{{ row.newText ?? ' ' }}</code></template>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <div v-else class="conversation-file-code" :class="{ diff: conversationFilePreviewMode === 'diff' }"><div v-for="(line, index) in filePreviewLines" :key="`${conversationFilePreviewMode}:${index}`" :class="['conversation-file-code-line', diffLineKind(line)]"><span class="conversation-file-code-number">{{ conversationFilePreviewMode === 'file' ? index + 1 : diffLineNumber(index, line) }}</span><code>{{ line || ' ' }}</code></div></div>
+          </div>
+        </template>
+      </section>
+    </div>
+    <div v-if="showCreateConversation" class="modal-backdrop"><section class="modal-card create-conversation-modal" role="dialog" aria-modal="true" aria-labelledby="create-conversation-title"><div class="modal-head"><div><div class="eyebrow">NEW SESSION</div><h2 id="create-conversation-title">新建会话</h2></div><button class="icon-button" aria-label="关闭新建会话弹窗" :disabled="creatingConversation" @click="closeCreateConversation">×</button></div><p class="create-conversation-intro">选择此次会话使用的 Runtime。该选择不会改变已有会话。</p><label class="create-conversation-runtime" for="create-conversation-runtime"><span>Runtime</span><select id="create-conversation-runtime" v-model="selectedCreateRuntime" :disabled="creatingConversation"><option v-for="option in runtimeOptions" :key="option.value" :value="option.value">{{ option.label }} · {{ runtimeDescriptor(option.value)?.description ?? option.value }}</option></select></label><p v-if="createConversationError" class="form-error" role="alert">{{ createConversationError }}</p><div class="modal-actions"><button class="btn" :disabled="creatingConversation" @click="closeCreateConversation">取消</button><button class="btn primary" :disabled="creatingConversation || !selectedCreateRuntime" @click="createConversation">{{ creatingConversation ? '创建中…' : `使用 ${runtimeBaseLabel(selectedCreateRuntime)} 新建会话` }}</button></div></section></div>
+    <div v-if="conversationMigrationSource" class="modal-backdrop"><section class="modal-card runtime-migration-modal" role="dialog" aria-modal="true" aria-labelledby="runtime-migration-title"><div class="modal-head"><div><div class="eyebrow">RUNTIME HANDOFF</div><h2 id="runtime-migration-title">切换 Runtime</h2></div><button class="icon-button" aria-label="关闭 Runtime 切换弹窗" :disabled="migratingRuntime" @click="closeRuntimeMigration">×</button></div><div class="runtime-migration-flow" aria-label="Runtime 切换路径"><article :class="['runtime-migration-node', conversationMigrationSource.runtimeType]"><small>保留原会话</small><strong>{{ runtimeBaseLabel(conversationMigrationSource.runtimeType) }}</strong><span>NATIVE SESSION</span></article><svg class="runtime-migration-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13m-5-5 5 5-5 5" /></svg><article :class="['runtime-migration-node', selectedMigrationRuntime, 'target']"><small>创建交接会话</small><strong>{{ selectedMigrationRuntime ? runtimeBaseLabel(selectedMigrationRuntime) : '选择目标' }}</strong><span>TARGET RUNTIME</span></article></div><label class="runtime-migration-target" for="runtime-migration-target"><span>目标 Runtime</span><select id="runtime-migration-target" v-model="selectedMigrationRuntime" :disabled="migratingRuntime"><option disabled value="">请选择目标 Runtime</option><option v-for="option in migrationTargets" :key="option.value" :value="option.value">{{ option.label }} · {{ runtimeDescriptor(option.value)?.description ?? option.value }}</option></select></label><p>源会话和历史不会删除；切换完成后会自动打开目标会话。</p><p class="runtime-migration-note">仅发送长度受限的可见历史交接。目标会话只会先总结交接内容，不执行命令、不修改文件，也不调用工具。</p><p class="runtime-migration-note warning">正在执行或等待审批的会话不能切换，请先等待当前 Turn 完成。</p><p v-if="runtimeMigrationError" class="form-error" role="alert">{{ runtimeMigrationError }}</p><div class="modal-actions"><button class="btn" :disabled="migratingRuntime" @click="closeRuntimeMigration">取消</button><button class="btn primary" :disabled="migratingRuntime || !selectedMigrationRuntime" @click="confirmRuntimeMigration">{{ migratingRuntime ? '正在创建交接…' : `确认切换到 ${runtimeBaseLabel(selectedMigrationRuntime)}` }}</button></div></section></div>
+    <div v-if="showTraeCacheDialog && traeCache" class="modal-backdrop"><section class="modal-card trae-cache-modal" role="dialog" aria-modal="true" aria-labelledby="trae-cache-title"><div class="modal-head"><div><div class="eyebrow">TRAE HISTORY REPLAY</div><h2 id="trae-cache-title">本地回放缓存</h2></div><button class="icon-button" aria-label="关闭 Trae 缓存弹窗" :disabled="traeCacheBusy" @click="closeTraeCacheDialog">×</button></div><dl class="trae-cache-stats"><div><dt>回放节点</dt><dd>{{ traeCache.eventCount }} 个（非消息条数）</dd></div><div><dt>占用空间</dt><dd>{{ formatCacheBytes(traeCache.byteLength) }}</dd></div><div><dt>最后更新</dt><dd>{{ formatCacheTime(traeCache.lastUpdatedAt) }}</dd></div></dl><p class="trae-cache-note">节点包含用户/助手消息、流式输出片段、工具、思考与 Turn 状态，用于恢复过程展示；它不等同于聊天消息数。</p><p class="trae-cache-note">可清理：{{ traeCache.clears }}。不会清理：{{ traeCache.preserves }}。</p><p class="trae-cache-note">“生成交接后压缩”会先让 Trae 仅产出交接摘要，再将本地逐条过程替换为该摘要，便于继续当前 Session。</p><p v-if="traeCacheError" class="form-error" role="alert">{{ traeCacheError }}</p><label class="trae-cache-confirm"><input v-model="traeCacheClearConfirmed" type="checkbox" :disabled="traeCacheBusy" />我了解“彻底清除”会让此会话重启后不再显示既有本地消息和过程。</label><div class="modal-actions"><button class="btn" :disabled="traeCacheBusy" @click="closeTraeCacheDialog">取消</button><button class="btn primary" :disabled="traeCacheBusy || isRunning || sending" @click="compactTraeCache">{{ traeCacheBusy ? '处理中…' : '生成交接后压缩' }}</button><button class="btn danger" :disabled="traeCacheBusy || !traeCacheClearConfirmed || isRunning || sending" @click="clearTraeCache">彻底清除本地缓存</button></div></section></div>
     <div v-if="showCreateDemand" class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-demand-title"><div class="modal-head"><div><div class="eyebrow">NEW DEMAND</div><h2 id="create-demand-title">创建隔离需求</h2></div><button class="icon-button" aria-label="关闭创建需求弹窗" @click="showCreateDemand = false">×</button></div><label>需求名</label><input v-model="demandName" class="input" placeholder="例如：统一 AI 工作对话" /><label>分支名</label><input v-model="demandBranch" class="input" placeholder="可选，默认按需求名生成" /><fieldset class="demand-repository-fieldset"><legend>开发 Repo</legend><label class="sr-only" for="demand-repository-search">搜索开发 Repo</label><div class="demand-repository-search"><input id="demand-repository-search" v-model="demandRepositoryQuery" class="input" type="search" autocomplete="off" placeholder="按名称、路径或分支搜索…" aria-describedby="demand-repository-search-summary" /><button v-if="demandRepositoryQuery" class="repo-search-clear" type="button" aria-label="清除 Repo 搜索" @click="demandRepositoryQuery = ''">清除</button></div><p id="demand-repository-search-summary" class="demand-repository-summary" role="status">{{ demandRepositorySearchSummary }}</p><div class="repo-picker"><label v-for="repo in filteredDemandCreationRepositories" :key="repo.id" class="repo-option"><input v-model="selectedRepositoryIds" type="checkbox" :value="repo.id" /><span><strong>{{ repo.name }}</strong><small>{{ repo.path }}</small></span><code v-if="repo.defaultRef" class="demand-repository-ref">{{ repo.defaultRef }}</code></label><p v-if="filteredDemandCreationRepositories.length === 0" class="repo-picker-empty">没有匹配的 Repo。可尝试名称、目录路径或分支名。</p></div></fieldset><p class="demand-baseline-notice">创建前会将所选 <code>services/</code> 基线强制更新到远端默认分支；其中未提交和未跟踪的文件会被丢弃，已有 Demand Worktree 不受影响。</p><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showCreateDemand = false">取消</button><button class="btn primary" :disabled="creating || !demandName.trim() || selectedRepositoryIds.length === 0" @click="createDemand">{{ creating ? '正在更新基线并创建…' : '创建并进入' }}</button></div></section></div>
     <div v-if="showAddRepository" class="modal-backdrop"><section class="modal-card"><div class="modal-head"><div><div class="eyebrow">REPOSITORY</div><h2>添加开发 Repo</h2></div><button class="icon-button" @click="showAddRepository = false">×</button></div><div class="mode-tabs"><button :class="{ active: repositorySource === 'folder' }" @click="repositorySource = 'folder'">本地目录</button><button :class="{ active: repositorySource === 'git' }" @click="repositorySource = 'git'">Git clone</button></div><label>显示名称</label><input v-model="repositoryName" class="input" placeholder="可选" /><template v-if="repositorySource === 'folder'"><label>仓库目录</label><input v-model="repositoryPath" class="input" placeholder="/Users/you/projects/repository" /><p class="field-help">该 Git 仓库会复制到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><template v-else><label>Git URL</label><input v-model="repositoryUrl" class="input" placeholder="git@github.com:org/repository.git" /><p class="field-help">仓库会克隆到当前 Workspace 的 <code>services/&lt;名称&gt;</code>。</p></template><p v-if="modalError" class="form-error">{{ modalError }}</p><div class="modal-actions"><button class="btn" @click="showAddRepository = false">取消</button><button class="btn primary" :disabled="creating || (repositorySource === 'folder' ? !repositoryPath.trim() : !repositoryUrl.trim())" @click="addRepository">{{ creating ? '正在添加…' : '添加 Repo' }}</button></div></section></div>
     <AddDemandRepositoryDialog v-if="selectedDemand" :visible="showAddDemandRepository" :demand="selectedDemand" :repositories="availableDemandRepositories" :selected-repository-id="selectedDemandRepositoryId" :adding="addingDemandRepository" :error="demandRepositoryError" @close="closeAddDemandRepository" @add="addDemandRepository" @update:selected-repository-id="selectedDemandRepositoryId = $event" />
-    <BindThreadDialog :visible="showBindConversation" :binding="bindingConversation" :loading="threadPickerLoading" :manual-entry="manualThreadEntry" :selected-project="selectedThreadProject" :query="threadQuery" :native-id="boundNativeId" :title="boundConversationTitle" :error="modalError" :can-bind="canBindNativeThread" :all-thread-count="nativeThreads.length" :projects="threadProjects" :threads="filteredNativeThreads" @close="closeBindConversation" @bind="bindConversation" @select="selectNativeThread" @update:manual-entry="manualThreadEntry = $event" @update:selected-project="selectedThreadProject = $event" @update:query="threadQuery = $event" @update:native-id="boundNativeId = $event" @update:title="boundConversationTitle = $event" />
+    <BindThreadDialog :visible="showBindConversation" :binding="bindingConversation" :loading="threadPickerLoading" :models-loading="bindModelsLoading" :manual-entry="manualThreadEntry" :selected-project="selectedThreadProject" :query="threadQuery" :native-id="boundNativeId" :title="boundConversationTitle" :error="modalError" :can-bind="canBindNativeThread" :all-thread-count="nativeThreads.length" :projects="threadProjects" :threads="filteredNativeThreads" :runtime-type="selectedBindRuntime" :runtime-options="runtimeOptions" :runtime-label="bindRuntimeLabel" :runtime-description="bindRuntimeDescription" :native-session-label="bindNativeSessionLabel" :model="selectedBindModel" :models="bindRuntimeModels" :model-description="selectedBindModelDescription" @close="closeBindConversation" @bind="bindConversation" @select="selectNativeThread" @update:runtime-type="changeBindRuntime" @update:model="selectedBindModel = $event" @update:manual-entry="manualThreadEntry = $event" @update:selected-project="selectedThreadProject = $event" @update:query="threadQuery = $event" @update:native-id="boundNativeId = $event" @update:title="boundConversationTitle = $event" />
     <div v-if="conversationPendingDelete" class="modal-backdrop"><section class="modal-card delete-conversation-modal" role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title"><div class="modal-head"><div><div class="eyebrow">REMOVE SESSION</div><h2 id="delete-conversation-title">删除会话？</h2></div><button class="icon-button" aria-label="关闭删除会话弹窗" :disabled="deletingConversation" @click="closeDeleteConversation">×</button></div><p>将从当前 {{ conversationPendingDelete.scope === 'workspace' ? 'Workspace' : 'Demand' }} 移除“{{ conversationPendingDelete.title }}”的会话绑定。</p><p class="delete-conversation-note">{{ conversationPendingDelete.scope === 'workspace' ? '原生 Codex Thread 和历史仍会保留，但 CodyWork 不再显示此会话绑定。' : '不会删除原生 Codex Thread 或它的历史；仍可稍后重新绑定并继续。' }}</p><p v-if="deleteConversationError" class="form-error" role="alert">{{ deleteConversationError }}</p><div class="modal-actions"><button class="btn" :disabled="deletingConversation" @click="closeDeleteConversation">取消</button><button class="btn danger" :disabled="deletingConversation" @click="deleteConversation">{{ deletingConversation ? '删除中…' : '删除会话' }}</button></div></section></div>
     <div v-if="workspacePendingDelete" class="modal-backdrop"><section class="modal-card delete-workspace-modal" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title"><div class="modal-head"><div><div class="eyebrow">REMOVE WORKSPACE</div><h2 id="delete-workspace-title">从 CodyWork 移除 Workspace？</h2></div><button class="icon-button" aria-label="关闭移除 Workspace 弹窗" :disabled="deletingWorkspace" @click="closeDeleteWorkspace">×</button></div><p>将移除“{{ workspacePendingDelete.name }}”在 CodyWork 中的登记，以及关联的 Repo、Demand、会话审计与缓存数据。</p><p class="delete-workspace-note">不会删除 <code>{{ workspacePendingDelete.path }}</code>，也不会删除其中的 Git 仓库、分支或 Worktree。</p><p class="delete-workspace-confirm">这是一次仅作用于 CodyWork 本地记录的操作。确认后可随时重新添加该目录。</p><p v-if="deleteWorkspaceError" class="form-error" role="alert">{{ deleteWorkspaceError }}</p><div class="modal-actions"><button class="btn" :disabled="deletingWorkspace" @click="closeDeleteWorkspace">取消</button><button class="btn danger" :disabled="deletingWorkspace" @click="deleteWorkspace">{{ deletingWorkspace ? '移除中…' : '确认移除' }}</button></div></section></div>
     <div v-if="baselineCleanupPending" class="modal-backdrop"><section class="modal-card baseline-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="baseline-cleanup-title" aria-describedby="baseline-cleanup-description"><div class="modal-head"><div><div class="eyebrow">DISCARD BASELINE CHANGES</div><h2 id="baseline-cleanup-title">清理基线变更？</h2></div><button class="icon-button" aria-label="关闭清理基线变更弹窗" :disabled="Boolean(clearingRepositoryId)" @click="closeBaselineCleanup">×</button></div><p id="baseline-cleanup-description">将丢弃 <strong>{{ baselineCleanupPending.name }}</strong> 基线仓库中的全部未提交修改和未跟踪文件。</p><p class="baseline-cleanup-note">不会切换分支、不会回退已提交代码、不会同步远端；<strong>不会修改任何 Demand Worktree。</strong></p><p class="baseline-cleanup-path"><code>{{ baselineCleanupPending.path }}</code></p><p v-if="baselineCleanupError" class="form-error" role="alert">{{ baselineCleanupError }}</p><div class="modal-actions"><button class="btn" :disabled="Boolean(clearingRepositoryId)" @click="closeBaselineCleanup">取消</button><button class="btn danger" :disabled="Boolean(clearingRepositoryId)" @click="confirmBaselineCleanup">{{ clearingRepositoryId ? '清理中…' : '确认丢弃基线变更' }}</button></div></section></div>
@@ -141,7 +202,7 @@ import {
   type ComposerImage,
 } from '@codycodeagent/cody-web-core/composer'
 import type { ConversationSubscriptionEvent } from '@codycodeagent/cody-web-core/client'
-import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyComposerOption, type CodyMessage } from '@codycodeagent/cody-web-core/vue'
+import { CodyComposer, CodyConversation, CodyMarkdown, conversationEntriesFromState, useConversationController, type CodyComposerOption, type CodyMessage } from '@codycodeagent/cody-web-core/vue'
 import '@codycodeagent/cody-web-core/vue/style.css'
 import WorkspaceSetupDialog from './components/WorkspaceSetupDialog.vue'
 import WorkbenchSidebar from './components/WorkbenchSidebar.vue'
@@ -161,8 +222,9 @@ import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepos
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
 import { buildConversationRecoveryPrompt, isThreadMigrationRecommended, recoveryConversationTitle } from './conversationRecovery'
 import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
+import { splitDiffRows, trimDiffContext, type FilePreviewDiffLayout } from './filePreviewDiff'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
-import { initialModelId, reasoningOptionsForModel, reconcileReasoningEffort } from './composerModels'
+import { initialModelId, modelDescription, reasoningOptionsForModel, reconcileReasoningEffort } from './composerModels'
 import { quickActionsForScene, resolveQuickActionSkills } from './quickActions'
 import { skillInstallIsActive, skillInstallStatusLabel } from './skillInstallPresentation'
 import {
@@ -188,9 +250,12 @@ import {
   type RuntimeDiagnostics,
   type RuntimeFailureReport,
   type RuntimeRateLimitWindow,
+  type RuntimeDescriptor,
   type RuntimeSettings,
   type SkillInstallStatus,
+  type TraeConversationCache,
   type Workspace,
+  type WorkspaceFilePreview,
   type WorkspaceSkill,
 } from './api'
 import {
@@ -205,6 +270,7 @@ import {
   filterSkills,
   groupThreadProjects,
   matchDemandRoute,
+  migrationRuntimeOptions,
   parseWorkbenchRoute,
   threadTitle,
   skillSearchSummary,
@@ -220,12 +286,14 @@ type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'cha
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const workspaceConversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
 const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage, retryFailedUserMessage, interrupt: interruptConversationState } = useConversationController()
-const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const composerImages = ref<ComposerImage[]>([]); const composerImageError = ref(''); const uploadingImages = ref(false); const runtimeModels = ref<ComposerOptions['models']>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const socketConnection = ref<ConversationSocketSnapshot>(initialConversationSocketSnapshot()); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const demandRepositoryQuery = ref(''); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
+const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const composerImages = ref<ComposerImage[]>([]); const composerImageError = ref(''); const uploadingImages = ref(false); const runtimeModels = ref<ComposerOptions['models']>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const runtimeCapabilities = ref<ComposerOptions['capabilities']>({ modelSelection: false, reasoning: false, structuredSkills: false, imageInput: false, nativeSessionList: false, planMode: false, steer: false, append: false, questions: false, aiCodeReports: false }); const socketConnection = ref<ConversationSocketSnapshot>(initialConversationSocketSnapshot()); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const showCreateConversation = ref(false); const createConversationError = ref(''); const selectedCreateRuntime = ref<string>('codex'); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const selectedRepositoryIds = ref<string[]>([]); const demandRepositoryQuery = ref(''); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const bindModelsLoading = ref(false); const bindRuntimeModels = ref<ComposerOptions['models']>([]); const selectedBindRuntime = ref<string>('codex'); const selectedBindModel = ref(''); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 // Composer state belongs to a conversation. Keeping a single global draft made
 // a failed message from one session appear in a newly-created session.
 const draftByConversationId = new Map<string, string>()
 const composerImagesByConversationId = new Map<string, ComposerImage[]>()
 const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapshot | null>(null); const dashboardRefreshing = ref(false); const knowledge = ref<KnowledgeDocument[]>([]); const selectedKnowledge = ref<KnowledgeDocument | null>(null); const knowledgeQuery = ref(''); const skills = ref<WorkspaceSkill[]>([]); const selectedSkill = ref<WorkspaceSkill | null>(null); const skillQuery = ref(''); const skillSource = ref(''); const installingSkill = ref(false); const skillJob = ref<SkillInstallStatus | null>(null); const showSkillInstallDialog = ref(false); const pausingSkillInstall = ref(false); const runtime = ref<RuntimeSettings | null>(null); const runtimeCommand = ref(''); const runtimeMessage = ref(''); const testingRuntime = ref(false); const runtimeDiagnostics = ref<RuntimeDiagnostics | null>(null); const runtimeFailureReport = ref<RuntimeFailureReport | null>(null); const runtimeRateLimits = ref<RuntimeAccountRateLimits | null>(null); const loadingRuntimeDetails = ref(false); const reloadingMcp = ref(false); const compactingConversation = ref(false); const compactConversationMessage = ref(''); const showAddRepository = ref(false); const repositorySource = ref<'folder' | 'git'>('folder'); const repositoryPath = ref(''); const repositoryUrl = ref(''); const repositoryName = ref(''); const demandNavExpanded = ref(true); const workspaceSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'workspace-sidebar')); const conversationSidebarCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-sidebar')); const copiedDemandPath = ref(''); const copiedDemandLink = ref('')
+const runtimeType = ref<string>('codex')
+const composerCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-composer'))
 const settingsSection = ref<WorkbenchSettingsSection>('overview')
 const quickActions = ref<QuickAction[]>([])
 const selectedQuickActionId = ref('')
@@ -260,6 +328,31 @@ const conversationShareAccounts = ref<FeishuChannelAccount[]>([])
 const sharingConversation = ref(false)
 const conversationShareError = ref('')
 const conversationShareResult = ref<ConversationShareResult | null>(null)
+const traeCache = ref<TraeConversationCache | null>(null)
+const showTraeCacheDialog = ref(false)
+const traeCacheBusy = ref(false)
+const traeCacheError = ref('')
+const traeCacheClearConfirmed = ref(false)
+const conversationFilePreview = ref<WorkspaceFilePreview | null>(null)
+const conversationFilePreviewLine = ref(1)
+const conversationFilePreviewMode = ref<'file' | 'diff'>('file')
+const conversationFileDiffLayout = ref<FilePreviewDiffLayout>('split')
+const conversationFileDiffBefore = ref(3)
+const conversationFileDiffAfter = ref(3)
+const conversationFilePreviewWrap = ref(true)
+const conversationFileDiffLinkedScroll = ref(true)
+const conversationFilePreviewLoading = ref(false)
+const conversationFilePreviewError = ref('')
+const conversationFilePreviewModal = ref<HTMLElement | null>(null)
+const conversationFilePreviewFullscreen = ref(false)
+const conversationFileDiffOldScroll = ref<HTMLElement | null>(null)
+const conversationFileDiffNewScroll = ref<HTMLElement | null>(null)
+let conversationFilePreviewRequest = 0
+let conversationFileDiffScrollSyncing = false
+const conversationMigrationSource = ref<Conversation | null>(null)
+const migratingRuntime = ref(false)
+const runtimeMigrationError = ref('')
+const selectedMigrationRuntime = ref('')
 const showAiCodeReport = ref(false)
 const aiReportSummary = ref<AiReportDemandSummary | null>(null)
 const aiReportLoading = ref(false)
@@ -336,11 +429,65 @@ const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.tr
 const filteredSkills = computed(() => filterSkills(skills.value, skillQuery.value))
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
 const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
-const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Codex Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : settingsSection.value === 'smart-notifications' ? '智能通知' : '设置')
+const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : settingsSection.value === 'smart-notifications' ? '智能通知' : '设置')
+const runtimeOptions = computed(() => (runtime.value?.runtimes ?? []).map(runtime => ({ value: runtime.id, label: runtime.label })))
+const runtimeDescriptor = (runtimeType: string): RuntimeDescriptor | undefined => runtime.value?.runtimes.find(item => item.id === runtimeType)
+const selectedRuntimeDescriptor = computed(() => runtimeDescriptor(runtimeType.value))
+const activeRuntimeType = computed<string>(() => selectedConversation.value?.runtimeType ?? runtime.value?.runtimeType ?? 'codex')
+const activeRuntimeLabel = computed(() => runtimeDescriptor(activeRuntimeType.value)?.label ?? activeRuntimeType.value)
+const bindRuntimeLabel = computed(() => runtimeDescriptor(selectedBindRuntime.value)?.label ?? selectedBindRuntime.value)
+const bindRuntimeDescription = computed(() => runtimeDescriptor(selectedBindRuntime.value)?.description ?? '使用该 Runtime 的原生会话；可恢复范围由 Runtime 本身声明。')
+const bindNativeSessionLabel = computed(() => 'Session')
+const selectedBindModelDescription = computed(() => {
+  const model = bindRuntimeModels.value.find(candidate => candidate.id === selectedBindModel.value)
+  return model ? modelDescription(model) : ''
+})
+const traeCacheBadgeTitle = computed(() => {
+  const cache = traeCache.value
+  if (!cache) return runtimeBaseDescription('trae')
+  return `Trae ACP Session · 本地回放缓存：${cache.eventCount} 个回放节点（非消息条数），${formatCacheBytes(cache.byteLength)}。点击管理缓存。`
+})
+const migrationTargets = computed(() => migrationRuntimeOptions(runtimeOptions.value, conversationMigrationSource.value?.runtimeType))
+const composerRuntimeHint = computed(() => {
+  if (selectedCollaborationModeKind.value === 'plan') return 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。'
+  const provider = activeRuntimeLabel.value
+  if (activeRuntimeType.value === 'trae') {
+    if (permission.value === 'yolo') return `${provider} YOLO：自动选择 ACP 提供的允许选项；仅在 Trae 请求权限时生效。`
+    if (permission.value === 'workspace-write') return `${provider} Normal：将 Trae ACP 权限请求交给当前审批界面。`
+    return `${provider} 只读：拒绝 Trae ACP 请求的写入权限；未声明权限请求的工具不会被伪装为已沙箱化。`
+  }
+  if (permission.value === 'yolo') return `${provider} YOLO：使用当前服务账号的完整系统权限执行。`
+  if (permission.value === 'workspace-write') return `${provider} Normal：使用原生 workspace-write 与审批机制。`
+  return `${provider} 只读：允许读取和查询，但不能修改文件。`
+})
+watch(runtimeType, value => { if (runtime.value) runtimeCommand.value = runtime.value.commands[value] ?? '' })
 const threadProjects = computed<ThreadProject[]>(() => groupThreadProjects(nativeThreads.value, selectedDemand.value?.repositories.map(repo => repo.worktreePath) ?? []))
 const filteredNativeThreads = computed(() => filterNativeThreads(nativeThreads.value, selectedThreadProject.value, threadQuery.value))
 const canBindNativeThread = computed(() => manualThreadEntry.value ? Boolean(boundNativeId.value.trim()) : filteredNativeThreads.value.some(thread => thread.nativeId === boundNativeId.value && !thread.bound))
-const composerModels = computed<CodyComposerOption[]>(() => runtimeModels.value.map(model => ({ value: model.id, label: model.label, description: model.description })))
+const composerModels = computed<CodyComposerOption[]>(() => runtimeModels.value.map(model => ({ value: model.id, label: model.label, description: modelDescription(model) })))
+const selectedModelDetails = computed(() => {
+  const model = runtimeModels.value.find(candidate => candidate.id === selectedModel.value)
+  return model ? modelDescription(model) : ''
+})
+const isMarkdownFilePreview = computed(() => ['md', 'mdx'].includes(conversationFilePreview.value?.extension ?? ''))
+const filePreviewModeHint = computed(() => {
+  const preview = conversationFilePreview.value
+  if (!preview) return ''
+  if (conversationFilePreviewMode.value === 'file') return `${preview.extension || 'text'} · ${preview.size.toLocaleString()} bytes`
+  return preview.diff.base === 'untracked' ? '未跟踪文件：与空文件比较' : '工作区相对 HEAD 的未提交改动'
+})
+const visibleFilePreviewDiff = computed(() => {
+  const preview = conversationFilePreview.value
+  if (!preview) return ''
+  return trimDiffContext(preview.diff.content, conversationFileDiffBefore.value, conversationFileDiffAfter.value)
+})
+const filePreviewLines = computed(() => {
+  const preview = conversationFilePreview.value
+  if (!preview) return []
+  const content = conversationFilePreviewMode.value === 'diff' ? visibleFilePreviewDiff.value : preview.content
+  return content.replace(/\n$/u, '').split('\n')
+})
+const filePreviewSplitRows = computed(() => splitDiffRows(visibleFilePreviewDiff.value))
 const coreCollaborationModes = computed<ComposerCollaborationModeOption[]>(() => {
   return mergeCollaborationModeOptions(runtimeCollaborationModes.value.map((mode) => {
     const reasoningEffort = mode.reasoningEffort ?? ''
@@ -357,18 +504,27 @@ const coreCollaborationModes = computed<ComposerCollaborationModeOption[]>(() =>
 const composerCollaborationModes = computed<CodyComposerOption[]>(() => coreCollaborationModes.value.map(mode => ({ value: mode.name, label: mode.label })))
 const selectedCollaborationMode = computed(() => reconcileSelectedCollaborationModeName(selectedCollaborationModeName.value, coreCollaborationModes.value))
 const selectedCollaborationModeKind = computed<'default' | 'plan'>(() => coreCollaborationModes.value.find(mode => mode.name === selectedCollaborationMode.value)?.mode ?? 'default')
-const composerSubmitModes = computed<CodyComposerOption[]>(() => [{ value: 'queue', label: '排队', description: '当前 Turn 结束后顺序执行。' }, { value: 'steer', label: '引导', description: '正在执行时发送给当前 Turn。' }])
-const composerReasoningOptions = computed<CodyComposerOption[]>(() => reasoningOptionsForModel(runtimeModels.value, selectedModel.value))
-const composerPermissionOptions = computed<CodyComposerOption[]>(() => [
-  { value: 'read-only', label: '只读', description: '使用 Codex 原生 read-only，只读取和查询。' },
-  { value: 'workspace-write', label: 'Normal', description: '使用 Codex 原生 workspace-write 与审批机制。' },
-  { value: 'yolo', label: 'YOLO', description: '使用 Codex danger-full-access；拥有服务账号可用的完整系统权限。' },
+const composerSubmitModes = computed<CodyComposerOption[]>(() => [
+  { value: 'queue', label: '排队', description: '当前 Turn 结束后顺序执行。' },
+  ...(runtimeCapabilities.value.append ? [{ value: 'append', label: '追加', description: '立即发送给正在执行的任务；不能追加时会明确转入队列。' }] : []),
+  ...(runtimeCapabilities.value.steer ? [{ value: 'steer', label: '引导', description: '正在执行时发送给当前 Turn。' }] : []),
 ])
-const composerSkills = computed<CodyComposerOption[]>(() => runtimeSkills.value.map(skill => ({
+const composerReasoningOptions = computed<CodyComposerOption[]>(() => runtimeCapabilities.value.reasoning ? reasoningOptionsForModel(runtimeModels.value, selectedModel.value) : [])
+const composerPermissionOptions = computed<CodyComposerOption[]>(() => [
+  { value: 'read-only', label: '只读', description: activeRuntimeType.value === 'trae' ? '拒绝 Trae ACP 请求的写入权限。' : '使用 Codex 原生 read-only，只读取和查询。' },
+  { value: 'workspace-write', label: 'Normal', description: activeRuntimeType.value === 'trae' ? '将 Trae ACP 权限请求交给审批界面。' : '使用 Codex 原生 workspace-write 与审批机制。' },
+  { value: 'yolo', label: 'YOLO', description: activeRuntimeType.value === 'trae' ? '自动选择 Trae ACP 提供的允许选项。' : '使用 Codex danger-full-access；拥有服务账号可用的完整系统权限。' },
+])
+const composerSkills = computed<CodyComposerOption[]>(() => runtimeCapabilities.value.structuredSkills ? runtimeSkills.value.map(skill => ({
   value: skill.id,
   label: skill.label,
   description: [skillSourceLabel(skill.scope), skill.description, skillIdentityDescription(runtimeSkills.value, skill), sameNameSkills(runtimeSkills.value, skill).length ? skill.path : ''].filter(Boolean).join(' · '),
-})))
+})) : [])
+const composerPlaceholder = computed(() => {
+  const imageHint = runtimeCapabilities.value.imageInput ? '（可粘贴或拖入图片；Enter 换行，Control + Enter 发送）' : '（Enter 换行，Control + Enter 发送）'
+  if (isRunning.value) return selectedSubmitMode.value === 'steer' ? `描述引导…${imageHint}` : selectedSubmitMode.value === 'append' ? `补充当前任务…${imageHint}` : `描述下一步…${imageHint}`
+  return `描述你希望完成的事情…${imageHint}`
+})
 
 function displayConversationStatus(conversation: Conversation): Conversation['status'] {
   const state = selectedConversation.value?.id === conversation.id && conversationState.value.threadId === conversation.nativeId
@@ -383,6 +539,10 @@ function setWorkspaceSidebarCollapsed(collapsed: boolean): void {
 function setConversationSidebarCollapsed(collapsed: boolean): void {
   conversationSidebarCollapsed.value = collapsed
   writePanelCollapsed(window.localStorage, 'conversation-sidebar', collapsed)
+}
+function setComposerCollapsed(collapsed: boolean): void {
+  composerCollapsed.value = collapsed
+  writePanelCollapsed(window.localStorage, 'conversation-composer', collapsed)
 }
 function conversationWithDisplayStatus(conversation: Conversation): Conversation {
   return { ...conversation, status: displayConversationStatus(conversation) }
@@ -506,7 +666,10 @@ async function loadWorkspaces(): Promise<void> {
     const active = nextWorkspaces.find((item) => item.id === route.workspaceId)
       ?? nextWorkspaces.find((item) => item.active)
       ?? nextWorkspaces[0]
-    if (active) await selectWorkspace(active, { demandId: route.demandId, conversationId: route.conversationId, page: route.page, settingsSection: route.settingsSection, history: 'replace' })
+    if (active) {
+      await selectWorkspace(active, { demandId: route.demandId, conversationId: route.conversationId, page: route.page, settingsSection: route.settingsSection, history: 'replace' })
+      await openRouteFilePreview(route)
+    }
   } catch (cause) {
     if (sequence === workspaceLoadSequence) error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -738,7 +901,11 @@ async function pauseSkillInstall(): Promise<void> {
 }
 async function loadRuntime(): Promise<void> {
   runtime.value = await api.runtimeSettings()
+  runtimeType.value = runtime.value.runtimeType
   runtimeCommand.value = runtime.value.command
+  selectedCreateRuntime.value = runtimeOptions.value.some(option => option.value === runtime.value!.runtimeType)
+    ? runtime.value.runtimeType
+    : runtimeOptions.value[0]?.value ?? runtime.value.runtimeType
   await loadRuntimeDetails()
 }
 async function loadRuntimeDetails(): Promise<void> {
@@ -757,8 +924,10 @@ async function loadRuntimeDetails(): Promise<void> {
 }
 async function saveRuntime(): Promise<void> {
   try {
-    runtime.value = await api.updateRuntimeSettings({ command: runtimeCommand.value.trim() })
-    runtimeMessage.value = '已保存。下一次会话将使用新的 App Server 设置。'
+    runtime.value = await api.updateRuntimeSettings({ runtimeType: runtimeType.value, command: runtimeCommand.value.trim() })
+    runtimeType.value = runtime.value.runtimeType
+    runtimeCommand.value = runtime.value.command
+    runtimeMessage.value = '已保存。新建会话时会使用这里选择的默认 Runtime。已有会话不会被自动迁移。'
   } catch (cause) { runtimeMessage.value = cause instanceof Error ? cause.message : String(cause) }
 }
 async function testRuntime(): Promise<void> {
@@ -945,7 +1114,7 @@ async function openDemand(demand: Demand, history: HistoryMode = 'push', preferr
   demandConversationBindings.value = []
   activePage.value = 'chat'
   updateRoute(demand, history)
-  await Promise.all([loadComposerOptions(demand.id), loadSkills(), loadQuickActions(), loadDemandChannelBindings(demand)])
+  await Promise.all([loadComposerOptions(undefined, demand.id), loadSkills(), loadQuickActions(), loadDemandChannelBindings(demand)])
   conversations.value = await api.listConversations(workspace.value!.id, demand.id)
   if (!conversations.value.length) {
     const created = await api.createConversation(workspace.value!.id, demand.id)
@@ -973,7 +1142,11 @@ async function restoreRoute(): Promise<void> {
   const route = routeParams()
   const nextWorkspace = workspaces.value.find((item) => item.id === route.workspaceId) ?? workspace.value
   if (!nextWorkspace) return
-  if (workspace.value?.id !== nextWorkspace.id) { await selectWorkspace(nextWorkspace, { demandId: route.demandId, conversationId: route.conversationId, page: route.page, settingsSection: route.settingsSection, history: 'none' }); return }
+  if (workspace.value?.id !== nextWorkspace.id) {
+    await selectWorkspace(nextWorkspace, { demandId: route.demandId, conversationId: route.conversationId, page: route.page, settingsSection: route.settingsSection, history: 'none' })
+    await openRouteFilePreview(route)
+    return
+  }
   if (route.demandId) {
     const demand = demandFromRoute(route.demandId)
     if (demand && selectedDemand.value?.id !== demand.id) await openDemand(demand, 'none', route.conversationId)
@@ -983,12 +1156,14 @@ async function restoreRoute(): Promise<void> {
       else error.value = '链接中的会话不存在。'
     }
     else if (!demand) error.value = '链接中的 Demand 不存在。'
+    await openRouteFilePreview(route)
     return
   }
   if (route.conversationId) {
     const conversation = workspaceConversations.value.find(item => item.id === route.conversationId)
     if (conversation) await openWorkspaceConversations('none', conversation.id)
     else error.value = '链接中的 Workspace 会话不存在。'
+    await openRouteFilePreview(route)
     return
   }
   selectedDemand.value = null
@@ -1002,6 +1177,7 @@ async function restoreRoute(): Promise<void> {
     if (route.settingsSection === 'runtime') await loadRuntime()
     if (route.settingsSection === 'quick-actions') await loadSkills()
   }
+  await openRouteFilePreview(route)
 }
 async function connect(conversation: Conversation): Promise<void> {
   visibleConversationEntryCount.value = DEFAULT_VISIBLE_MESSAGE_COUNT
@@ -1038,6 +1214,7 @@ async function connect(conversation: Conversation): Promise<void> {
         onEvent(event) {
           const productEvent = event as ConversationEvent
           listener({ type: 'event', event: productEvent, ownerRevision: productEvent.ownerRevision } satisfies ConversationSubscriptionEvent)
+          if (conversation.runtimeType === 'trae') scheduleTraeCacheRefresh(conversation)
         },
         onConnection(event) { listener(event) },
         onState(state) {
@@ -1048,7 +1225,173 @@ async function connect(conversation: Conversation): Promise<void> {
     },
   })
 }
-async function openConversation(conversation: Conversation, history: HistoryMode = 'push'): Promise<void> { selectedConversation.value = conversation; updateRoute(selectedDemand.value, history, conversation.id); permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; conversationChannelBindings.value = []; channelBindingMessage.value = ''; error.value = ''; await Promise.all([connect(conversation), loadConversationChannelBindings(conversation)]); await scrollToBottom(true) }
+async function openConversation(conversation: Conversation, history: HistoryMode = 'push'): Promise<void> { selectedConversation.value = conversation; updateRoute(selectedDemand.value, history, conversation.id); permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; conversationChannelBindings.value = []; channelBindingMessage.value = ''; traeCache.value = null; resetTraeCachePolling(); error.value = ''; await Promise.all([connect(conversation), loadConversationChannelBindings(conversation), loadComposerOptions(conversation), loadTraeCache(conversation)]); startTraeCachePolling(); await scrollToBottom(true) }
+function closeConversationFilePreview(): void {
+  if (document.fullscreenElement === conversationFilePreviewModal.value) void document.exitFullscreen()
+  conversationFilePreviewRequest += 1
+  conversationFilePreview.value = null
+  conversationFilePreviewLine.value = 1
+  conversationFilePreviewMode.value = 'file'
+  conversationFileDiffLayout.value = 'split'
+  conversationFileDiffBefore.value = 3
+  conversationFileDiffAfter.value = 3
+  conversationFilePreviewWrap.value = true
+  conversationFileDiffLinkedScroll.value = true
+  conversationFilePreviewLoading.value = false
+  conversationFilePreviewError.value = ''
+}
+async function openConversationFile(input: { path: string; line: number }): Promise<void> {
+  const activeWorkspace = workspace.value
+  if (!activeWorkspace) return
+  const request = ++conversationFilePreviewRequest
+  conversationFilePreview.value = null
+  conversationFilePreviewLine.value = Math.max(1, input.line || 1)
+  conversationFilePreviewMode.value = 'file'
+  conversationFileDiffLayout.value = 'split'
+  conversationFileDiffBefore.value = 3
+  conversationFileDiffAfter.value = 3
+  conversationFilePreviewWrap.value = true
+  conversationFileDiffLinkedScroll.value = true
+  conversationFilePreviewError.value = ''
+  conversationFilePreviewLoading.value = true
+  try {
+    // Fetch a bounded 100-line hunk context once. The UI can then expand the
+    // upper and lower context of each hunk without issuing extra file reads.
+    const preview = await api.previewWorkspaceFile(activeWorkspace.id, input.path, {
+      diffContext: 100,
+      demandId: selectedConversation.value?.demandId ?? selectedDemand.value?.id,
+    })
+    if (request === conversationFilePreviewRequest) {
+      conversationFilePreview.value = preview
+      conversationFilePreviewMode.value = preview.diff.available ? 'diff' : 'file'
+    }
+  } catch (cause) {
+    if (request === conversationFilePreviewRequest) conversationFilePreviewError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (request === conversationFilePreviewRequest) conversationFilePreviewLoading.value = false
+  }
+}
+async function openRouteFilePreview(route: ReturnType<typeof parseWorkbenchRoute>): Promise<void> {
+  if (!route.filePath || !workspace.value) return
+  await openConversationFile({ path: route.filePath, line: route.fileLine ?? 1 })
+}
+function syncConversationFilePreviewFullscreen(): void {
+  conversationFilePreviewFullscreen.value = document.fullscreenElement === conversationFilePreviewModal.value
+}
+async function toggleConversationFilePreviewFullscreen(): Promise<void> {
+  const modal = conversationFilePreviewModal.value
+  if (!modal) return
+  try {
+    if (document.fullscreenElement === modal) await document.exitFullscreen()
+    else await modal.requestFullscreen()
+    syncConversationFilePreviewFullscreen()
+  } catch {
+    conversationFilePreviewError.value = '当前浏览器无法进入全屏查看。'
+  }
+}
+/** Keeps the opposite split pane anchored to the same logical Diff row. */
+function syncConversationFileDiffScroll(source: 'old' | 'new', event: Event): void {
+  if (!conversationFileDiffLinkedScroll.value || conversationFileDiffScrollSyncing) return
+  const current = event.currentTarget
+  const opposite = source === 'old' ? conversationFileDiffNewScroll.value : conversationFileDiffOldScroll.value
+  if (!(current instanceof HTMLElement) || !opposite) return
+  const rows = [...current.querySelectorAll<HTMLElement>('[data-diff-row]')]
+  let anchor = rows[0]
+  for (const row of rows) {
+    if (row.offsetTop > current.scrollTop) break
+    anchor = row
+  }
+  const anchorKey = anchor?.dataset.diffRow
+  if (!anchorKey) return
+  const oppositeAnchor = opposite.querySelector<HTMLElement>(`[data-diff-row="${anchorKey}"]`)
+  if (!oppositeAnchor) return
+  conversationFileDiffScrollSyncing = true
+  opposite.scrollTop = Math.max(0, oppositeAnchor.offsetTop + (current.scrollTop - anchor.offsetTop))
+  window.requestAnimationFrame(() => { conversationFileDiffScrollSyncing = false })
+}
+function diffLineKind(line: string): 'added' | 'removed' | 'hunk' | 'meta' | '' {
+  if (conversationFilePreviewMode.value !== 'diff') return ''
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'added'
+  if (line.startsWith('-') && !line.startsWith('---')) return 'removed'
+  if (line.startsWith('@@')) return 'hunk'
+  if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) return 'meta'
+  return ''
+}
+function diffLineNumber(index: number, line: string): string { return line.startsWith('@@') ? '@@' : String(index + 1) }
+async function loadTraeCache(conversation: Conversation, background = false): Promise<void> {
+  const activeWorkspace = workspace.value
+  if (!activeWorkspace) return
+  try {
+    const cache = await api.traeConversationCache(activeWorkspace.id, conversation.id)
+    if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) {
+      traeCache.value = cache
+      startTraeCachePolling()
+    }
+  } catch (cause) {
+    if (!background && workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === conversation.id) error.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+const TRAE_CACHE_REFRESH_INTERVAL_MS = 15_000
+let traeCachePollTimer: number | null = null
+let traeCacheRefreshTimer: number | null = null
+function resetTraeCachePolling(): void {
+  if (traeCachePollTimer !== null) window.clearInterval(traeCachePollTimer)
+  if (traeCacheRefreshTimer !== null) window.clearTimeout(traeCacheRefreshTimer)
+  traeCachePollTimer = null
+  traeCacheRefreshTimer = null
+}
+function startTraeCachePolling(): void {
+  resetTraeCachePolling()
+  if (!traeCache.value || selectedConversation.value?.runtimeType !== 'trae') return
+  traeCachePollTimer = window.setInterval(() => {
+    const conversation = selectedConversation.value
+    if (document.visibilityState === 'visible' && conversation?.runtimeType === 'trae') void loadTraeCache(conversation, true)
+  }, TRAE_CACHE_REFRESH_INTERVAL_MS)
+}
+function scheduleTraeCacheRefresh(conversation: Conversation): void {
+  if (traeCacheRefreshTimer !== null || selectedConversation.value?.id !== conversation.id) return
+  traeCacheRefreshTimer = window.setTimeout(() => {
+    traeCacheRefreshTimer = null
+    if (document.visibilityState === 'visible') void loadTraeCache(conversation, true)
+  }, 600)
+}
+function refreshVisibleTraeCache(): void {
+  const conversation = selectedConversation.value
+  if (document.visibilityState === 'visible' && conversation?.runtimeType === 'trae') scheduleTraeCacheRefresh(conversation)
+}
+function formatCacheBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+function formatCacheTime(value: string | null): string { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚无缓存' }
+function openTraeCacheDialog(): void { traeCacheError.value = ''; traeCacheClearConfirmed.value = false; showTraeCacheDialog.value = true }
+function closeTraeCacheDialog(): void { if (!traeCacheBusy.value) { showTraeCacheDialog.value = false; traeCacheError.value = ''; traeCacheClearConfirmed.value = false } }
+async function refreshTraeCacheAndConversation(): Promise<void> {
+  const activeWorkspace = workspace.value
+  const conversation = selectedConversation.value
+  if (!activeWorkspace || !conversation) return
+  await Promise.all([loadTraeCache(conversation), connect(conversation)])
+  await scrollToBottom(true)
+}
+async function compactTraeCache(): Promise<void> {
+  const activeWorkspace = workspace.value
+  const conversation = selectedConversation.value
+  if (!activeWorkspace || !conversation || traeCacheBusy.value) return
+  traeCacheBusy.value = true; traeCacheError.value = ''
+  try { traeCache.value = await api.compactTraeConversationCache(activeWorkspace.id, conversation.id); await refreshTraeCacheAndConversation(); showTraeCacheDialog.value = false }
+  catch (cause) { traeCacheError.value = cause instanceof Error ? cause.message : String(cause) }
+  finally { traeCacheBusy.value = false }
+}
+async function clearTraeCache(): Promise<void> {
+  const activeWorkspace = workspace.value
+  const conversation = selectedConversation.value
+  if (!activeWorkspace || !conversation || traeCacheBusy.value || !traeCacheClearConfirmed.value) return
+  traeCacheBusy.value = true; traeCacheError.value = ''
+  try { traeCache.value = await api.clearTraeConversationCache(activeWorkspace.id, conversation.id); await refreshTraeCacheAndConversation(); showTraeCacheDialog.value = false }
+  catch (cause) { traeCacheError.value = cause instanceof Error ? cause.message : String(cause) }
+  finally { traeCacheBusy.value = false }
+}
 async function loadConversationChannelBindings(conversation: Conversation): Promise<void> {
   const activeWorkspace = workspace.value
   if (!activeWorkspace) return
@@ -1076,6 +1419,13 @@ function conversationRowAriaLabel(conversation: Conversation): string {
   const status = statusLabel(displayConversationStatus(conversation))
   const badge = conversationChannelBadge(conversation, bindingsForConversation(conversation))
   return badge ? `${conversation.title}，${status}。${badge.detail}` : `${conversation.title}，${status}`
+}
+function conversationRowTooltip(conversation: Conversation): string {
+  return [
+    `会话：${conversation.title}`,
+    `Runtime：${runtimeDescriptor(conversation.runtimeType)?.label ?? conversation.runtimeType}`,
+    `状态：${statusLabel(displayConversationStatus(conversation))}`,
+  ].join('\n')
 }
 async function loadDemandChannelBindings(demand: Demand): Promise<void> {
   const activeWorkspace = workspace.value
@@ -1265,16 +1615,66 @@ async function createDemand(): Promise<void> { if (!workspace.value) return; cre
 async function createConversation(): Promise<void> {
   if (!workspace.value || creatingConversation.value || (!selectedDemand.value && !isWorkspaceConversationPage.value)) return
   creatingConversation.value = true
-  error.value = ''
+  createConversationError.value = ''
   try {
     const created = selectedDemand.value
-      ? await api.createConversation(workspace.value.id, selectedDemand.value.id)
-      : await api.createWorkspaceConversation(workspace.value.id)
+      ? await api.createConversation(workspace.value.id, selectedDemand.value.id, undefined, selectedCreateRuntime.value)
+      : await api.createWorkspaceConversation(workspace.value.id, undefined, selectedCreateRuntime.value)
     conversations.value = [created, ...conversations.value]
     if (created.scope === 'workspace') workspaceConversations.value = conversations.value
+    showCreateConversation.value = false
     await openConversation(created)
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
+  } catch (cause) { createConversationError.value = cause instanceof Error ? cause.message : String(cause) }
   finally { creatingConversation.value = false }
+}
+function openCreateConversation(): void {
+  selectedCreateRuntime.value = runtimeOptions.value.some(option => option.value === selectedCreateRuntime.value)
+    ? selectedCreateRuntime.value
+    : runtimeOptions.value[0]?.value ?? runtime.value?.runtimeType ?? 'codex'
+  createConversationError.value = ''
+  showCreateConversation.value = true
+}
+function closeCreateConversation(): void {
+  if (creatingConversation.value) return
+  showCreateConversation.value = false
+  createConversationError.value = ''
+}
+function runtimeBaseLabel(runtimeType: string): string { return runtimeDescriptor(runtimeType)?.label.toUpperCase() ?? runtimeType.toUpperCase() }
+function runtimeBaseDescription(runtimeType: string): string {
+  return runtimeDescriptor(runtimeType)?.description ?? `当前会话由 ${runtimeType} Runtime 提供能力。`
+}
+function canMigrateConversation(conversation: Conversation): boolean {
+  return Boolean(runtimeOptions.value.some(option => option.value !== conversation.runtimeType))
+    && conversation.id === selectedConversation.value?.id && !sending.value && !isRunning.value
+}
+function openRuntimeMigration(conversation: Conversation = selectedConversation.value!): void {
+  if (!conversation || !canMigrateConversation(conversation)) return
+  conversationMigrationSource.value = conversation
+  selectedMigrationRuntime.value = ''
+  runtimeMigrationError.value = ''
+}
+function closeRuntimeMigration(): void {
+  if (migratingRuntime.value) return
+  conversationMigrationSource.value = null
+  selectedMigrationRuntime.value = ''
+  runtimeMigrationError.value = ''
+}
+async function confirmRuntimeMigration(): Promise<void> {
+  const activeWorkspace = workspace.value
+  const source = conversationMigrationSource.value
+  if (!activeWorkspace || !source || migratingRuntime.value) return
+  migratingRuntime.value = true
+  runtimeMigrationError.value = ''
+  try {
+    const created = await api.migrateConversationRuntime(activeWorkspace.id, source.id, selectedMigrationRuntime.value)
+    conversations.value = [created, ...conversations.value]
+    if (created.scope === 'workspace') workspaceConversations.value = conversations.value
+    conversationMigrationSource.value = null
+    selectedMigrationRuntime.value = ''
+    await openConversation(created)
+  } catch (cause) {
+    runtimeMigrationError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally { migratingRuntime.value = false }
 }
 async function settleConversation(): Promise<void> {
   if (!selectedDemand.value || !selectedConversation.value) return
@@ -1287,10 +1687,56 @@ async function settleConversation(): Promise<void> {
   })
   await submitConversationMessage(prompt, [], '沉淀当前会话到 Demand 文档', [])
 }
-async function openBindConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value) return; modalError.value = ''; boundNativeId.value = ''; boundConversationTitle.value = ''; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; showBindConversation.value = true; threadPickerLoading.value = true; try { nativeThreads.value = await api.listAvailableNativeThreads(workspace.value.id, selectedDemand.value.id) } catch (cause) { nativeThreads.value = []; modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { threadPickerLoading.value = false } }
-function closeBindConversation(): void { if (bindingConversation.value) return; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false }
+async function loadBindRuntimeOptions(): Promise<void> {
+  if (!workspace.value || !selectedDemand.value) return
+  const runtimeType = selectedBindRuntime.value
+  threadPickerLoading.value = true
+  bindModelsLoading.value = true
+  modalError.value = ''
+  boundNativeId.value = ''
+  selectedThreadProject.value = ''
+  threadQuery.value = ''
+  selectedBindModel.value = ''
+  try {
+    const [threads, options] = await Promise.all([
+      api.listAvailableNativeThreads(workspace.value.id, selectedDemand.value.id, runtimeType),
+      api.composerOptions(workspace.value.id, selectedDemand.value.id, undefined, runtimeType),
+    ])
+    if (runtimeType !== selectedBindRuntime.value) return
+    nativeThreads.value = threads
+    bindRuntimeModels.value = options.capabilities.modelSelection ? options.models : []
+  } catch (cause) {
+    if (runtimeType !== selectedBindRuntime.value) return
+    nativeThreads.value = []
+    bindRuntimeModels.value = []
+    modalError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    if (runtimeType === selectedBindRuntime.value) {
+      threadPickerLoading.value = false
+      bindModelsLoading.value = false
+    }
+  }
+}
+async function openBindConversation(): Promise<void> {
+  if (!workspace.value || !selectedDemand.value) return
+  modalError.value = ''
+  boundNativeId.value = ''
+  boundConversationTitle.value = ''
+  selectedThreadProject.value = ''
+  threadQuery.value = ''
+  manualThreadEntry.value = false
+  selectedBindRuntime.value = selectedCreateRuntime.value
+  showBindConversation.value = true
+  await loadBindRuntimeOptions()
+}
+function changeBindRuntime(runtimeType: string): void {
+  if (runtimeType === selectedBindRuntime.value || bindingConversation.value) return
+  selectedBindRuntime.value = runtimeType
+  void loadBindRuntimeOptions()
+}
+function closeBindConversation(): void { if (bindingConversation.value) return; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; bindRuntimeModels.value = []; selectedBindModel.value = '' }
 function selectNativeThread(thread: AvailableNativeThread): void { if (thread.bound) return; boundNativeId.value = thread.nativeId; if (!boundConversationTitle.value.trim()) boundConversationTitle.value = threadTitle(thread) }
-async function bindConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || bindingConversation.value || !canBindNativeThread.value) return; bindingConversation.value = true; modalError.value = ''; try { const created = await api.bindConversation(workspace.value.id, selectedDemand.value.id, { nativeId: boundNativeId.value.trim(), ...(boundConversationTitle.value.trim() ? { title: boundConversationTitle.value.trim() } : {}) }); conversations.value = [created, ...conversations.value]; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; boundNativeId.value = ''; boundConversationTitle.value = ''; await openConversation(created) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { bindingConversation.value = false } }
+async function bindConversation(): Promise<void> { if (!workspace.value || !selectedDemand.value || bindingConversation.value || !canBindNativeThread.value) return; bindingConversation.value = true; modalError.value = ''; const runtimeType = selectedBindRuntime.value; const modelId = selectedBindModel.value; try { const created = await api.bindConversation(workspace.value.id, selectedDemand.value.id, { nativeId: boundNativeId.value.trim(), ...(boundConversationTitle.value.trim() ? { title: boundConversationTitle.value.trim() } : {}), runtimeType }); conversations.value = [created, ...conversations.value]; showBindConversation.value = false; selectedThreadProject.value = ''; threadQuery.value = ''; manualThreadEntry.value = false; boundNativeId.value = ''; boundConversationTitle.value = ''; bindRuntimeModels.value = []; selectedBindModel.value = ''; await openConversation(created); if (modelId && runtimeModels.value.some(model => model.id === modelId)) selectModel(modelId) } catch (cause) { modalError.value = cause instanceof Error ? cause.message : String(cause) } finally { bindingConversation.value = false } }
 async function submitConversationMessage(
   content: string,
   turnSkills: string[],
@@ -1303,19 +1749,20 @@ async function submitConversationMessage(
   if (!composerHasContent({ text: optimisticText, skills: turnSkills, images })) return false
   sending.value = true
   try {
+    const submitMode = modeOverride ?? resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value)
     await submitUserMessage(
       { text: optimisticText, ...(images.length ? { images: images.map(image => image.url) } : {}), ...(skillReferences.length ? { skills: skillReferences } : {}) },
       {
-        mode: modeOverride ?? resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
+        mode: submitMode,
         input: {
           content,
           ...(images.length ? { imageIds: images.map(image => image.id) } : {}),
-          settings: {
+          ...(submitMode === 'append' ? {} : { settings: {
             ...(selectedModel.value ? { model: selectedModel.value } : {}),
-            ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
+            ...(runtimeCapabilities.value.reasoning && selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
             collaborationMode: selectedCollaborationModeKind.value,
             ...(turnSkills.length ? { skills: turnSkills } : {}),
-          },
+          } }),
         },
       },
     )
@@ -1384,7 +1831,7 @@ async function retryFailedMessage(message: CodyMessage): Promise<void> {
         ...(imageIds.length ? { imageIds } : {}),
         settings: {
           ...(selectedModel.value ? { model: selectedModel.value } : {}),
-          ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
+          ...(runtimeCapabilities.value.reasoning && selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
           collaborationMode: selectedCollaborationModeKind.value,
           ...(turnSkills.length ? { skills: turnSkills } : {}),
         },
@@ -1455,7 +1902,7 @@ async function recoverFailedMessageInNewConversation(message: CodyMessage): Prom
           ...(migratedImages.length ? { imageIds: migratedImages.map(image => image.id) } : {}),
           settings: {
             ...(selectedModel.value ? { model: selectedModel.value } : {}),
-            ...(selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
+            ...(runtimeCapabilities.value.reasoning && selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
             collaborationMode: selectedCollaborationModeKind.value,
             ...(turnSkills.length ? { skills: turnSkills } : {}),
           },
@@ -1529,7 +1976,7 @@ async function uploadImages(files: File[]): Promise<void> {
 }
 function removeComposerImage(imageId: string): void { composerImageError.value = ''; persistComposerImages(composerImages.value.filter(image => image.id !== imageId)) }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item); if (updated.scope === 'workspace') workspaceConversations.value = workspaceConversations.value.map(item => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
-async function loadComposerOptions(demandId?: string): Promise<void> { if (!workspace.value) return; try { const options = demandId ? await api.composerOptions(workspace.value.id, demandId) : await api.workspaceComposerOptions(workspace.value.id); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!options.models.some(model => model.id === selectedModel.value)) selectedModel.value = initialModelId(options.models); selectedReasoning.value = reconcileReasoningEffort(options.models, selectedModel.value, selectedReasoning.value) } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; selectedSkillsForTurn.value = [] } }
+async function loadComposerOptions(conversation?: Conversation, demandId?: string): Promise<void> { if (!workspace.value) return; try { const options = conversation?.scope === 'demand' && conversation.demandId ? await api.composerOptions(workspace.value.id, conversation.demandId, conversation.id) : conversation?.scope === 'workspace' ? await api.workspaceComposerOptions(workspace.value.id, conversation.id) : demandId ? await api.composerOptions(workspace.value.id, demandId) : await api.workspaceComposerOptions(workspace.value.id); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; runtimeCapabilities.value = options.capabilities; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!options.models.some(model => model.id === selectedModel.value)) selectedModel.value = initialModelId(options.models); selectedReasoning.value = options.capabilities.reasoning ? reconcileReasoningEffort(options.models, selectedModel.value, selectedReasoning.value) : ''; if (options.capabilities.append && !options.capabilities.steer) selectedSubmitMode.value = 'append'; else if (!options.capabilities.steer) selectedSubmitMode.value = 'queue' } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; runtimeCapabilities.value = { modelSelection: false, reasoning: false, structuredSkills: false, imageInput: false, nativeSessionList: false, planMode: false, steer: false, append: false, questions: false, aiCodeReports: false }; selectedSkillsForTurn.value = []; selectedReasoning.value = ''; selectedSubmitMode.value = 'queue' } }
 function selectCollaborationMode(name: string): void {
   const next = coreCollaborationModes.value.find(mode => mode.name === name) ?? coreCollaborationModes.value[0]
   if (!next) return
@@ -1539,6 +1986,11 @@ function selectCollaborationMode(name: string): void {
 }
 function selectModel(value: string): void { if (!runtimeModels.value.some(model => model.id === value)) return; selectedModel.value = value; selectedReasoning.value = reconcileReasoningEffort(runtimeModels.value, value, selectedReasoning.value) }
 function selectReasoning(value: string): void { if (composerReasoningOptions.value.some(option => option.value === value)) selectedReasoning.value = value }
+function selectSubmitMode(value: string): void {
+  if (value === 'append' && runtimeCapabilities.value.append) selectedSubmitMode.value = 'append'
+  else if (value === 'steer' && runtimeCapabilities.value.steer) selectedSubmitMode.value = 'steer'
+  else selectedSubmitMode.value = 'queue'
+}
 async function selectPermission(value: string): Promise<void> { if (value !== 'read-only' && value !== 'workspace-write' && value !== 'yolo') return; const previous = permission.value; permission.value = value; await savePermission(); if (error.value) permission.value = previous }
 async function interrupt(): Promise<void> { if (selectedConversation.value) await interruptConversationState() }
 async function copyText(text: string): Promise<void> {
@@ -1592,6 +2044,6 @@ watch(() => conversationState.value.activeTurnId, (activeTurnId, previousTurnId)
   if (previousTurnId && !activeTurnId && selectedDemand.value) void loadQuickActions()
 })
 let dashboardTimer: number | null = null
-onMounted(() => { void loadWorkspaces(); window.addEventListener('popstate', () => { void restoreRoute() }); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
-onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer) })
+onMounted(() => { void loadWorkspaces(); void loadRuntime().catch(() => {}); window.addEventListener('popstate', () => { void restoreRoute() }); document.addEventListener('visibilitychange', refreshVisibleTraeCache); document.addEventListener('fullscreenchange', syncConversationFilePreviewFullscreen); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
+onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer); resetTraeCachePolling(); document.removeEventListener('visibilitychange', refreshVisibleTraeCache); document.removeEventListener('fullscreenchange', syncConversationFilePreviewFullscreen) })
 </script>

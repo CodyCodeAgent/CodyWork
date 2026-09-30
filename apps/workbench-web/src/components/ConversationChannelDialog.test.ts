@@ -6,7 +6,7 @@ import type { Conversation, FeishuChannelBinding } from '../api'
 
 const conversation: Conversation = {
   id: 'conversation', demandId: 'demand', scope: 'demand', title: '需求沟通', nativeId: 'thread',
-  permissionMode: 'workspace-write', createdVia: 'feishu', status: 'completed', policyHash: 'policy', instructionHash: 'instruction', createdAt: '', updatedAt: '',
+  runtimeType: 'codex', permissionMode: 'workspace-write', createdVia: 'feishu', status: 'completed', policyHash: 'policy', instructionHash: 'instruction', createdAt: '', updatedAt: '',
 }
 const binding: FeishuChannelBinding = {
   id: 'binding', conversationKey: 'key', workspaceId: 'workspace', targetType: 'codywork-demand', demandId: 'demand',

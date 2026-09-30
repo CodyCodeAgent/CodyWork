@@ -63,6 +63,16 @@ export interface DashboardSnapshot {
   }
 }
 
+export interface TraeConversationCache {
+  kind: 'trae'
+  eventCount: number
+  byteLength: number
+  lastUpdatedAt: string | null
+  compactedAt: string | null
+  clears: string
+  preserves: string
+}
+
 export type SkillStatus = 'available' | 'disabled' | 'load_failed'
 export interface WorkspaceSkill {
   id: string
@@ -150,6 +160,24 @@ export interface KnowledgeDocument {
   content?: string
 }
 
+/** A text file read through CodyWork's Workspace-bounded preview endpoint. */
+export interface WorkspaceFileDiff {
+  available: boolean
+  base: 'HEAD' | 'untracked' | null
+  content: string
+}
+
+export interface WorkspaceFilePreview {
+  name: string
+  path: string
+  relativePath: string
+  extension: string
+  size: number
+  updatedAt: string
+  content: string
+  diff: WorkspaceFileDiff
+}
+
 export interface Repository {
   id: string
   name: string
@@ -203,12 +231,21 @@ export interface AiReportCapability {
   exportAvailable: boolean
   retryAvailable: boolean
   message: string
+  sources: AiReportCapabilitySource[]
+}
+
+export interface AiReportCapabilitySource {
+  id: 'codex' | 'trae'
+  label: string
+  state: AiReportCapabilityState
+  message: string
 }
 
 export interface AiReportConversationSummary {
   conversationId: string
   nativeSessionId: string
   title: string
+  runtimeType: string
   acceptedEvents: number
   acceptedCodeEvents: number
   additions: number
@@ -225,10 +262,20 @@ export interface AiReportReceipt {
   model: string
   filePath: string
   status: string
+  eventCount: number
   additions: number
   deletions: number
   eventTime: string
   receivedAt: string
+}
+
+export interface AiReportWorktreeChanges {
+  available: boolean
+  additions: number
+  deletions: number
+  repositoriesChecked: number
+  repositoriesTotal: number
+  note: string
 }
 
 export interface AiReportDemandSummary {
@@ -239,8 +286,10 @@ export interface AiReportDemandSummary {
   additions: number
   deletions: number
   netLines: number
+  lineStatsAvailable: boolean
   effectiveLines: number | null
   effectiveLinesNote: string
+  worktreeChanges: AiReportWorktreeChanges
   pending: number
   retrying: number
   lastSuccessAt: string | null
@@ -270,6 +319,7 @@ export interface Conversation {
   scope: 'demand' | 'workspace'
   demandId: string | null
   nativeId: string
+  runtimeType: 'codex' | 'trae'
   title: string
   createdVia: 'browser' | 'feishu'
   status: ConversationStatus
@@ -296,10 +346,36 @@ export interface AvailableNativeThread {
 }
 
 export interface ComposerOptions {
+  provider: { type: string; label: string }
+  capabilities: {
+    modelSelection: boolean
+    reasoning: boolean
+    structuredSkills: boolean
+    imageInput: boolean
+    nativeSessionList: boolean
+    planMode: boolean
+    steer: boolean
+    append: boolean
+    questions: boolean
+    aiCodeReports: boolean
+  }
   models: Array<{
     id: string
     label: string
     description: string
+    metadata?: {
+      contextWindow?: number
+      maxContextWindow?: number
+      supportsMaxMode?: boolean
+      loadPercent?: number
+      weeklyQuota?: {
+        applies: boolean
+        isDepleted: boolean
+        usedPercent?: number
+        remainingPercent?: number
+        resetTime?: number
+      }
+    }
     isDefault: boolean
     defaultReasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
     supportedReasoningEfforts: Array<'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'>
@@ -323,8 +399,18 @@ export interface ConversationShareResult {
   messageCount: number
 }
 
+export interface RuntimeDescriptor {
+  id: string
+  label: string
+  description?: string
+  capabilities?: { cache?: { kind: string; label: string; description: string } }
+}
+
 export interface RuntimeSettings {
+  runtimeType: string
   command: string
+  commands: Record<string, string>
+  runtimes: RuntimeDescriptor[]
   updatedAt: string
 }
 
@@ -528,7 +614,7 @@ export const api = {
   runtimeRateLimits: () => request<RuntimeAccountRateLimits>('GET', '/api/runtime/rate-limits'),
   reloadRuntimeMcp: () => request<{ reloaded: true }>('POST', '/api/runtime/mcp/reload'),
   runtimeSettings: () => request<RuntimeSettings>('GET', '/api/settings/runtime'),
-  updateRuntimeSettings: (patch: { command?: string }) =>
+  updateRuntimeSettings: (patch: { runtimeType?: string; command?: string; commands?: Record<string, string> }) =>
     request<RuntimeSettings>('PATCH', '/api/settings/runtime', patch),
   listWorkspaces: () => request<Workspace[]>('GET', '/api/workspaces'),
   listDirectories: (path?: string) => request<DirectoryListing>('GET', `/api/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`),
@@ -556,6 +642,7 @@ export const api = {
   testSmartNotification: (id: string) => request<{ queued: true; outboxId: string }>('POST', `/api/workspaces/${id}/smart-notifications/test`),
   listKnowledge: (id: string) => request<KnowledgeDocument[]>('GET', `/api/workspaces/${id}/knowledge`),
   getKnowledge: (id: string, documentId: string) => request<KnowledgeDocument>('GET', `/api/workspaces/${id}/knowledge/${encodeURIComponent(documentId)}`),
+  previewWorkspaceFile: (id: string, path: string, options: { diffContext?: number; demandId?: string } = {}) => request<WorkspaceFilePreview>('GET', `/api/workspaces/${encodeURIComponent(id)}/files/preview?path=${encodeURIComponent(path)}${options.diffContext === undefined ? '' : `&diffContext=${encodeURIComponent(options.diffContext)}`}${options.demandId ? `&demandId=${encodeURIComponent(options.demandId)}` : ''}`),
   listRepositories: (id: string) => request<Repository[]>('GET', `/api/workspaces/${id}/repositories`),
   addRepository: (id: string, input: { source: 'git' | 'folder'; url?: string; path?: string; name?: string }) =>
     request<Repository>('POST', `/api/workspaces/${id}/repositories`, input),
@@ -580,25 +667,37 @@ export const api = {
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
   listWorkspaceConversations: (workspaceId: string) =>
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/conversations`),
-  listAvailableNativeThreads: (workspaceId: string, demandId: string) =>
-    request<AvailableNativeThread[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/available-threads`),
-  composerOptions: (workspaceId: string, demandId: string) =>
-    request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/composer-options`),
-  workspaceComposerOptions: (workspaceId: string) =>
-    request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/composer-options`),
-  createConversation: (workspaceId: string, demandId: string, title?: string) =>
-    request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, title ? { title } : {}),
-  createWorkspaceConversation: (workspaceId: string, title?: string) =>
-    request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations`, title ? { title } : {}),
-  bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string }) =>
+  listAvailableNativeThreads: (workspaceId: string, demandId: string, runtimeType?: string) =>
+    request<AvailableNativeThread[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/available-threads${runtimeType ? `?runtimeType=${encodeURIComponent(runtimeType)}` : ''}`),
+  composerOptions: (workspaceId: string, demandId: string, conversationId?: string, runtimeType?: string) => {
+    const query = new URLSearchParams()
+    if (conversationId) query.set('conversationId', conversationId)
+    if (runtimeType) query.set('runtimeType', runtimeType)
+    return request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/composer-options${query.size ? `?${query.toString()}` : ''}`)
+  },
+  workspaceComposerOptions: (workspaceId: string, conversationId?: string) =>
+    request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/composer-options${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`),
+  createConversation: (workspaceId: string, demandId: string, title?: string, runtimeType?: string) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, { ...(title ? { title } : {}), ...(runtimeType ? { runtimeType } : {}) }),
+  createWorkspaceConversation: (workspaceId: string, title?: string, runtimeType?: string) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations`, { ...(title ? { title } : {}), ...(runtimeType ? { runtimeType } : {}) }),
+  bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string; runtimeType?: string }) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations/bind`, input),
   conversationHistory: (workspaceId: string, conversationId: string) =>
     request<{ events: ConversationEvent[]; watermark: number }>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/history`),
+  traeConversationCache: (workspaceId: string, conversationId: string) =>
+    request<TraeConversationCache | null>('GET', `/api/workspaces/${workspaceId}/conversations/${conversationId}/trae-cache`),
+  compactTraeConversationCache: (workspaceId: string, conversationId: string) =>
+    request<TraeConversationCache>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/trae-cache/compact`, { confirm: true }),
+  clearTraeConversationCache: (workspaceId: string, conversationId: string) =>
+    request<TraeConversationCache>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/trae-cache/clear`, { confirm: true }),
+  migrateConversationRuntime: (workspaceId: string, conversationId: string, targetRuntimeType: string) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/migrate-runtime`, { targetRuntimeType, confirm: true }),
   shareConversationToFeishu: (workspaceId: string, conversationId: string, input: { accountId: string; title?: string }) =>
     request<ConversationShareResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/share/feishu`, input),
   uploadConversationImage: (workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }) =>
     request<ConversationImageUpload>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/images`, input),
-  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }, imageIds: string[] = []) =>
+  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' | 'append' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }, imageIds: string[] = []) =>
     request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}), ...(imageIds.length ? { images: imageIds } : {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),

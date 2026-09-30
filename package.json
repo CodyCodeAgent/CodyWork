@@ -28,5 +28,8 @@
   "devDependencies": {
     "concurrently": "^9.2.1",
     "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@codycodeagent/cody-web-core": "link:../../../../../../../project_worktree/feature/core_runtime_registry/CodyWebCore"
   }
 }

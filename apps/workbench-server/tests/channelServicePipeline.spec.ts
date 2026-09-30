@@ -150,7 +150,7 @@ describe('CodyWork channel composition root', () => {
       await firstProvider.emitMessage(inbound(account.id, 'COMPOSITION_GROUP_REPLY', 'oc-reply', 'group'))
       const topicMessage = inbound(account.id, 'COMPOSITION_GROUP_TOPIC', 'oc-topic', 'group')
       await firstProvider.emitMessage(topicMessage)
-      await waitFor(() => firstProvider.updates.filter(update => JSON.stringify(update.card).includes('CodyWork · 已完成')).length === 3)
+      await waitFor(() => firstProvider.updates.filter(update => JSON.stringify(update.card).includes('CodyWork · Codex · 已完成')).length === 3)
       expect(firstProvider.replies).toHaveLength(3)
       expect(firstProvider.replies).toEqual(expect.arrayContaining([
         expect.objectContaining({ targetId: 'message-COMPOSITION_FIRST', replyInThread: false }),
@@ -196,11 +196,11 @@ describe('CodyWork channel composition root', () => {
       await service.start()
       const recoveredProvider = providers.at(-1)!
       await recoveredProvider.emitMessage(inbound(account.id, 'COMPOSITION_AFTER_RESTART'))
-      await waitFor(() => recoveredProvider.updates.some(update => JSON.stringify(update.card).includes('CodyWork · 已完成')))
+      await waitFor(() => recoveredProvider.updates.some(update => JSON.stringify(update.card).includes('CodyWork · Codex · 已完成')))
       expect(recoveredProvider.replies).toHaveLength(1)
-      expect(recoveredProvider.updates).toHaveLength(1)
       expect(recoveredProvider.reactions.map(reaction => reaction.emojiType)).toEqual(['GoGoGo', 'DONE'])
-      expect(JSON.stringify(recoveredProvider.updates[0]?.card)).toContain('Test runtime received: COMPOSITION_AFTER_RESTART')
+      const recoveredTurnUpdates = recoveredProvider.updates.filter(update => JSON.stringify(update.card).includes('Test runtime received: COMPOSITION_AFTER_RESTART'))
+      expect(recoveredTurnUpdates).toHaveLength(1)
       expect(service.diagnostics(account.id)).toMatchObject({
         account: { connectionState: 'connected' }, bindings: 3, inbox: { failed: 0 }, outbox: { pending: 0, deadLetter: 0 },
       })

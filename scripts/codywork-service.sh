@@ -64,7 +64,7 @@ load_service_environment() {
     key="${line%%=*}"
     value="${line#*=}"
     case "$key" in
-      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD|CODYWORK_PUBLIC_ORIGIN|CODYWORK_AI_REPORT_USER_HOME|CODYWORK_CODEX_HOME|CODYWORK_AI_REPORT_HOME|CODYWORK_AI_REPORT_EXPORT_BIN|CODYWORK_AI_REPORT_OUTBOX_BIN)
+      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD|CODYWORK_PUBLIC_ORIGIN|CODYWORK_DB|CODYWORK_AI_REPORT_USER_HOME|CODYWORK_CODEX_HOME|CODYWORK_AI_REPORT_HOME|CODYWORK_TRAE_AI_REPORT_HOME|CODYWORK_AI_REPORT_EXPORT_BIN|CODYWORK_AI_REPORT_OUTBOX_BIN)
         export "$key=$value"
         ;;
       *)
@@ -136,10 +136,18 @@ stop_service() {
 }
 
 start_service() {
-  local pid command
+  local pid command requested_host requested_port health_host
+  # A deployment may provide a checked local service.env, while an operator
+  # still needs a one-off host/port override for an isolated worktree. Capture
+  # the explicit process environment before loading that file so the file
+  # cannot accidentally take over another checkout's listening port.
+  requested_host="${CODYWORK_HOST:-}"
+  requested_port="${CODYWORK_PORT:-}"
   load_service_environment
-  HOST="${CODYWORK_HOST:-$HOST}"
-  PORT="${CODYWORK_PORT:-$PORT}"
+  HOST="${requested_host:-${CODYWORK_HOST:-$HOST}}"
+  PORT="${requested_port:-${CODYWORK_PORT:-$PORT}}"
+  health_host="$HOST"
+  [[ "$health_host" == '0.0.0.0' || "$health_host" == '::' ]] && health_host='127.0.0.1'
   if pid="$(read_pid 2>/dev/null)" && is_our_process "$pid"; then
     echo "CodyWork is already running (PID $pid)."
     return 0

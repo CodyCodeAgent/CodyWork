@@ -10,9 +10,11 @@ function createFixture() {
   const root = mkdtempSync(join(tmpdir(), 'codywork-ai-report-'))
   const codexHome = join(root, '.codex')
   const reportHome = join(root, '.ai-code-report')
+  const traeReportHome = join(root, '.trae', 'hooks', 'ai-contribution-v2')
   const repository = join(root, 'repo')
   mkdirSync(join(codexHome, 'sessions'), { recursive: true })
   mkdirSync(reportHome, { recursive: true })
+  mkdirSync(traeReportHome, { recursive: true })
   mkdirSync(repository, { recursive: true })
   execFileSync('git', ['init', '-q', repository])
   writeFileSync(join(repository, 'feature.ts'), 'const old = true\n')
@@ -34,7 +36,7 @@ function createFixture() {
     id, scope, demand_id, workspace_id, native_id, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at
   ) VALUES (?, 'demand', ?, ?, ?, ?, 'browser', 'completed', 'yolo', 'policy', 'instructions', ?, ?)`).run('conversation', 'demand', 'workspace', 'session-123', '实现上报', now, now)
   const workspace = db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get('workspace') as never
-  return { root, codexHome, reportHome, repository, db, workspace }
+  return { root, codexHome, reportHome, traeReportHome, repository, db, workspace }
 }
 
 function executable(path: string): string {
@@ -80,12 +82,46 @@ describe('AI code report receipts', () => {
     const summary = service.summary(fixture.workspace, 'demand')
     expect(summary.capability).toMatchObject({ state: 'ready', exportAvailable: true, retryAvailable: true })
     expect(summary).toMatchObject({ state: 'healthy', acceptedEvents: 2, acceptedCodeEvents: 1, additions: 2, deletions: 1, netLines: 1, effectiveLines: 2 })
+    expect(summary.worktreeChanges).toMatchObject({ available: true, additions: 2, deletions: 1, repositoriesChecked: 1, repositoriesTotal: 1 })
+    expect(summary.worktreeChanges.note).toContain('未按 AI 归因')
     expect(summary.conversations[0]).toMatchObject({ title: '实现上报', acceptedEvents: 2, acceptedCodeEvents: 1, additions: 2, deletions: 1 })
     expect(summary.recent.find(item => item.deliveryId === 'delivery-code')).toMatchObject({ filePath: 'feature.ts', additions: 2, deletions: 1 })
     expect(JSON.stringify(summary)).not.toContain('const added')
     expect((fixture.db.db.prepare('SELECT COUNT(*) AS count FROM ai_report_receipts').get() as { count: number }).count).toBe(2)
 
     expect(service.summary(fixture.workspace, 'demand').acceptedEvents).toBe(2)
+    fixture.db.close()
+  })
+
+  it('indexes only production-accepted TraeX delivery batches and keeps their line metrics unavailable', () => {
+    const fixture = createFixture()
+    const now = '2026-09-28T08:00:00.000Z'
+    fixture.db.db.prepare(`INSERT INTO conversations (
+      id, scope, demand_id, workspace_id, native_id, runtime_type, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at
+    ) VALUES (?, 'demand', ?, ?, ?, 'trae', ?, 'browser', 'completed', 'yolo', 'policy', 'instructions', ?, ?)`)
+      .run('trae-conversation', 'demand', 'workspace', 'trae-session-123', 'Trae 实现上报', now, now)
+    const records = [
+      { event: 'ai_contribution_delivery', batchId: 'accepted-batch', sessionId: 'trae-session-123', count: 2, transport: 'mcs_production', status: 'accepted', httpStatus: 200, responseCode: 0, timestamp: '2026-09-28T09:00:00.000Z' },
+      { event: 'ai_contribution_delivery', batchId: 'wrong-transport', sessionId: 'trae-session-123', count: 99, transport: 'loopback_test', status: 'accepted', httpStatus: 200, responseCode: 0 },
+      { event: 'ai_contribution_delivery', batchId: 'unaccepted', sessionId: 'trae-session-123', count: 99, transport: 'mcs_production', status: 'failed', httpStatus: 500, responseCode: 1 },
+    ]
+    writeFileSync(join(fixture.traeReportHome, 'reports.jsonl'), records.map(record => JSON.stringify(record)).join('\n') + '\n')
+    const service = new AiCodeReportService(fixture.db, {
+      home: fixture.root,
+      codexHome: fixture.codexHome,
+      reportHome: fixture.reportHome,
+      traeReportHome: fixture.traeReportHome,
+    })
+
+    const summary = service.summary(fixture.workspace, 'demand')
+    expect(summary.capability.sources).toContainEqual(expect.objectContaining({ id: 'trae', state: 'ready' }))
+    expect(summary).toMatchObject({ acceptedEvents: 2, acceptedCodeEvents: 2, additions: 0, deletions: 0, lineStatsAvailable: false, effectiveLines: null })
+    expect(summary.effectiveLinesNote).toContain('不保留 patch 行级信息')
+    expect(summary.worktreeChanges).toMatchObject({ available: true, additions: 2, deletions: 1, repositoriesChecked: 1, repositoriesTotal: 1 })
+    expect(summary.worktreeChanges.note).toContain('未按 AI 归因')
+    expect(summary.conversations.find(item => item.runtimeType === 'trae')).toMatchObject({ title: 'Trae 实现上报', acceptedEvents: 2, acceptedCodeEvents: 2 })
+    expect(summary.recent.find(item => item.deliveryId === 'traex:accepted-batch')).toMatchObject({ eventCount: 2, model: 'Trae ACP', additions: 0, deletions: 0 })
+    expect((fixture.db.db.prepare('SELECT COUNT(*) AS count FROM ai_report_receipts').get() as { count: number }).count).toBe(1)
     fixture.db.close()
   })
 })

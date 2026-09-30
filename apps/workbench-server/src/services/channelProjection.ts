@@ -94,6 +94,9 @@ export class ChannelProjectionService {
       for (const turn of Object.values(state.turns)) {
         if (turn.lifecycle === 'completed' || turn.lifecycle === 'failed' || turn.lifecycle === 'interrupted') {
           this.requests.expireTurn(binding.conversationId, turn.id, `turn.${turn.lifecycle}` as ConversationEvent['type'])
+          // Repaint terminal cards after a process restart. This also repairs
+          // cards produced before Trae emitted assistant.completed.
+          if (this.repositories.projections.turnByBinding(binding.id, turn.id)) this.scheduleRender(binding, turn.id, true)
         }
       }
       const pendingRequestIds = new Set(state.pendingRequests.map(request => request.id))
@@ -237,10 +240,15 @@ export class ChannelProjectionService {
     if (!state || !link) return
     let presentation = this.findTurnPresentation(link.id)
     if (!presentation) return
-    const projection = projectChannelTurn(state, turnId, presentation.revision + 1)
+    const initialProjection = projectChannelTurn(state, turnId, presentation.revision + 1)
+    // Older Trae sessions persisted only assistant.delta chunks. Keep their
+    // historical Feishu cards readable while current sessions use the
+    // normalized assistant.completed emitted by the runtime.
+    const assistantText = initialProjection.assistantText || await this.legacyAssistantText(binding, turnId)
+    const projection = assistantText === initialProjection.assistantText ? initialProjection : { ...initialProjection, assistantText }
     if (projection.terminal) presentation = await this.finalizeReceiptReaction(presentation, projection.status === 'completed' ? 'DONE' : 'ERROR')
     const prompt = string(presentation.state.prompt)
-    const card = projectionCard(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext))
+    const card = projectionCard(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext), { bindingId: binding.id, runtimePicker: true })
     let remoteMessageId = presentation.remoteMessageId
     if (!remoteMessageId) {
       const outboxId = string(presentation.state.outboxId)
@@ -295,6 +303,14 @@ export class ChannelProjectionService {
   private findTurnPresentation(turnLinkId: string): ChannelPresentation | null {
     const row = this.database.db.prepare('SELECT id FROM channel_presentations WHERE turn_link_id = ? AND purpose = \'turn\' ORDER BY created_at DESC LIMIT 1').get(turnLinkId) as { id?: string } | undefined
     return row?.id ? this.repositories.projections.getPresentation(row.id) : null
+  }
+
+  private async legacyAssistantText(binding: CodyWorkChannelBinding, turnId: string): Promise<string> {
+    const snapshot = await this.conversations.historyCanonical(binding.workspaceId, binding.conversationId)
+    return snapshot.events
+      .filter(event => event.type === 'assistant.delta' && event.turnId === turnId)
+      .map(event => string(event.data.text))
+      .join('')
   }
 
   private async publishAssistantImages(binding: CodyWorkChannelBinding, projection: ReturnType<typeof projectChannelTurn>, presentation: ChannelPresentation, inboxId: string): Promise<void> {
@@ -378,7 +394,12 @@ export class ChannelProjectionService {
       const snapshot = await this.conversations.historyCanonical(binding.workspaceId, binding.conversationId)
       await this.host.refresh({ conversationId: binding.conversationId, threadId: binding.threadId, readSnapshot: async () => snapshot })
       const bound = snapshot.events.find(event => event.type === 'command.bound' && event.itemId === clientCommandId && event.turnId)
-      const turnId = knownTurnId || bound?.turnId || ''
+      // Early Trae adapter versions did not emit command.bound, but their
+      // persisted user.completed event still carries both the command id and
+      // its stable local Turn id. Use it only during reconciliation so an
+      // already-completed command can be delivered without replaying it.
+      const accepted = snapshot.events.find(event => event.type === 'user.completed' && event.itemId === clientCommandId && event.turnId)
+      const turnId = knownTurnId || bound?.turnId || accepted?.turnId || ''
       if (!turnId) return
       const link = this.repositories.projections.turnByCommand(clientCommandId)
       if (link && !link.turnId) {
