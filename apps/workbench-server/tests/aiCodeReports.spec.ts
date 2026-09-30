@@ -63,10 +63,9 @@ describe('AI code report receipts', () => {
     const binDir = join(fixture.root, 'bin')
     mkdirSync(binDir)
     const exportBin = executable(join(binDir, 'ai-report-export'))
-    const pendingBin = executable(join(binDir, 'ai-report-pending'))
     const outboxBin = executable(join(binDir, 'ai-report-outbox'))
     writeFileSync(join(fixture.codexHome, 'hooks.json'), JSON.stringify({ hooks: Object.fromEntries(
-      ['SessionStart', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop'].map(name => [name, [{ hooks: [{ command: `${exportBin} ai-report-hook ${name}` }] }]]),
+      ['PostToolUse', 'Stop', 'SubagentStop'].map(name => [name, [{ hooks: [{ command: `${exportBin} ai-report-hook ${name}` }] }]]),
     ) }))
     const patch = '*** Begin Patch\n*** Update File: feature.ts\n@@\n-const old = true\n+const old = false\n+const added = true\n*** End Patch'
     const rows = [
@@ -76,7 +75,7 @@ describe('AI code report receipts', () => {
       { delivery_id: 'delivery-code', session_id: 'session-123', event: 'dev_agent_tool_call', name: 'apply_patch', source: 'codex', model: 'gpt-test', user_unique_id: 'tester', file_path: 'feature.ts', patch, report_status: 'ok', phase: 'report_result', event_time: '2026-09-28T08:01:00.000Z', ts: '2026-09-28T08:03:01.000Z' },
     ]
     writeFileSync(join(fixture.reportHome, 'tea-reporter-events-2026-09-28.log'), rows.map(row => `[2026-09-28] event=${row.event} | ${JSON.stringify(row)}`).join('\n') + '\n')
-    const service = new AiCodeReportService(fixture.db, { home: fixture.root, codexHome: fixture.codexHome, reportHome: fixture.reportHome, exportBin, pendingBin, outboxBin })
+    const service = new AiCodeReportService(fixture.db, { home: fixture.root, codexHome: fixture.codexHome, reportHome: fixture.reportHome, exportBin, outboxBin })
 
     const summary = service.summary(fixture.workspace, 'demand')
     expect(summary.capability).toMatchObject({ state: 'ready', exportAvailable: true, retryAvailable: true })

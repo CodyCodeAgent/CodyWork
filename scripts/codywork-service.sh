@@ -64,7 +64,7 @@ load_service_environment() {
     key="${line%%=*}"
     value="${line#*=}"
     case "$key" in
-      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD|CODYWORK_PUBLIC_ORIGIN)
+      CODYWORK_HOST|CODYWORK_PORT|CODYWORK_PASSWORD|CODYWORK_PUBLIC_ORIGIN|CODYWORK_AI_REPORT_USER_HOME|CODYWORK_CODEX_HOME|CODYWORK_AI_REPORT_HOME|CODYWORK_AI_REPORT_EXPORT_BIN|CODYWORK_AI_REPORT_OUTBOX_BIN)
         export "$key=$value"
         ;;
       *)
@@ -177,7 +177,12 @@ start_service() {
       rm -f "$PID_FILE"
       return 1
     fi
-    if node -e "fetch('http://127.0.0.1:$PORT/api/health').then(async r=>{const body=await r.json();process.exit(r.ok&&body?.ok===true&&body?.data?.service==='codywork'?0:1)}).catch(()=>process.exit(1))"; then
+    # A service bound to one development-machine address is not reachable
+    # through loopback. Probe that exact address while retaining loopback for
+    # wildcard binds.
+    local health_host="$HOST"
+    [[ "$health_host" == '0.0.0.0' || "$health_host" == '::' ]] && health_host='127.0.0.1'
+    if node -e "const net=require('node:net');const socket=net.createConnection({host:'$health_host',port:$PORT});socket.setTimeout(1000);socket.once('connect',()=>{socket.end();process.exit(0)});socket.once('error',()=>process.exit(1));socket.once('timeout',()=>process.exit(1))"; then
       echo "CodyWork is running (PID $pid). Log: $LOG_FILE"
       return 0
     fi
@@ -191,6 +196,9 @@ start_service() {
 
 status_service() {
   local pid
+  load_service_environment
+  HOST="${CODYWORK_HOST:-$HOST}"
+  PORT="${CODYWORK_PORT:-$PORT}"
   if pid="$(read_pid 2>/dev/null)" && is_our_process "$pid"; then
     echo "running pid=$pid cwd=$(process_cwd "$pid") url=http://$HOST:$PORT log=$LOG_FILE"
     return 0
