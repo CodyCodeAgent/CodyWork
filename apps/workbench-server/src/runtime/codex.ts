@@ -236,8 +236,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       this.requireCatalog().listCollaborationModes(),
       this.listSkillCatalog({ workspacePath: context.workspacePath, ...(context.demandPath ? { demandPath: context.demandPath } : {}) }),
     ])
-    return {
-      models: models.status === 'fulfilled' ? models.value.flatMap((model) => {
+    const composerModels = models.status === 'fulfilled' ? models.value.flatMap((model) => {
         const id = model.id || model.model
         if (!id) return []
         const supportedReasoningEfforts = model.supportedReasoningEfforts.filter(isReasoningEffort)
@@ -253,9 +252,9 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
           defaultReasoningEffort,
           supportedReasoningEfforts,
         }]
-      }) : [],
-      skills: skills.status === 'fulfilled' ? skills.value.filter(skill => skill.enabled) : [],
-      collaborationModes: modes.status === 'fulfilled' ? modes.value.flatMap(mode => {
+      }) : []
+    const composerSkills = skills.status === 'fulfilled' ? skills.value.filter(skill => skill.enabled) : []
+    const collaborationModes = modes.status === 'fulfilled' ? modes.value.flatMap(mode => {
         if (!mode.name) return []
         return [{
           name: mode.name,
@@ -264,7 +263,24 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
           ...(mode.model ? { model: mode.model } : {}),
           ...(mode.reasoningEffort ? { reasoningEffort: mode.reasoningEffort as ReasoningEffort } : {}),
         }]
-      }) : [],
+      }) : []
+    return {
+      provider: { type: 'codex', label: 'Codex' },
+      capabilities: {
+        modelSelection: composerModels.length > 0,
+        reasoning: composerModels.some(model => model.supportedReasoningEfforts.length > 0),
+        structuredSkills: true,
+        imageInput: true,
+        nativeSessionList: true,
+        planMode: collaborationModes.some(mode => mode.mode === 'plan'),
+        steer: true,
+        append: false,
+        questions: true,
+        aiCodeReports: true,
+      },
+      models: composerModels,
+      skills: composerSkills,
+      collaborationModes,
     }
   }
 

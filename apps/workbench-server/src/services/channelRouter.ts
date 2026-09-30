@@ -150,7 +150,10 @@ export class ChannelRouter {
     }
     try {
       let card: FeishuCard | null = null
-      if (kind === 'channel.model_select' || kind === 'channel.reasoning_select') card = await this.handleModelAction(accountId, action)
+      if (kind === 'channel.model_picker') card = await this.handleModelPickerAction(accountId, action)
+      else if (kind === 'channel.runtime_picker') card = await this.handleRuntimePickerAction(accountId, action)
+      else if (kind === 'channel.runtime_select') card = await this.handleRuntimeSelectAction(accountId, action)
+      else if (kind === 'channel.model_select' || kind === 'channel.reasoning_select') card = await this.handleModelAction(accountId, action)
       else if (kind.startsWith('channel.pick_') || kind === 'channel.group_setting_mode') card = await this.bindings.handleAction(accountId, action)
       else if (kind === 'channel.access_approve' || kind === 'channel.access_reject') card = await this.access.handleAction(accountId, action)
       else if (kind === 'channel.approval') await this.requests.handleApprovalAction(accountId, action)
@@ -171,6 +174,68 @@ export class ChannelRouter {
     return executionContextMarkdown(settings).replace(/\n---\n\n$/u, '')
   }
 
+  private modelPickerCard(binding: CodyWorkChannelBinding, settings: ChannelModelSettings): FeishuCard {
+    const conversation = this.conversations.get?.(binding.workspaceId, binding.conversationId)
+    const runtimeLabel = conversation ? this.runtimeLabel(conversation.runtimeType) : '当前 Runtime'
+    if (!settings.models.length) throw new Error(`${runtimeLabel} 当前没有返回可用模型`)
+    const reasoningNote = settings.models.some(model => model.supportedReasoningEfforts.length > 0)
+      ? '先选择模型，再选择该模型支持的推理程度。保存后只影响后续消息。'
+      : '当前 Runtime 不提供推理程度配置；选择模型后将直接生效。'
+    return selectionCard('切换 CodyWork 模型', `${this.modelSummary(settings)}\n\n${reasoningNote}`, settings.models.map(model => ({
+      text: `${model.label || model.id}${model.id === settings.model ? ' · 当前' : ''}`,
+      value: { action: 'channel.model_select', bindingId: binding.id, modelId: model.id },
+    })))
+  }
+
+  private async handleModelPickerAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
+    const bindingId = string(action.value.bindingId)
+    const binding = this.repositories.bindings.get(bindingId)
+    if (binding.accountId !== accountId) throw new Error('模型配置不属于当前机器人')
+    if (binding.ownerIdentity !== action.actorId) throw new Error('只有此绑定的创建者可以切换模型')
+    return this.modelPickerCard(binding, await this.settings.resolve(binding))
+  }
+
+  private runtimePickerCard(binding: CodyWorkChannelBinding): FeishuCard {
+    const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
+    const current = this.runtimeLabel(conversation.runtimeType)
+    const targets = this.conversations.runtimeDescriptors().filter(runtime => runtime.id !== conversation.runtimeType)
+    if (!targets.length) throw new Error('当前没有其他可切换的 Runtime')
+    return selectionCard('切换 CodyWork Runtime', `当前会话使用 **${current}**。切换会保留源会话，创建一个新的目标 Runtime 会话，并只发送有长度上限的可见历史交接。\n\n切换后，这个飞书会话的后续消息将交由新会话处理；正在执行或等待审批时不能切换。`, targets.map(target => ({
+      text: `切换到 ${target.label}`,
+      value: { action: 'channel.runtime_select', bindingId: binding.id, targetRuntimeType: target.id },
+    })))
+  }
+
+  private runtimeLabel(runtimeType: string): string {
+    return this.conversations.runtimeDescriptors().find(runtime => runtime.id === runtimeType)?.label ?? runtimeType
+  }
+
+  private async handleRuntimePickerAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
+    const binding = this.repositories.bindings.get(string(action.value.bindingId))
+    if (binding.accountId !== accountId) throw new Error('底座配置不属于当前机器人')
+    if (binding.ownerIdentity !== action.actorId) throw new Error('只有此绑定的创建者可以切换 Runtime')
+    return this.runtimePickerCard(binding)
+  }
+
+  private async handleRuntimeSelectAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
+    const binding = this.repositories.bindings.get(string(action.value.bindingId))
+    if (binding.accountId !== accountId) throw new Error('底座配置不属于当前机器人')
+    if (binding.ownerIdentity !== action.actorId) throw new Error('只有此绑定的创建者可以切换 Runtime')
+    const targetRuntimeType = string(action.value.targetRuntimeType)
+    if (!this.conversations.runtimeDescriptors().some(runtime => runtime.id === targetRuntimeType)) throw new Error('请选择已启用的目标 Runtime')
+    const migrated = await this.conversations.migrateRuntime(binding.workspaceId, binding.conversationId, targetRuntimeType, true)
+    this.hooks.detachBindingObservation(binding)
+    const rebound = this.repositories.bindings.updateConversation(accountId, binding.id, migrated.id)
+    await this.hooks.observe(rebound)
+    this.repositories.audit.record(accountId, 'channel.runtime.migrated', 'channel_binding', binding.id, true, {
+      sourceConversationId: binding.conversationId, targetConversationId: migrated.id, targetRuntimeType,
+    })
+    const target = this.runtimeLabel(targetRuntimeType)
+    return feishuTextCard('CodyWork · Runtime 已切换', `已创建并接管 **${target}** 会话。后续飞书消息会发送到新会话；源会话仍保留，可在 CodyWork 中查看。`, {
+      color: 'green', ...(this.hooks.openUrl(rebound) ? { actions: [{ text: '在 CodyWork 中打开', url: this.hooks.openUrl(rebound), type: 'primary' as const }] } : {}),
+    })
+  }
+
   private async handleModelAction(accountId: string, action: FeishuCardAction): Promise<FeishuCard> {
     const bindingId = string(action.value.bindingId)
     const modelId = string(action.value.modelId)
@@ -178,6 +243,15 @@ export class ChannelRouter {
     if (actionBinding.accountId !== accountId) throw new Error('模型配置不属于当前机器人')
     if (string(action.value.action) === 'channel.model_select') {
       const { model } = await this.settings.model(bindingId, action.actorId, modelId)
+      if (model.supportedReasoningEfforts.length === 0) {
+        const selected = await this.settings.select(bindingId, action.actorId, modelId, '')
+        const openUrl = this.hooks.openUrl(actionBinding)
+        const next = feishuTextCard('CodyWork · 模型已更新', `${this.modelSummary(selected)}\n\n当前 Runtime 未提供推理程度配置，新模型会从下一条消息开始生效。`, {
+          color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}),
+        })
+        await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `model:${bindingId}:${modelId}`, revision: 2, terminal: true })
+        return next
+      }
       const next = selectionCard('选择推理程度', `已选择模型：**${model.label || model.id}**\n\n请选择该模型支持的推理程度。保存后只影响后续消息。`, model.supportedReasoningEfforts.map(effort => ({
         text: `${channelReasoningLabel(effort)}${effort === model.defaultReasoningEffort ? ' · 默认' : ''}`,
         value: { action: 'channel.reasoning_select', bindingId, modelId, reasoningEffort: effort },
@@ -200,12 +274,14 @@ export class ChannelRouter {
     if (name === '/model') {
       if (binding.ownerIdentity !== inbox.message.sender.id) throw new Error('只有此绑定的创建者可以切换模型')
       const settings = await this.settings.resolve(binding)
-      if (!settings.models.length) throw new Error('Codex Runtime 当前没有返回可用模型')
-      const card = selectionCard('切换 CodyWork 模型', `${this.modelSummary(settings)}\n\n先选择模型，再选择该模型支持的推理程度。保存后只影响后续消息。`, settings.models.map(model => ({
-        text: `${model.label || model.id}${model.id === settings.model ? ' · 当前' : ''}`,
-        value: { action: 'channel.model_select', bindingId: binding.id, modelId: model.id },
-      })))
+      const card = this.modelPickerCard(binding, settings)
       await this.hooks.enqueue(binding.accountId, { kind: 'reply_card', targetId: inbox.message.messageId, payload: { card, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:model`, terminal: true })
+      this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id }); return
+    }
+    if (name === '/runtime') {
+      if (binding.ownerIdentity !== inbox.message.sender.id) throw new Error('只有此绑定的创建者可以切换 Runtime')
+      const card = this.runtimePickerCard(binding)
+      await this.hooks.enqueue(binding.accountId, { kind: 'reply_card', targetId: inbox.message.messageId, payload: { card, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:runtime`, terminal: true })
       this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id }); return
     }
     if (name === '/setting') {
@@ -271,7 +347,7 @@ export class ChannelRouter {
       this.repositories.requests.update(binding.accountId, request.id, { status: 'answered' })
       this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id }); return
     }
-    await this.hooks.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/model、/status、/stop、/retry、/unbind、/setting（群聊）、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })
+    await this.hooks.enqueue(binding.accountId, { kind: 'reply_text', targetId: inbox.message.messageId, payload: { text: '可用命令：/model、/runtime、/status、/stop、/retry、/unbind、/setting（群聊）、/answer <requestId> <答案>' }, dedupeKey: `${inbox.id}:help`, terminal: true })
     this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id })
   }
 }

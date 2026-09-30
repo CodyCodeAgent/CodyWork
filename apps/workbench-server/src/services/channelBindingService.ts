@@ -17,6 +17,9 @@ type Hooks = {
 
 function string(value: unknown): string { return typeof value === 'string' ? value : '' }
 function isFlatGroup(message: ChannelInboundMessage): boolean { return message.conversation.scope === 'group' }
+function hasExecutableInput(message: ChannelInboundMessage): boolean {
+  return Boolean(message.text.trim() || message.attachments.length || message.quotedMessage?.text.trim() || message.quotedMessage?.attachments.length)
+}
 function asTopic(message: ChannelInboundMessage): ChannelInboundMessage {
   return isFlatGroup(message) ? { ...message, conversation: { ...message.conversation, scope: 'topic', rootId: message.conversation.rootId || message.messageId } } : message
 }
@@ -139,9 +142,14 @@ export class ChannelBindingService {
     const openUrl = this.hooks.openUrl(binding)
     const scopeNote = `${workspaceScope ? 'Workspace 会话' : 'Demand Worktree 开发会话'}；${permissionMode === 'yolo' ? 'YOLO 已启用。' : 'Normal 审批模式。'}`
     const groupNote = groupMode === 'topic' ? '\n\n此群后续每条根消息都会创建独立会话。发送 `/setting` 可调整。' : groupMode === 'reply' ? '\n\n此群后续消息将共享本会话并回复原消息。发送 `/setting` 可调整。' : ''
-    const next = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。${scopeNote}${groupNote}\n\n接下来在本对话发送的消息会进入同一个 Codex Thread。`, { color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}) })
+    const initialMessageCanRun = hasExecutableInput(inbox.message)
+    const next = feishuTextCard('CodyWork 已绑定', `已绑定到 **${conversation.title}**。${scopeNote}${groupNote}\n\n${initialMessageCanRun ? '正在提交这条原始消息。' : '当前消息只包含 @机器人，没有可执行内容；请直接发送你的问题或任务。'}`, { color: 'green', ...(openUrl ? { actions: [{ text: '在 CodyWork 中打开', url: openUrl, type: 'primary' as const }] } : {}) })
     await this.hooks.enqueue(accountId, { kind: 'update_card', targetId: action.remoteMessageId, payload: { card: next }, dedupeKey: `${inbox.id}:bound`, revision: 3, terminal: true })
-    this.repositories.audit.record(accountId, 'channel.binding.created', 'channel_binding', binding.id, true, { provider: inbox.message.provider, accountId, eventId: inbox.message.eventId, messageId: inbox.message.messageId, conversationKey: inbox.conversationKey, bindingId: binding.id, threadId: binding.threadId, inboxId: inbox.id })
+    this.repositories.audit.record(accountId, 'channel.binding.created', 'channel_binding', binding.id, true, { provider: inbox.message.provider, accountId, eventId: inbox.message.eventId, messageId: inbox.message.messageId, conversationKey: inbox.conversationKey, bindingId: binding.id, threadId: binding.threadId, inboxId: inbox.id, initialMessageSubmitted: initialMessageCanRun })
+    if (!initialMessageCanRun) {
+      this.repositories.inbox.update(inbox.id, 'completed', { bindingId: binding.id })
+      return next
+    }
     await this.hooks.submitInbox(inbox.id, binding)
     return next
   }

@@ -11,11 +11,12 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.40.0",
+    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.42.0",
     "@larksuiteoapi/node-sdk": "1.73.2",
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "1.5.1",
     "@types/node": "^22.20.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.22.4",

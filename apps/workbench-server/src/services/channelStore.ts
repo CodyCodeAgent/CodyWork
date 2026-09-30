@@ -528,6 +528,20 @@ export class ChannelStore implements ChannelOutboxStore {
     return this.getBinding(bindingId)
   }
 
+  /**
+   * A runtime migration creates a new native conversation. Keep the channel
+   * identity stable, but make subsequent Feishu messages target that new
+   * conversation and clear provider-specific model settings from the source.
+   */
+  updateBindingConversation(accountId: string, bindingId: string, conversationId: string): CodyWorkChannelBinding {
+    const result = this.database.db.prepare(`UPDATE channel_bindings
+      SET conversation_id = ?, model = '', reasoning_effort = '', updated_at = ?
+      WHERE id = ? AND account_id = ?`)
+      .run(conversationId, nowIso(), bindingId, accountId)
+    if (result.changes === 0) throw new Error('飞书绑定不存在')
+    return this.getBinding(bindingId)
+  }
+
   deleteBinding(accountId: string, conversationKey: string): boolean {
     return this.database.db.prepare('DELETE FROM channel_bindings WHERE account_id = ? AND conversation_key = ?').run(accountId, conversationKey).changes > 0
   }

@@ -83,6 +83,174 @@ describe('CodyWork channel end-to-end pipeline', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('finishes binding an @-only message without submitting an empty prompt', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-channel-empty-binding-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspaceId = makeId('ws')
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
+      .run(workspaceId, 'Empty binding', root, now, now)
+    const store = new ChannelStore(db)
+    const repositories = new ChannelRepositories(store)
+    const account = store.saveAccount(null, { name: 'Empty binding bot', appId: 'cli_empty_binding', appSecret: 'test-secret' })
+    const claimed = repositories.inbox.claim(inbound(account.id, '', 'ou-private-empty')).item
+    repositories.inbox.update(claimed.id, 'waiting_binding')
+    const submitted: CodyWorkChannelBinding[] = []
+    const service = new ChannelBindingService(db, repositories, new ConversationService(db, new TestRuntimeAdapter()), new WorkspaceRegistry(db), {
+      enqueue: async () => ({ id: makeId('outbox'), remoteMessageId: 'remote-card' }) as never,
+      submitInbox: async (_inboxId, binding) => { submitted.push(binding) },
+      observe: async () => undefined,
+      openUrl: () => 'http://localhost/workspace-session',
+    })
+    const action = (value: Record<string, unknown>) => ({ value: { inboxId: claimed.id, workspaceId, ...value }, actorId: 'ou-owner', remoteMessageId: 'remote-card', eventId: makeId('action') }) as never
+
+    await service.handleAction(account.id, action({ action: 'channel.pick_workspace_scope' }))
+    await service.handleAction(account.id, action({ action: 'channel.pick_new_workspace_session' }))
+    const result = await service.handleAction(account.id, action({
+      action: 'channel.pick_permission', sessionAction: 'channel.pick_new_workspace_session', permissionMode: 'yolo', conversationId: '',
+    }))
+
+    expect(submitted).toHaveLength(0)
+    expect(JSON.stringify(result)).toContain('没有可执行内容')
+    expect(repositories.inbox.get(claimed.id)).toMatchObject({ status: 'completed' })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('submits a Trae model without reviving a stale channel reasoning selection', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-channel-trae-settings-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspaceId = makeId('ws')
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
+      .run(workspaceId, 'Trae channel settings', root, now, now)
+
+    class CapturingTraeRuntime extends TestRuntimeAdapter {
+      readonly settings: Array<{ model?: string; reasoningEffort?: string } | undefined> = []
+      override async getComposerOptions() {
+        return {
+          models: [{
+            id: 'trae-channel-model', label: 'Trae Channel Model', description: 'Trae ACP fixture', isDefault: true,
+            defaultReasoningEffort: 'none' as const, supportedReasoningEfforts: [],
+          }],
+          skills: [], collaborationModes: [],
+        }
+      }
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        this.settings.push(request.settings)
+        return super.submitTurn(request)
+      }
+    }
+
+    const runtime = new CapturingTraeRuntime()
+    const conversations = new ConversationService(db, runtime)
+    const workspaces = new WorkspaceRegistry(db)
+    const conversation = await conversations.createWorkspace(workspaceId, 'Trae channel conversation', 'feishu')
+    const store = new ChannelStore(db)
+    const repositories = new ChannelRepositories(store)
+    const account = store.saveAccount(null, { name: 'Trae channel bot', appId: 'cli_trae_channel', appSecret: 'test-secret' })
+    const bindingMessage = inbound(account.id, 'TRAE_CHANNEL_BINDING', 'ou-trae-channel')
+    const binding = repositories.bindings.create({
+      message: bindingMessage, targetType: 'codywork-workspace', workspaceId, demandId: null, conversationId: conversation.id,
+      threadId: conversation.nativeId, ownerIdentity: 'ou-owner', permissionMode: 'yolo', notificationPolicy: 'mirror-requests',
+    })
+    // Simulate a persisted selection made before this binding used Trae ACP.
+    const staleBinding = repositories.bindings.updateModel(account.id, binding.id, 'trae-channel-model', 'medium')
+    const settings = new ChannelSessionSettingsService(db, repositories, conversations, workspaces)
+    await expect(settings.resolve(staleBinding)).resolves.toMatchObject({
+      model: 'trae-channel-model', reasoningEffort: '', reasoningSupported: false,
+    })
+
+    const claimed = repositories.inbox.claim(inbound(account.id, 'TRAE_CHANNEL_EXECUTE', 'ou-trae-channel')).item
+    const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, {
+      observe: vi.fn(async () => undefined), renderCommandFailure: vi.fn(async () => undefined),
+    } as never, settings, {
+      provider: () => ({}) as never,
+      enqueue: async () => ({ id: makeId('outbox'), remoteMessageId: 'remote-card', status: 'sent' }) as never,
+      addReceiptReaction: vi.fn(async () => 'reaction-received'),
+      openUrl: () => 'http://localhost/conversation',
+    })
+    try {
+      await commands.submitInbox(claimed.id, staleBinding)
+      expect(runtime.settings).toEqual([{ model: 'trae-channel-model' }])
+    } finally {
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('delivers a completed legacy Trae turn that was persisted without command.bound', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-channel-trae-reconcile-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    const db = new WorkbenchDb(':memory:')
+    const now = nowIso()
+    const workspaceId = makeId('ws')
+    db.db.prepare('INSERT INTO workspaces (id, name, path, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)')
+      .run(workspaceId, 'Trae reconciliation', root, now, now)
+
+    class LegacyTraeRuntime extends TestRuntimeAdapter {
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        const onEvent = request.onEvent
+        return super.submitTurn({
+          ...request,
+          // Reproduce the first Trae adapter release: it persisted the
+          // streamed chunks but no binding or normalized final response.
+          onEvent: event => {
+            if (event.type !== 'command.bound' && event.type !== 'assistant.completed') onEvent?.(event)
+          },
+        })
+      }
+    }
+
+    const conversations = new ConversationService(db, new LegacyTraeRuntime())
+    const workspaces = new WorkspaceRegistry(db)
+    const conversation = await conversations.createWorkspace(workspaceId, 'Legacy Trae channel', 'feishu')
+    const store = new ChannelStore(db)
+    const repositories = new ChannelRepositories(store)
+    const account = store.saveAccount(null, { name: 'Trae recovery bot', appId: 'cli_trae_recovery', appSecret: 'test-secret' })
+    const bindingMessage = inbound(account.id, 'TRAE_LEGACY_BINDING', 'ou-trae-recovery')
+    const binding = repositories.bindings.create({
+      message: bindingMessage, targetType: 'codywork-workspace', workspaceId, demandId: null, conversationId: conversation.id,
+      threadId: conversation.nativeId, ownerIdentity: 'ou-owner', permissionMode: 'yolo', notificationPolicy: 'mirror-requests',
+    })
+    const enqueue = vi.fn(async () => ({ id: makeId('outbox'), remoteMessageId: 'remote-card', status: 'sent' }) as never)
+    const projection = new ChannelProjectionService(db, repositories, conversations, workspaces,
+      { expireTurn: vi.fn(), publish: vi.fn(), resolve: vi.fn() } as never,
+      { enqueue, queue: enqueue, fail: vi.fn(), isAccountActive: () => true, finishReceiptReaction: vi.fn(async () => undefined), openUrl: () => 'http://localhost/conversation' } as never,
+    )
+    const settings = new ChannelSessionSettingsService(db, repositories, conversations, workspaces)
+    const commands = new ChannelCommandAdapter(db, repositories, conversations, workspaces, projection, settings, {
+      provider: () => ({}) as never, enqueue, addReceiptReaction: vi.fn(async () => 'reaction-received'), openUrl: () => 'http://localhost/conversation',
+    } as never)
+    const claimed = repositories.inbox.claim(inbound(account.id, 'TRAE_LEGACY_EXECUTE', 'ou-trae-recovery')).item
+
+    try {
+      await commands.submitInbox(claimed.id, binding)
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const link = repositories.projections.activeTurns(binding.id)[0]
+      expect(link?.turnId).toBe('')
+      const snapshot = await conversations.historyCanonical(workspaceId, conversation.id)
+      expect(snapshot.events.some(event => event.type === 'user.completed')).toBe(true)
+      const accepted = snapshot.events.find(event => event.type === 'user.completed')
+      expect(accepted?.itemId).toBe(link?.clientCommandId)
+      expect(accepted?.turnId).toBeTruthy()
+
+      await projection.reconcileActiveTurns(account.id)
+      await new Promise(resolve => setTimeout(resolve, 30))
+
+      expect(repositories.projections.turnByCommand(link?.clientCommandId ?? '')).toMatchObject({ status: 'completed', turnId: expect.any(String) })
+      expect(repositories.inbox.get(claimed.id)).toMatchObject({ status: 'completed', turnId: expect.any(String) })
+      expect(enqueue.mock.calls.map(call => call[1]?.kind)).toContain('update_card')
+      expect(JSON.stringify(enqueue.mock.calls)).toContain('Test runtime received: TRAE_LEGACY_EXECUTE')
+    } finally {
+      projection.close()
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('converges private, flat-group reply and group-topic messages through one durable pipeline', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-channel-pipeline-'))
     const baseline = join(root, 'services', 'demo')
@@ -261,7 +429,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
       for (const prompt of ['PRIVATE_PIPELINE', 'GROUP_REPLY_PIPELINE', 'GROUP_TOPIC_PIPELINE']) {
         const matches = terminalUpdates.filter(delivery => JSON.stringify(delivery.payload).includes(prompt))
         expect(matches, prompt).toHaveLength(1)
-        expect(JSON.stringify(matches[0]?.payload)).toContain('CodyWork · 已完成')
+        expect(JSON.stringify(matches[0]?.payload)).toContain('CodyWork · Codex · 已完成')
       }
 
       const topicBinding = repositories.bindings.list(account.id).find(binding => binding.channelConversationId === 'oc-topic')

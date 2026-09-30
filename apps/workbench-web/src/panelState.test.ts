@@ -14,9 +14,13 @@ describe('workbench panel state', () => {
     const storage = memoryStorage()
     writePanelCollapsed(storage, 'workspace-sidebar', true)
     writePanelCollapsed(storage, 'conversation-sidebar', false)
+    writePanelCollapsed(storage, 'trae-cache-banner', true)
+    writePanelCollapsed(storage, 'conversation-composer', true)
 
     expect(readPanelCollapsed(storage, 'workspace-sidebar')).toBe(true)
     expect(readPanelCollapsed(storage, 'conversation-sidebar')).toBe(false)
+    expect(readPanelCollapsed(storage, 'trae-cache-banner')).toBe(true)
+    expect(readPanelCollapsed(storage, 'conversation-composer')).toBe(true)
   })
 
   it('keeps panels expanded when storage is unavailable', () => {

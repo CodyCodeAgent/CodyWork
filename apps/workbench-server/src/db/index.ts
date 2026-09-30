@@ -38,10 +38,16 @@ export interface DemandRow {
 export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'disconnected'
 export type ConversationPermissionMode = 'read-only' | 'workspace-write' | 'yolo'
 export type ConversationCreatedVia = 'browser' | 'feishu'
+/** Stable Runtime identifier. Validity is owned by the installed Runtime
+ * registry rather than a database CHECK constraint, so new adapters do not
+ * require a schema migration. */
+export type ConversationRuntimeType = string
 
 export interface RuntimeSettingsRow {
   id: number
-  codex_command: string | null
+  runtime_type: ConversationRuntimeType
+  /** JSON object keyed by Runtime id, for example {"codex":"...","trae":"..."}. */
+  commands_json: string
   updated_at: string
 }
 
@@ -51,6 +57,8 @@ export interface ConversationRow {
   demand_id: string | null
   workspace_id: string
   native_id: string
+  /** The provider that owns native_id. Existing rows migrate to Codex. */
+  runtime_type: ConversationRuntimeType
   title: string
   created_via: ConversationCreatedVia
   status: ConversationStatus
@@ -100,6 +108,8 @@ export interface AiReportReceiptRow {
   report_status: string
   capture_status: string
   capture_reason: string
+  /** Number of code events represented by this receipt batch (normally 1). */
+  event_count: number
   additions: number
   deletions: number
   added_line_hashes_json: string
@@ -178,6 +188,7 @@ export class WorkbenchDb {
         demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
         native_id TEXT NOT NULL,
+        runtime_type TEXT NOT NULL DEFAULT 'codex',
         title TEXT NOT NULL,
         created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
         status TEXT NOT NULL DEFAULT 'idle',
@@ -187,7 +198,7 @@ export class WorkbenchDb {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL)),
-        UNIQUE(native_id)
+        UNIQUE(runtime_type, native_id)
       );
       CREATE TABLE IF NOT EXISTS conversation_audits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -195,6 +206,28 @@ export class WorkbenchDb {
         action TEXT NOT NULL,
         data_json TEXT NOT NULL,
         created_at TEXT NOT NULL
+      );
+      -- Trae ACP restores session context but does not replay the product UI
+      -- event stream after a server restart. Keep a provider-specific replay
+      -- cache instead of weakening Codex's native-history ownership model.
+      CREATE TABLE IF NOT EXISTS trae_conversation_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        event_id TEXT NOT NULL,
+        event_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(conversation_id, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS trae_conversation_events_order
+        ON trae_conversation_events(conversation_id, id);
+      -- A compaction boundary lets the browser immediately honor a cache
+      -- clear even while the current ACP process still has old events in
+      -- memory. Newer live events continue to be replayed and cached.
+      CREATE TABLE IF NOT EXISTS trae_conversation_cache_state (
+        conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+        native_events_after TEXT,
+        compacted_at TEXT,
+        updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS conversation_images (
         id TEXT PRIMARY KEY,
@@ -260,6 +293,7 @@ export class WorkbenchDb {
         report_status TEXT NOT NULL,
         capture_status TEXT NOT NULL DEFAULT '',
         capture_reason TEXT NOT NULL DEFAULT '',
+        event_count INTEGER NOT NULL DEFAULT 1,
         additions INTEGER NOT NULL DEFAULT 0,
         deletions INTEGER NOT NULL DEFAULT 0,
         added_line_hashes_json TEXT NOT NULL DEFAULT '[]',
@@ -277,7 +311,8 @@ export class WorkbenchDb {
       );
       CREATE TABLE IF NOT EXISTS runtime_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        codex_command TEXT,
+        runtime_type TEXT NOT NULL DEFAULT 'codex',
+        commands_json TEXT NOT NULL DEFAULT '{}',
         updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS dashboard_snapshots (
@@ -773,21 +808,84 @@ export class WorkbenchDb {
       const violations = this.db.prepare('PRAGMA foreign_key_check').all()
       if (violations.length) throw new Error('Workspace permission migration left invalid foreign keys')
     }
+    const conversationRuntimeColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name?: string }[]
+    const runtimeConversationSchema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'conversations'").get() as { sql?: string } | undefined
+    const hasConversationRuntime = conversationRuntimeColumns.some(column => column.name === 'runtime_type')
+    // SQLite cannot drop a CHECK constraint in place. Rebuild once so Runtime
+    // IDs are registry-validated and future adapters do not force a DB change.
+    if (!hasConversationRuntime || /CHECK\s*\(\s*runtime_type\s+IN/iu.test(runtimeConversationSchema?.sql ?? '')) {
+      // A native session id is provider-local. Rebuild rather than ALTER so
+      // legacy global uniqueness becomes the provider-scoped invariant. Keep
+      // dependent audit/channel tables bound to the replacement parent table;
+      // SQLite otherwise rewrites their references to the temporary name.
+      this.db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;')
+      try {
+        this.db.exec(`
+          BEGIN IMMEDIATE;
+          ALTER TABLE conversations RENAME TO conversations_runtime_retired;
+          CREATE TABLE conversations (
+          id TEXT PRIMARY KEY,
+          scope TEXT NOT NULL DEFAULT 'demand' CHECK (scope IN ('demand', 'workspace')),
+          demand_id TEXT REFERENCES demands(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          native_id TEXT NOT NULL,
+          runtime_type TEXT NOT NULL DEFAULT 'codex',
+          title TEXT NOT NULL,
+          created_via TEXT NOT NULL DEFAULT 'browser' CHECK (created_via IN ('browser', 'feishu')),
+          status TEXT NOT NULL DEFAULT 'idle',
+          permission_mode TEXT NOT NULL DEFAULT 'workspace-write',
+          policy_hash TEXT NOT NULL,
+          instruction_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK ((scope = 'demand' AND demand_id IS NOT NULL) OR (scope = 'workspace' AND demand_id IS NULL)),
+          UNIQUE(runtime_type, native_id)
+        );
+        INSERT INTO conversations (id, scope, demand_id, workspace_id, native_id, runtime_type, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at)
+          SELECT id, scope, demand_id, workspace_id, native_id, ${hasConversationRuntime ? 'runtime_type' : "'codex'"}, title, created_via, status, permission_mode, policy_hash, instruction_hash, created_at, updated_at
+          FROM conversations_runtime_retired;
+        DROP TABLE conversations_runtime_retired;
+          COMMIT;
+        `)
+      } catch (error) {
+        if (this.db.isTransaction) this.db.exec('ROLLBACK;')
+        throw error
+      } finally {
+        this.db.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;')
+      }
+      const violations = this.db.prepare('PRAGMA foreign_key_check').all()
+      if (violations.length) throw new Error('Conversation runtime migration left invalid foreign keys')
+    }
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
-    if (runtimeColumns.some(column => column.name !== 'id' && column.name !== 'codex_command' && column.name !== 'updated_at')) {
+    if (!runtimeColumns.some(column => column.name === 'commands_json')) {
+      const legacy = this.db.prepare('SELECT * FROM runtime_settings WHERE id = 1').get() as {
+        id?: number
+        runtime_type?: string
+        codex_command?: string | null
+        trae_command?: string | null
+        updated_at?: string
+      } | undefined
+      const commands = {
+        ...(legacy?.codex_command?.trim() ? { codex: legacy.codex_command.trim() } : {}),
+        ...(legacy?.trae_command?.trim() ? { trae: legacy.trae_command.trim() } : {}),
+      }
       this.db.exec(`
         BEGIN IMMEDIATE;
         ALTER TABLE runtime_settings RENAME TO runtime_settings_retired;
         CREATE TABLE runtime_settings (
           id INTEGER PRIMARY KEY CHECK (id = 1),
-          codex_command TEXT,
+          runtime_type TEXT NOT NULL DEFAULT 'codex',
+          commands_json TEXT NOT NULL DEFAULT '{}',
           updated_at TEXT NOT NULL
         );
-        INSERT INTO runtime_settings (id, codex_command, updated_at)
-          SELECT id, codex_command, updated_at FROM runtime_settings_retired;
-        DROP TABLE runtime_settings_retired;
-        COMMIT;
       `)
+      if (legacy) this.db.prepare('INSERT INTO runtime_settings (id, runtime_type, commands_json, updated_at) VALUES (?, ?, ?, ?)')
+        .run(1, legacy.runtime_type?.trim() || 'codex', JSON.stringify(commands), legacy.updated_at ?? nowIso())
+      this.db.exec('DROP TABLE runtime_settings_retired; COMMIT;')
+    }
+    const aiReportReceiptColumns = this.db.prepare('PRAGMA table_info(ai_report_receipts)').all() as { name?: string }[]
+    if (!aiReportReceiptColumns.some(column => column.name === 'event_count')) {
+      this.db.exec('ALTER TABLE ai_report_receipts ADD COLUMN event_count INTEGER NOT NULL DEFAULT 1')
     }
     this.db.prepare('INSERT OR IGNORE INTO runtime_settings (id, updated_at) VALUES (1, ?)').run(nowIso())
   }

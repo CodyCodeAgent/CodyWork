@@ -27,3 +27,40 @@ export function reconcileReasoningEffort(models: ComposerModel[], modelId: strin
     ? selectedEffort
     : model.defaultReasoningEffort
 }
+
+function compactCount(value: number): string {
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`
+  if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`
+  return String(value)
+}
+
+function percent(value: number | undefined): string | undefined {
+  return value === undefined ? undefined : `${Math.round(value)}%`
+}
+
+/** Builds a concise, provider-authoritative description for the native model
+ * picker and the selected-model status line. */
+export function modelDescription(model: ComposerModel): string {
+  const metadata = model.metadata
+  const details: string[] = []
+  if (metadata?.contextWindow !== undefined) details.push(`上下文 ${compactCount(metadata.contextWindow)}`)
+  if (metadata?.supportsMaxMode) {
+    details.push(metadata.maxContextWindow !== undefined ? `Max 上下文 ${compactCount(metadata.maxContextWindow)}` : '支持 Max 模式')
+  }
+  const load = percent(metadata?.loadPercent)
+  if (load) details.push(`当前负载 ${load}`)
+  const quota = metadata?.weeklyQuota
+  if (quota?.applies) {
+    if (quota.isDepleted) details.push('周额度已耗尽')
+    else {
+      const remaining = percent(quota.remainingPercent)
+      const used = percent(quota.usedPercent)
+      details.push(remaining ? `周额度剩余 ${remaining}` : used ? `本周已用 ${used}` : '适用周额度')
+    }
+    if (quota.resetTime !== undefined) {
+      const reset = new Date(quota.resetTime * 1_000)
+      if (!Number.isNaN(reset.valueOf())) details.push(`重置 ${reset.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}`)
+    }
+  }
+  return [model.description.trim(), ...details].filter(Boolean).join(' · ')
+}

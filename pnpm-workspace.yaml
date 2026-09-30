@@ -8,3 +8,6 @@ allowBuilds:
   lefthook: false
   node-pty: false
   protobufjs: true
+
+minimumReleaseAgeExclude:
+  - '@agentclientprotocol/sdk@1.5.1'

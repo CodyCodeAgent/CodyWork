@@ -35,7 +35,7 @@ void channelService(appContext).start().catch(error => console.error(`[codywork]
 function close() {
   server.closeRealtime(1012, 'service restart')
   server.close(() => {
-    void appContext.channels?.close().finally(() => appContext.conversations?.getRuntime().close()).finally(() => {
+    void Promise.resolve(appContext.channels?.close()).finally(() => appContext.conversations?.closeRuntimes()).finally(() => {
       void appContext.dashboards?.dispose().finally(() => {
         db.close()
         process.exit(0)

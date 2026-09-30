@@ -12,6 +12,7 @@ import {
   filterSkills,
   formatThreadTime,
   groupThreadProjects,
+  migrationRuntimeOptions,
   matchDemandRoute,
   parseWorkbenchRoute,
   maskedChannelIdentity,
@@ -25,7 +26,7 @@ import {
 
 const conversation = (status: Conversation['status']): Conversation => ({
   id: 'conversation', scope: 'demand', demandId: 'demand', nativeId: 'native', title: 'Session', status,
-  createdVia: 'browser',
+  createdVia: 'browser', runtimeType: 'codex',
   permissionMode: 'workspace-write', policyHash: '', instructionHash: '', createdAt: '', updatedAt: '',
 })
 
@@ -36,6 +37,12 @@ const demand = (id: string, branchName = id): Demand => ({
 const thread = (nativeId: string, cwd: string, preview = nativeId): AvailableNativeThread => ({ nativeId, cwd, preview, bound: false })
 
 describe('workbench UI rules', () => {
+  it('offers every registered Runtime except the source as a migration target', () => {
+    const runtimes = [{ value: 'codex', label: 'Codex' }, { value: 'trae', label: 'Trae' }, { value: 'future', label: 'Future Runtime' }]
+    expect(migrationRuntimeOptions(runtimes, 'codex')).toEqual([runtimes[1], runtimes[2]])
+    expect(migrationRuntimeOptions(runtimes, 'trae')).toEqual([runtimes[0], runtimes[2]])
+  })
+
   it('protects active and last remaining conversations from deletion', () => {
     expect(canDeleteConversation(conversation('running'), 3)).toBe(false)
     expect(deleteConversationTitle(conversation('awaiting_approval'), 3)).toContain('不能删除')
@@ -100,7 +107,7 @@ describe('workbench UI rules', () => {
   it('round-trips stable Workspace and Demand deep links', () => {
     const url = workbenchUrl('http://localhost:3001/?workspace=old&debug=1', 'ws-1', 'demand-1')
     expect(url.toString()).toBe('http://localhost:3001/?workspace=ws-1&debug=1&demand=demand-1')
-    expect(parseWorkbenchRoute(url.search)).toEqual({ workspaceId: 'ws-1', demandId: 'demand-1', conversationId: null, page: 'dashboard', settingsSection: 'overview' })
+    expect(parseWorkbenchRoute(url.search)).toEqual({ workspaceId: 'ws-1', demandId: 'demand-1', conversationId: null, filePath: null, fileLine: null, page: 'dashboard', settingsSection: 'overview' })
     const demands = [demand('demand-1', 'feat/one')]
     expect(matchDemandRoute(demands, 'feat/one')?.id).toBe('demand-1')
   })
@@ -113,6 +120,13 @@ describe('workbench UI rules', () => {
     const workspaceSession = workbenchUrl('http://localhost:3001/', 'ws-1', null, { conversationId: 'workspace-conversation' })
     expect(workspaceSession.toString()).toBe('http://localhost:3001/?workspace=ws-1&conversation=workspace-conversation')
     expect(parseWorkbenchRoute(workspaceSession.search)).toMatchObject({ workspaceId: 'ws-1', demandId: null, conversationId: 'workspace-conversation' })
+  })
+
+  it('parses an optional file-preview deep link without accepting invalid line numbers', () => {
+    expect(parseWorkbenchRoute('?workspace=ws-1&demand=demand-1&conversation=conversation-1&file=%2Fdata00%2Frepo%2Fmain.go&line=42')).toMatchObject({
+      workspaceId: 'ws-1', demandId: 'demand-1', conversationId: 'conversation-1', filePath: '/data00/repo/main.go', fileLine: 42,
+    })
+    expect(parseWorkbenchRoute('?file=%2Fdata00%2Frepo%2Fmain.go&line=0')).toMatchObject({ filePath: '/data00/repo/main.go', fileLine: null })
   })
 
   it('round-trips settings subpages without leaking them into Demand links', () => {

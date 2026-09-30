@@ -9,7 +9,7 @@
       </button>
       <button type="button" class="settings-tile" @click="emit('open', 'runtime')">
         <span class="tile-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4" /></svg></span>
-        <span class="tile-copy"><strong>Codex Runtime</strong><small>配置 App Server 启动命令并检查运行连接。</small></span>
+        <span class="tile-copy"><strong>Runtime</strong><small>选择 Codex 或 Trae，并配置启动命令与连接检查。</small></span>
         <span class="tile-arrow" aria-hidden="true">→</span>
       </button>
       <button type="button" class="settings-tile" @click="emit('open', 'feishu')">

@@ -7,6 +7,8 @@ import type { CodyWorkChannelBinding } from './channelStore.js'
 import type { WorkspaceRegistry } from './workspaceRegistry.js'
 
 export type ChannelExecutionContext = {
+  runtimeType: string
+  runtimeLabel: string
   model: string
   modelLabel: string
   reasoningEffort: ReasoningEffort | ''
@@ -16,7 +18,7 @@ export type ChannelExecutionContext = {
   demandName?: string
 }
 
-export type ChannelModelSettings = ChannelExecutionContext & { models: RuntimeModelOption[] }
+export type ChannelModelSettings = ChannelExecutionContext & { models: RuntimeModelOption[]; reasoningSupported: boolean }
 
 const reasoningLabels: Record<ReasoningEffort, string> = {
   none: '无推理', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '极高',
@@ -43,20 +45,29 @@ export class ChannelSessionSettingsService {
     let models: RuntimeModelOption[] = []
     try { models = await this.models(binding) } catch { /* submission can still use the native Runtime default */ }
     const selected = models.find(model => model.id === binding.model) ?? models.find(model => model.isDefault) ?? models[0]
+    // A binding can outlive a provider/model switch. In particular, Trae ACP
+    // models deliberately expose no reasoning selector, so a prior Codex
+    // selection such as "medium" must never be restored for that model.
     const effort = selected
-      ? selected.supportedReasoningEfforts.includes(binding.reasoningEffort as ReasoningEffort)
-        ? binding.reasoningEffort as ReasoningEffort
-        : selected.defaultReasoningEffort
+      ? selected.supportedReasoningEfforts.length === 0
+        ? ''
+        : selected.supportedReasoningEfforts.includes(binding.reasoningEffort as ReasoningEffort)
+          ? binding.reasoningEffort as ReasoningEffort
+          : selected.defaultReasoningEffort
       : ''
     const storedEffort = validReasoningEffort(binding.reasoningEffort)
-    const effectiveEffort = effort || storedEffort
+    const effectiveEffort = selected ? effort : storedEffort
     const workspace = this.workspaces.get(binding.workspaceId)
     const demand = binding.demandId ? listDemands(this.database, workspace).find(item => item.id === binding.demandId) : null
+    const conversation = this.conversations.get(binding.workspaceId, binding.conversationId)
     return {
+      runtimeType: conversation.runtimeType,
+      runtimeLabel: this.conversations.runtimeDescriptors().find(runtime => runtime.id === conversation.runtimeType)?.label ?? conversation.runtimeType,
       models,
       model: selected?.id ?? binding.model, modelLabel: selected?.label || selected?.id || binding.model || 'Default',
       reasoningEffort: effectiveEffort,
       reasoningLabel: effectiveEffort ? reasoningLabels[effectiveEffort] : '默认',
+      reasoningSupported: Boolean(selected?.supportedReasoningEfforts.length),
       permissionLabel: permissionLabel(binding.permissionMode), workspaceName: workspace.name,
       ...(demand ? { demandName: demand.name } : {}),
     }
@@ -68,7 +79,9 @@ export class ChannelSessionSettingsService {
     const models = await this.models(binding, true)
     const model = models.find(item => item.id === modelId)
     if (!model) throw new Error('所选模型已不可用，请重新发送 /model')
-    if (!model.supportedReasoningEfforts.includes(effort as ReasoningEffort)) throw new Error('该模型不支持所选推理程度，请重新选择')
+    if (model.supportedReasoningEfforts.length === 0) {
+      if (effort) throw new Error('当前 Runtime 未提供推理程度配置')
+    } else if (!model.supportedReasoningEfforts.includes(effort as ReasoningEffort)) throw new Error('该模型不支持所选推理程度，请重新选择')
     const updated = this.repositories.bindings.updateModel(binding.accountId, binding.id, model.id, effort)
     this.repositories.audit.record(binding.accountId, 'channel.model.updated', 'channel_binding', binding.id, true, {
       actorId, model: model.id, reasoningEffort: effort,
@@ -85,12 +98,15 @@ export class ChannelSessionSettingsService {
   }
 
   private async models(binding: CodyWorkChannelBinding, force = false): Promise<RuntimeModelOption[]> {
-    const key = `${binding.workspaceId}:${binding.demandId ?? 'workspace'}`
+    // Models and capabilities belong to the persisted conversation provider,
+    // not merely to its Workspace/Demand. A switched default must not poison
+    // a historical binding's cached settings.
+    const key = `${binding.workspaceId}:${binding.demandId ?? 'workspace'}:${binding.conversationId}`
     const cached = this.cache.get(key)
     if (!force && cached && cached.expiresAt > Date.now()) return cached.models
     const options = binding.demandId
-      ? await this.conversations.composerOptions(binding.workspaceId, binding.demandId)
-      : await this.conversations.workspaceComposerOptions(binding.workspaceId)
+      ? await this.conversations.composerOptions(binding.workspaceId, binding.demandId, binding.conversationId)
+      : await this.conversations.workspaceComposerOptions(binding.workspaceId, binding.conversationId)
     this.cache.set(key, { expiresAt: Date.now() + 300_000, models: options.models })
     return options.models
   }

@@ -122,7 +122,7 @@ export class ChannelCommandAdapter {
       await this.projection.observe(binding)
       const initial = projectionCard({
         threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0,
-      }, prompt, this.hooks.openUrl(binding), executionContext)
+      }, prompt, this.hooks.openUrl(binding), executionContext, { bindingId: binding.id, runtimePicker: true })
       const sent = await this.hooks.enqueue(inbox.message.accountId, {
         kind: 'reply_card', targetId: replyMessageId, payload: { card: initial, replyInThread: binding.channelScope === 'topic' }, dedupeKey: `${inbox.id}:turn-card`, revision: 0,
       })
@@ -142,8 +142,9 @@ export class ChannelCommandAdapter {
         prompt,
         submitMode: 'queue',
         executionProfile: { permissionMode: binding.permissionMode },
-        ...(executionContext.model && executionContext.reasoningEffort ? { settings: {
-          model: executionContext.model, reasoningEffort: executionContext.reasoningEffort,
+        ...(executionContext.model ? { settings: {
+          model: executionContext.model,
+          ...(executionContext.reasoningEffort ? { reasoningEffort: executionContext.reasoningEffort } : {}),
         } } : {}),
         localImages,
       })
@@ -179,6 +180,11 @@ export class ChannelCommandAdapter {
         if (inbox.status === 'received' || inbox.status === 'ready') {
           this.repositories.inbox.update(inbox.id, 'ready', { bindingId: binding.id })
           await this.submitInbox(inbox.id, binding)
+        } else if (inbox.status === 'submitted' && inbox.clientCommandId) {
+          // The Runtime accepted this command before the service restarted.
+          // Keep it eligible for ChannelProjectionService reconciliation;
+          // replaying it here could execute a user request twice.
+          continue
         } else if (inbox.status === 'submitting' && !inbox.turnId) {
           this.repositories.inbox.update(inbox.id, 'failed', { lastError: '提交结果不确定，未自动重发。请使用 /retry 明确重试。' })
         } else if (inbox.turnId) {

@@ -47,6 +47,7 @@ The production server serves the API, WebSocket endpoint, and built Vue SPA from
 - `POST /api/workspaces/:id/open`: mark a Workspace recently opened and return its summary
 - `DELETE /api/workspaces/:id`: remove registration without deleting files
 - `GET /api/workspaces/:id/dashboard`: read the five Dashboard metric groups
+- `GET /api/workspaces/:id/files/preview?path=<path>`: preview a supported Markdown, text, or source-code file contained by the registered Workspace; returns the complete text and, when available, a read-only working-tree diff relative to Git `HEAD`; symlink and parent-directory escapes are rejected
 - `GET /api/workspaces/:id/repositories`: read baseline repositories under `services/`
 - `GET /api/workspaces/:id/demands`: list demands and Worktree mappings
 - `POST /api/workspaces/:id/demands`: create a multi-repository demand Worktree
@@ -73,7 +74,9 @@ Example creation request:
 
 Local folders are first inspected for the CSR core shape: `services/`, `docs/`, `specs/`, and `worktrees/`. A complete folder returns `adopted` and is not rebuilt. An empty folder returns `initialize` and is initialized by Codex. A non-empty incomplete folder is rejected to avoid overwriting existing content. The server does not manufacture a second Workspace scaffold.
 
-The Runtime Adapter contract lives in `src/runtime/protocol.ts`. The product enables only the Codex App Server Adapter. The Policy Resolver permits writes only in declared Worktree roots and neither prompts nor Yolo can widen access outside the Workspace. Browsers use WebSocket for live events; the server talks to Codex over local stdio JSON-RPC.
+The Runtime Adapter contract lives in `src/runtime/protocol.ts`. CodyWork registers the native Codex App Server Adapter and the Trae ACP Adapter; the selected conversation retains its Runtime type. The Policy Resolver permits writes only in declared Worktree roots and neither prompts nor Yolo can widen access outside the Workspace. Browsers use WebSocket for live events; the server talks to Codex over local stdio JSON-RPC or to Trae through a dedicated ACP process per conversation.
+
+Trae cancellation is sent through ACP's `session/cancel` notification. If the provider does not settle the active prompt within the bounded recovery window, CodyWork emits one `turn.interrupted` event and terminates only that conversation's ACP process. The next operation restores the native Session when available, or uses the existing missing-session recovery path.
 
 ## Global Codex Runtime settings
 

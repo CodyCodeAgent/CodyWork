@@ -2,17 +2,21 @@ import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isIP } from 'node:net'
 import { WebSocketServer, WebSocket } from 'ws'
-import { WorkbenchDb, WorkspaceRow } from '../db/index.js'
-import { inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
+import { WorkbenchDb, WorkspaceRow, makeId, nowIso } from '../db/index.js'
+import type { ConversationRuntimeType } from '../db/index.js'
+import { ensureWorkspaceControlPlane, inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
 import { addRepository, clearRepositoryBaselineChanges, listCachedRepositories, syncRepositoryBaseline } from '../services/repositories.js'
-import { delegateWorkspaceInitialization } from '../runtime/bootstrap.js'
+import { DEFAULT_WORKSPACE_SETUP_PROMPT } from '../runtime/bootstrap.js'
 import { CodyWorkCodexRuntime } from '../runtime/codex.js'
-import { runtimeSettings, runtimeSettingsRow, updateRuntimeSettings } from '../runtime/settings.js'
+import { CodyWorkTraeRuntime } from '../runtime/trae.js'
+import { runtimeSettings, updateRuntimeSettings } from '../runtime/settings.js'
 import type { RuntimeSettingsPatch } from '../runtime/settings.js'
+import { createCodyWorkRuntimeRegistry, type CodyWorkRuntimeRegistry } from '../runtime/registry.js'
 import { ConversationService } from '../services/conversations.js'
 import { getSkill, listSkills } from '../services/skills.js'
 import { getKnowledgeDocument, listKnowledgeDocuments } from '../services/knowledge.js'
+import { getWorkspaceFilePreview } from '../services/workspaceFilePreview.js'
 import { listBrowsableDirectories } from '../services/directories.js'
 import { DashboardCache } from '../services/dashboardCache.js'
 import { createStaticAssetHandler } from '../http/staticAssets.js'
@@ -53,6 +57,12 @@ interface Ctx {
   params: Record<string, string>
   body: Record<string, unknown>
   query: URLSearchParams
+}
+
+function optionalRuntimeType(value: unknown): ConversationRuntimeType | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  throw new Error('请选择有效的 Runtime')
 }
 
 export interface AppContext {
@@ -206,7 +216,7 @@ function requiredParam(ctx: Ctx, key: string): string {
 }
 
 function conversationService(ctx: AppContext): ConversationService {
-  if (!ctx.conversations) ctx.conversations = new ConversationService(ctx.db, createDefaultRuntime(ctx.db), workspaceId => {
+  if (!ctx.conversations) ctx.conversations = new ConversationService(ctx.db, createRuntimeRegistry(ctx.db), () => runtimeSettings(ctx.db).runtimeType, (workspaceId: string) => {
     setTimeout(() => {
       const workspace = ctx.db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
       if (workspace) void dashboardCache(ctx).refresh(workspace)
@@ -279,7 +289,16 @@ function getWorkspace(ctx: AppContext, id: string): WorkspaceRow {
 
 function workspaceSetup(ctx: AppContext): WorkspaceSetupCoordinator {
   if (!ctx.workspaceSetup) {
-    ctx.workspaceSetup = new WorkspaceSetupCoordinator((path, name) => workspaceRegistry(ctx).register(path, name))
+    ctx.workspaceSetup = new WorkspaceSetupCoordinator({
+      prepare: source => prepareWorkspace(source),
+      ensureControlPlane: path => ensureWorkspaceControlPlane(path),
+      inspect: path => inspectWorkspace(path),
+      initialize: (path, onEvent, prompt) => conversationService(ctx).getRuntime().initializeWorkspace({ workspacePath: path, instruction: prompt, onEvent }),
+      register: (path, name) => workspaceRegistry(ctx).register(path, name),
+      makeId: () => makeId('workspace_setup'),
+      now: nowIso,
+      prompt: DEFAULT_WORKSPACE_SETUP_PROMPT,
+    })
   }
   return ctx.workspaceSetup
 }
@@ -289,23 +308,24 @@ function skillInstalls(ctx: AppContext): SkillInstallCoordinator {
   return ctx.skillInstalls
 }
 
-function createDefaultRuntime(db?: WorkbenchDb) {
-  const saved = db ? runtimeSettingsRow(db) : undefined
-  const command = saved?.codex_command?.trim() || process.env.CODY_CODEX_COMMAND?.trim() || 'codex app-server --stdio'
+function createRuntimeRegistry(db: WorkbenchDb): CodyWorkRuntimeRegistry {
+  const saved = runtimeSettings(db)
+  const command = saved.commands.codex?.trim() || process.env.CODY_CODEX_COMMAND?.trim() || 'codex app-server --stdio'
   const model = process.env.CODY_CODEX_MODEL?.trim()
   let runtime: CodyWorkCodexRuntime
-  const quickActionTools = db ? new AgentQuickActionTools(db, workspace => listSkills(runtime, workspace)) : null
+  const quickActionTools = new AgentQuickActionTools(db, workspace => listSkills(runtime, workspace))
   runtime = new CodyWorkCodexRuntime({
     command,
     ...(model ? { model } : {}),
-    ...(quickActionTools ? { productToolHandler: call => quickActionTools.handle(call) } : {}),
+    productToolHandler: call => quickActionTools.handle(call),
   })
-  return runtime
+  const traeCommand = saved.commands.trae?.trim() || process.env.CODY_TRAE_COMMAND?.trim() || 'traex acp serve'
+  return createCodyWorkRuntimeRegistry(saved.runtimeType, { codex: runtime, trae: new CodyWorkTraeRuntime({ command: traeCommand }) })
 }
 
-async function awaitInitialization(path: string) {
-  const result = await delegateWorkspaceInitialization(path)
-  if (result.status === 'error') throw new Error(`Codex Workspace 初始化失败：${result.message}`)
+async function awaitInitialization(ctx: AppContext, path: string) {
+  const result = await conversationService(ctx).getRuntime().initializeWorkspace({ workspacePath: path, instruction: DEFAULT_WORKSPACE_SETUP_PROMPT })
+  if (result.status === 'error') throw new Error(`Runtime Workspace 初始化失败：${result.message}`)
   return result
 }
 
@@ -359,16 +379,25 @@ function buildRoutes(ctx: AppContext) {
     return { reloaded: true }
   })
 
-  // Observe the process already owned by the ConversationService. Creating a
-  // throwaway App Server for a health click breaks single-owner semantics.
-  add('POST', '/api/runtime/test', () => conversationService(ctx).getRuntime().getInfo())
+  add('GET', '/api/runtimes', () => ({
+    defaultRuntimeType: runtimeSettings(ctx.db).runtimeType,
+    runtimes: conversationService(ctx).runtimeDescriptors(),
+  }))
 
-  add('GET', '/api/settings/runtime', () => runtimeSettings(ctx.db))
+  // Codex checks its existing owner without spawning a competing process;
+  // Trae ACP has no owner before session creation, so its probe performs one
+  // initialize handshake and immediately closes the temporary process.
+  add('POST', '/api/runtime/test', () => {
+    const runtime = conversationService(ctx).getRuntime()
+    return runtime.checkConnection?.() ?? runtime.getInfo()
+  })
+
+  add('GET', '/api/settings/runtime', () => ({ ...runtimeSettings(ctx.db), runtimes: conversationService(ctx).runtimeDescriptors() }))
 
   add('PATCH', '/api/settings/runtime', async (c) => {
     const patch = c.body as RuntimeSettingsPatch
     const updated = updateRuntimeSettings(ctx.db, patch)
-    return { ...updated, restartRequired: true }
+    return { ...updated, runtimes: conversationService(ctx).runtimeDescriptors(), restartRequired: true }
   })
 
   add('GET', '/api/workspaces', () => {
@@ -390,7 +419,7 @@ function buildRoutes(ctx: AppContext) {
     const source = normalizeSource(c.body)
     const prepared = prepareWorkspace(source)
     const initialization = prepared.action === 'initialize'
-      ? await awaitInitialization(prepared.path)
+      ? await awaitInitialization(ctx, prepared.path)
       : { status: 'initialized' as const, message: 'Workspace 已存在，不需要初始化。' }
     if (prepared.action === 'initialize') {
       const check = inspectWorkspace(prepared.path).check
@@ -466,6 +495,18 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/knowledge/:documentId', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return getKnowledgeDocument(row, requiredParam(c, 'documentId'))
+  })
+
+  add('GET', '/api/workspaces/:id/files/preview', (c) => {
+    const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    const rawDiffContext = c.query.get('diffContext')
+    const demandId = c.query.get('demandId')
+    const demand = demandId ? getDemand(ctx.db, row, demandId) : undefined
+    return getWorkspaceFilePreview(row, c.query.get('path') ?? '', {
+      // The preview service clamps this value to a safe, small upper bound.
+      diffContext: rawDiffContext === null ? undefined : Number(rawDiffContext),
+      demandRepositories: demand?.repositories,
+    })
   })
 
   add('GET', '/api/workspaces/:id/skills', async (c) => {
@@ -629,36 +670,45 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/workspaces/:id/composer-options', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return conversationService(ctx).workspaceComposerOptions(workspace.id)
+    return conversationService(ctx).workspaceComposerOptions(workspace.id, c.query.get('conversationId') ?? undefined)
   })
 
   add('POST', '/api/workspaces/:id/conversations', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const title = typeof c.body.title === 'string' ? c.body.title : undefined
-    return conversationService(ctx).createWorkspace(workspace.id, title)
+    return conversationService(ctx).createWorkspace(workspace.id, title, 'browser', optionalRuntimeType(c.body.runtimeType))
   })
 
   add('GET', '/api/workspaces/:id/demands/:demandId/available-threads', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return conversationService(ctx).listAvailableNativeThreads(workspace.id, requiredParam(c, 'demandId'))
+    return conversationService(ctx).listAvailableNativeThreads(workspace.id, requiredParam(c, 'demandId'), optionalRuntimeType(c.query.get('runtimeType')))
   })
 
   add('GET', '/api/workspaces/:id/demands/:demandId/composer-options', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
-    return conversationService(ctx).composerOptions(workspace.id, requiredParam(c, 'demandId'))
+    return conversationService(ctx).composerOptions(
+      workspace.id,
+      requiredParam(c, 'demandId'),
+      c.query.get('conversationId') ?? undefined,
+      optionalRuntimeType(c.query.get('runtimeType')),
+    )
   })
 
   add('POST', '/api/workspaces/:id/demands/:demandId/conversations', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const title = typeof c.body.title === 'string' ? c.body.title : undefined
-    return conversationService(ctx).create(workspace.id, requiredParam(c, 'demandId'), title)
+    return conversationService(ctx).create(workspace.id, requiredParam(c, 'demandId'), title, 'browser', optionalRuntimeType(c.body.runtimeType))
   })
 
   add('POST', '/api/workspaces/:id/demands/:demandId/conversations/bind', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const nativeId = typeof c.body.nativeId === 'string' ? c.body.nativeId : ''
     const title = typeof c.body.title === 'string' ? c.body.title : undefined
-    return conversationService(ctx).bind(workspace.id, requiredParam(c, 'demandId'), { nativeId, title })
+    return conversationService(ctx).bind(workspace.id, requiredParam(c, 'demandId'), {
+      nativeId,
+      title,
+      runtimeType: optionalRuntimeType(c.body.runtimeType),
+    })
   })
 
   add('GET', '/api/workspaces/:id/demands/:demandId/channel-bindings', (c) => {
@@ -676,6 +726,33 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/conversations/:conversationId/history', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return conversationService(ctx).history(workspace.id, requiredParam(c, 'conversationId'))
+  })
+
+  add('GET', '/api/workspaces/:id/conversations/:conversationId/trae-cache', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return conversationService(ctx).traeCache(workspace.id, requiredParam(c, 'conversationId'))
+  })
+
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/migrate-runtime', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const targetRuntimeType = c.body?.targetRuntimeType
+    if (targetRuntimeType !== 'codex' && targetRuntimeType !== 'trae') throw new Error('请选择有效的目标 Runtime')
+    return conversationService(ctx).migrateRuntime(
+      workspace.id,
+      requiredParam(c, 'conversationId'),
+      targetRuntimeType,
+      c.body?.confirm === true,
+    )
+  })
+
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/trae-cache/compact', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return await conversationService(ctx).compactTraeCache(workspace.id, requiredParam(c, 'conversationId'), c.body?.confirm === true)
+  })
+
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/trae-cache/clear', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return await conversationService(ctx).clearTraeCache(workspace.id, requiredParam(c, 'conversationId'), c.body?.confirm === true)
   })
 
   add('GET', '/api/workspaces/:id/conversations/:conversationId/channel-bindings', (c) => {
@@ -727,7 +804,7 @@ function buildRoutes(ctx: AppContext) {
   add('POST', '/api/workspaces/:id/conversations/:conversationId/messages', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const content = typeof c.body.content === 'string' ? c.body.content : ''
-    const mode = c.body.mode === 'steer' ? 'steer' : 'queue'
+    const mode = c.body.mode === 'steer' || c.body.mode === 'append' ? c.body.mode : 'queue'
     const reasoningEfforts = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
     const collaborationMode: 'default' | 'plan' = c.body.collaborationMode === 'plan' ? 'plan' : 'default'
     const settings = {
