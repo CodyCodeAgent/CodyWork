@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ChannelInboundMessage, ChannelInboxItem } from '@codycodeagent/cody-web-core/channel'
 import { WorkbenchDb } from '../src/db/index.js'
 import { codyWorkConversationUrl, feishuProjectionBody } from '../src/services/channelBot.js'
-import { projectionCard, rewriteWorkspaceFileLinks } from '../src/services/channelFeishuRenderer.js'
+import { projectionCard, projectionCards, rewriteWorkspaceFileLinks } from '../src/services/channelFeishuRenderer.js'
 import { ChannelAccessService } from '../src/services/channelAccessService.js'
 import { ChannelAccountManager } from '../src/services/channelAccountManager.js'
 import { channelPrompt } from '../src/services/channelCommandAdapter.js'
@@ -221,6 +221,19 @@ describe('CodyWork channel architecture and lifecycle', () => {
     })
     expect(JSON.stringify(card)).not.toContain('"tag":"action"')
     expect(JSON.stringify(elements.at(-1))).toContain('CodyWork · Codex · AI Hub · 飞书表格')
+  })
+
+  it('retains every oversized native table page for terminal delivery', () => {
+    const rows = Array.from({ length: 18 }, (_, index) => `| row-${index} | ${'x'.repeat(2_200)} |`).join('\n')
+    const cards = projectionCards({
+      threadId: 'thread-1', turnId: 'turn-1', status: 'completed', terminal: true, revision: 1,
+      assistantText: `| name | detail |\n| --- | --- |\n${rows}`, assistantImages: [], error: '',
+    }, 'show every row')
+    expect(cards.length).toBeGreaterThan(1)
+    expect(cards.map(card => JSON.stringify(card)).join('')).toContain('row-17')
+    expect(cards.every(card => JSON.stringify(card).includes('"tag":"table"'))).toBe(true)
+    expect(JSON.stringify(cards[0])).toContain('第 1/')
+    expect(JSON.stringify(cards.at(-1))).toContain(`第 ${cards.length}/`)
   })
 
   it('opens a two-step /model picker and confirms the persisted selection', async () => {

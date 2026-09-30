@@ -289,7 +289,24 @@ describe('CodyWork channel end-to-end pipeline', () => {
         this.settings.push(request.settings)
         this.localImages.push(request.localImages?.map(image => image.path) ?? [])
         this.prompts.push(request.prompt)
-        return super.submitTurn(request)
+        const onEvent = request.onEvent
+        return super.submitTurn({
+          ...request,
+          onEvent: event => {
+            // Exercise a Feishu-native table that must span multiple cards.
+            // Only the group-topic turn is expanded so the same test can
+            // verify the continuation keeps its original reply route.
+            if (request.prompt === 'GROUP_TOPIC_PIPELINE' && (event.type === 'assistant.delta' || event.type === 'assistant.completed')) {
+              const table = [
+                '| Step | Detail |', '| --- | --- |',
+                ...Array.from({ length: 40 }, (_, index) => `| ${index + 1} | CONTINUATION_ROW_${index + 1} ${'x'.repeat(900)} |`),
+              ].join('\n')
+              onEvent?.({ ...event, data: { ...event.data, text: table } })
+              return
+            }
+            onEvent?.(event)
+          },
+        })
       }
     }
 
@@ -409,7 +426,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
       expect(runtime.prompts[0]).toContain('message-quoted/quoted.txt')
       expect(runtime.prompts[0]).toContain('[当前消息]\nPRIVATE_PIPELINE\n[/当前消息]')
 
-      const initialCards = deliveries.filter(delivery => delivery.kind === 'reply_card')
+      const initialCards = deliveries.filter(delivery => delivery.kind === 'reply_card' && !delivery.dedupeKey.includes(':continuation:'))
       expect(initialCards).toHaveLength(3)
       expect(JSON.stringify(initialCards)).toContain('GPT Pipeline')
       expect(JSON.stringify(initialCards)).toContain('Channel pipeline')
@@ -423,6 +440,11 @@ describe('CodyWork channel end-to-end pipeline', () => {
       expect(privateInitial?.payload.replyInThread).toBe(false)
       expect(replyInitial?.payload.replyInThread).toBe(false)
       expect(topicInitial?.payload.replyInThread).toBe(true)
+
+      const topicContinuations = deliveries.filter(delivery => delivery.kind === 'reply_card' && delivery.dedupeKey.includes(':continuation:'))
+      expect(topicContinuations.length).toBeGreaterThan(0)
+      expect(topicContinuations.every(delivery => delivery.targetId === topicMessage.messageId && delivery.payload.replyInThread === true)).toBe(true)
+      expect(JSON.stringify(topicContinuations)).toContain('CONTINUATION_ROW_40')
 
       const terminalUpdates = deliveries.filter(delivery => delivery.kind === 'update_card' && delivery.terminal)
       expect(terminalUpdates).toHaveLength(3)

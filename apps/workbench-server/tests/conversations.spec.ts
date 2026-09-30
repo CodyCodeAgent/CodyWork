@@ -12,7 +12,7 @@ import { ConversationImageUploads } from '../src/services/imageUploads.js'
 import { startServer } from '../src/routes/index.js'
 import { createCodyWorkRuntimeRegistry } from '../src/runtime/registry.js'
 
-function runtimeRegistry(adapters: { codex: TestRuntimeAdapter; trae: TestRuntimeAdapter }) {
+function runtimeRegistry(adapters: { codex: TestRuntimeAdapter; trae?: TestRuntimeAdapter }) {
   return createCodyWorkRuntimeRegistry('codex', adapters)
 }
 
@@ -35,6 +35,24 @@ async function fixture() {
 }
 
 describe('conversation websocket control plane', () => {
+  it('falls back to Codex when Trae is not installed or enabled', async () => {
+    const test = await fixture()
+    const codex = new TestRuntimeAdapter()
+    // A configured default from an older settings row must not make application
+    // startup or a new conversation depend on the optional Trae executable.
+    const conversations = new ConversationService(test.db, runtimeRegistry({ codex }), () => 'trae')
+
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Codex without Trae')
+
+    expect(conversation.runtimeType).toBe('codex')
+    await expect(conversations.getRuntime().getInfo()).resolves.toMatchObject({ runtimeVersion: 'test-1.0.0' })
+    expect(runtimeRegistry({ codex }).list().map(runtime => runtime.id)).toEqual(['codex'])
+    await expect(conversations.listAvailableNativeThreads(test.workspaceId, test.demandId, 'trae')).rejects.toThrow('请选择已启用的 Runtime')
+
+    test.db.close()
+    rmSync(test.root, { recursive: true, force: true })
+  })
+
   it('uses the Demand directory as context metadata without constructing a Git allowlist', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-git-metadata-'))
     const baseline = join(root, 'services', 'demo')
