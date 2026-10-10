@@ -1,6 +1,6 @@
 {
   "name": "@codycodeagent/codywork",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "CodyWork — a Vue workbench for policy-bound Codex development",
   "license": "MIT",
   "private": true,
@@ -30,6 +30,6 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.42.0"
+    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.43.1"
   }
 }
