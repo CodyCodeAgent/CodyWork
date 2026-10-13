@@ -506,6 +506,7 @@ function buildRoutes(ctx: AppContext) {
       // The preview service clamps this value to a safe, small upper bound.
       diffContext: rawDiffContext === null ? undefined : Number(rawDiffContext),
       demandRepositories: demand?.repositories,
+      demandRoot: demand?.path,
     })
   })
 

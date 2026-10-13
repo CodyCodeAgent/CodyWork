@@ -7,6 +7,23 @@ import { getWorkspaceFilePreview } from '../src/services/workspaceFilePreview.js
 import type { WorkspaceRow } from '../src/db/index.js'
 
 describe('workspace file preview', () => {
+  it('resolves Demand documents from its working directory without falling back to baseline files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'workspace-preview-'))
+    try {
+      const demandRoot = join(root, 'worktrees', 'demo')
+      for (const dir of ['specs', 'docs']) {
+        mkdirSync(join(demandRoot, dir), { recursive: true })
+        mkdirSync(join(root, dir), { recursive: true })
+        writeFileSync(join(demandRoot, dir, 'report.md'), 'demand report')
+        writeFileSync(join(root, dir, 'report.md'), 'baseline report')
+        expect(getWorkspaceFilePreview({ path: root } as WorkspaceRow, `${dir}/report.md`, { demandRoot }).content).toBe('demand report')
+      }
+      writeFileSync(join(root, 'docs', 'baseline-only.md'), 'baseline only')
+      expect(() => getWorkspaceFilePreview({ path: root } as WorkspaceRow, 'docs/baseline-only.md', { demandRoot })).toThrow(join(demandRoot, 'docs', 'baseline-only.md'))
+      expect(getWorkspaceFilePreview({ path: root } as WorkspaceRow, 'docs/report.md').content).toBe('baseline report')
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('reads supported text documents inside a workspace', () => {
     const root = mkdtempSync(join(tmpdir(), 'workspace-preview-'))
     mkdirSync(join(root, 'worktrees', 'demo'), { recursive: true })

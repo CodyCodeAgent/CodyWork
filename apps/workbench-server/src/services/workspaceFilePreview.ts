@@ -39,6 +39,8 @@ export interface WorkspaceFilePreview {
 }
 
 export interface WorkspaceFilePreviewOptions {
+  /** Working directory of the active Demand, including docs/ and specs/. */
+  demandRoot?: string
   /** Context lines around each Git hunk, clamped to a bounded product limit. */
   diffContext?: number
   /**
@@ -97,16 +99,22 @@ function existingCandidate(root: string, requestedPath: string): string | null {
 }
 
 /**
- * Resolves a relative agent path in the active Demand first. Paths such as
+ * Resolves a relative agent path from the active Demand working directory first. Paths such as
  * `my-repo/src/file.ts` and `services/my-repo/src/file.ts` explicitly select
  * a repository; an unqualified path is accepted only when it matches exactly
- * one Demand repository. The Workspace remains the fallback for documents
- * such as the demand context itself.
+ * one Demand repository. Workspace-relative resolution applies only when no
+ * Demand working directory is supplied, avoiding accidental baseline previews.
  */
-function resolvePreviewCandidate(workspaceRoot: string, requestedPath: string, repositories: WorkspaceFilePreviewOptions['demandRepositories']): string | null {
+function resolvePreviewCandidate(workspaceRoot: string, requestedPath: string, options: WorkspaceFilePreviewOptions): string | null {
   if (isAbsolute(requestedPath)) return existsSync(resolve(requestedPath)) ? resolve(requestedPath) : null
 
-  const roots = demandPreviewRoots(workspaceRoot, repositories)
+  const demandRoot = options.demandRoot ? realpathSync(options.demandRoot) : undefined
+  if (demandRoot && !isInside(workspaceRoot, demandRoot)) throw new Error('需求目录不在当前 Workspace 内')
+  if (demandRoot) {
+    const candidate = existingCandidate(demandRoot, requestedPath)
+    if (candidate) return candidate
+  }
+  const roots = demandPreviewRoots(workspaceRoot, options.demandRepositories)
   const parts = requestedPath.replaceAll('\\', '/').split('/').filter(Boolean)
   const qualified = roots.flatMap(root => {
     const prefixLength = parts[0] === root.name ? 1 : parts[0] === 'services' && parts[1] === root.name ? 2 : 0
@@ -124,7 +132,7 @@ function resolvePreviewCandidate(workspaceRoot: string, requestedPath: string, r
   if (repositoryMatches.length === 1) return repositoryMatches[0]!
   if (repositoryMatches.length > 1) throw new Error('预览文件路径不明确，请使用仓库名开头的路径')
 
-  return existingCandidate(workspaceRoot, requestedPath)
+  return demandRoot ? null : existingCandidate(workspaceRoot, requestedPath)
 }
 
 function workspaceFileDiff(resolvedPath: string, workspaceRoot: string, diffContext: number): WorkspaceFileDiff {
@@ -167,8 +175,8 @@ export function getWorkspaceFilePreview(workspace: WorkspaceRow, requestedPath: 
   if (!path || /[\u0000-\u001f]/u.test(path)) throw new Error('预览文件路径无效')
 
   const workspaceRoot = realpathSync(workspace.path)
-  const candidate = resolvePreviewCandidate(workspaceRoot, path, options.demandRepositories)
-  if (!candidate) throw new Error('预览文件不存在')
+  const candidate = resolvePreviewCandidate(workspaceRoot, path, options)
+  if (!candidate) throw new Error(`预览文件不存在：${resolve(options.demandRoot ?? workspaceRoot, path)}`)
 
   const resolvedPath = realpathSync(candidate)
   const workspaceRelativePath = relative(workspaceRoot, resolvedPath)
