@@ -42,6 +42,47 @@ function createFixture() {
 }
 
 describe('safe repository baseline synchronization', { timeout: 15_000 }, () => {
+  it('restores an initialized submodule commit and clears its changes', () => {
+    const test = createFixture()
+    try {
+      git(test.baseline, ['-c', 'protocol.file.allow=always', 'submodule', 'add', test.updater, 'core'])
+      git(test.baseline, ['commit', '-am', 'add submodule'])
+      const core = join(test.baseline, 'core')
+      const recorded = git(core, ['rev-parse', 'HEAD'])
+      git(core, ['config', 'user.email', 'test@example.com'])
+      git(core, ['config', 'user.name', 'Test'])
+      writeFileSync(join(core, 'README.md'), 'another commit\n')
+      git(core, ['commit', '-am', 'advance submodule'])
+      writeFileSync(join(core, 'README.md'), 'uncommitted\n')
+      writeFileSync(join(core, 'untracked.txt'), 'temporary\n')
+      const result = clearRepositoryBaselineChanges(test.db, test.workspace, test.repository.id)
+      expect(result.state).toBe('cleaned')
+      expect(result.repository.dirty).toBe(0)
+      expect(git(core, ['rev-parse', 'HEAD'])).toBe(recorded)
+      expect(git(core, ['status', '--porcelain=v1'])).toBe('')
+    } finally {
+      test.db.close()
+      rmSync(test.root, { recursive: true, force: true })
+    }
+  })
+
+  it('reports failure when an untracked nested Git repository remains', () => {
+    const test = createFixture()
+    try {
+      const nested = join(test.baseline, 'nested')
+      mkdirSync(nested)
+      git(nested, ['init'])
+      writeFileSync(join(nested, 'local.txt'), 'preserve nested repository\n')
+      const result = clearRepositoryBaselineChanges(test.db, test.workspace, test.repository.id)
+      expect(result.state).toBe('failed')
+      expect(result.repository.dirty).toBe(1)
+      expect(result.message).toContain('清理后仓库仍有变更')
+    } finally {
+      test.db.close()
+      rmSync(test.root, { recursive: true, force: true })
+    }
+  })
+
   it('fetches and fast-forwards a clean baseline without rewriting history', () => {
     const test = createFixture()
     writeFileSync(join(test.updater, 'remote.md'), 'from origin\n')

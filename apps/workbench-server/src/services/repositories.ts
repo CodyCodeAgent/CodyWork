@@ -387,12 +387,16 @@ export function clearRepositoryBaselineChanges(db: WorkbenchDb, workspace: Works
       return { repository: current, state: 'already_clean', message: '基线没有未提交改动，无需清理。', discardedTrackedChanges: 0, discardedUntrackedFiles: 0 }
     }
 
-    if (repositoryHead(repository.baseline_path)) runGit(repository.baseline_path, ['reset', '--hard', 'HEAD'])
+    if (repositoryHead(repository.baseline_path)) runGit(repository.baseline_path, ['reset', '--hard', '--recurse-submodules', 'HEAD'])
     // Never use -x: ignored files, including CodyWork's worktrees/, are not
     // cleanup candidates. The explicit exclusion also protects old setups.
     runGit(repository.baseline_path, ['clean', '-fd', '--exclude=worktrees/'])
+    // Visit initialized submodules only; cleanup must not clone or fetch.
+    runGit(repository.baseline_path, ['submodule', 'foreach', '--recursive', 'git reset --hard HEAD && git clean -fd --exclude=worktrees/'])
 
-    const current = saveRepositoryInspection(db, repository, inspectRepository(repository.baseline_path), 'ok', null)
+    const inspection = inspectRepository(repository.baseline_path)
+    if (inspection.dirty) throw new Error('清理后仓库仍有变更，请检查子模块或嵌套 Git 仓库。')
+    const current = saveRepositoryInspection(db, repository, inspection, 'ok', null)
     return {
       repository: current,
       state: 'cleaned',

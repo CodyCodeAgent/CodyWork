@@ -1101,6 +1101,7 @@ async function confirmBaselineCleanup(): Promise<void> {
   try {
     const result = await api.clearRepositoryBaseline(currentWorkspace.id, repository.id)
     repositories.value = repositories.value.map(item => item.id === repository.id ? result.repository : item)
+    if (result.state === 'failed') throw new Error(result.message)
     baselineCleanupPending.value = null
     await refreshDashboard()
   } catch (cause) {
