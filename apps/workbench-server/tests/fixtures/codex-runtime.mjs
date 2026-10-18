@@ -88,6 +88,12 @@ function emitTurn(threadId, prompt, turnCwd = '') {
     write({ id: 800 + turnSequence, method: 'item/tool/requestUserInput', params: { threadId, turnId, itemId, questions: [{ id: 'q1', header: 'Fixture', question: '继续吗？', isOther: false, isSecret: false, options: null }], isBlocking: true } })
     return
   }
+  if (prompt.includes('DYNAMIC_FOLLOWUP_CREATE')) {
+    const namespace = (threadDynamicTools.get(threadId) ?? []).find(tool => tool?.type === 'namespace' && tool?.name === 'codywork_followups')
+    if (!namespace?.tools?.some(tool => tool?.name === 'create')) throw new Error('missing followup tool namespace')
+    write({ id: 700 + turnSequence, method: 'item/tool/call', params: { threadId, turnId, callId: `call-${turnSequence}`, namespace: 'codywork_followups', tool: 'create', arguments: { name: 'Fixture followup', prompt: '检查合成任务状态', completionCondition: '合成任务完成', intervalMinutes: 10, deadlineAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString(), notificationPolicy: 'change' } } })
+    return
+  }
   if (prompt.includes('DYNAMIC_QUICK_ACTION')) {
     const namespace = (threadDynamicTools.get(threadId) ?? []).find(tool => tool?.type === 'namespace' && tool?.name === 'codywork_quick_actions')
     if (!namespace?.tools?.some(tool => tool?.name === 'save')) {
@@ -108,7 +114,8 @@ function emitTurn(threadId, prompt, turnCwd = '') {
     })
     return
   }
-  const text = prompt.includes('SERVER_CWD') ? process.cwd()
+  const text = prompt.includes('CODYWORK_FOLLOWUP_CHECK') ? JSON.stringify({ status: prompt.includes('PENDING_FIXTURE') ? 'pending' : 'completed', summary: '合成任务检查结果', facts: { fixture: prompt.includes('PENDING_FIXTURE') ? 'waiting' : 'done' } })
+    : prompt.includes('SERVER_CWD') ? process.cwd()
     : prompt.includes('THREAD_CWD') ? lastThreadCwd
       : prompt.includes('TURN_CWD') ? turnCwd
         : prompt.includes('REAL') ? 'CODEX_FIXTURE_REAL' : 'CODEX_FIXTURE_OK'
@@ -165,6 +172,14 @@ rl.on('line', line => {
       persistState()
       write({ id: message.id, result: { thread: { id: threadId } } })
     }
+  }
+  else if (message.method === 'thread/fork') {
+    const sourceId = message.params.threadId
+    const threadId = `native-fixture-thread-${++threadSequence}`
+    threadHistories.set(threadId, structuredClone(threadHistories.get(sourceId) ?? []))
+    threadDynamicTools.set(threadId, structuredClone(threadDynamicTools.get(sourceId) ?? []))
+    persistState()
+    write({ id: message.id, result: { thread: { id: threadId } } })
   }
   else if (message.method === 'thread/resume') {
     const threadId = message.params?.threadId ?? 'native-fixture-thread'
@@ -261,7 +276,7 @@ rl.on('line', line => {
       }
     }
     const policy = message.params?.sandboxPolicy
-    const expectedPolicy = prompt.includes('EXPECT_READ_ONLY')
+    const expectedPolicy = prompt.includes('EXPECT_READ_ONLY') || prompt.includes('CODYWORK_FOLLOWUP_CHECK')
       ? 'readOnly'
       : prompt.includes('EXPECT_YOLO') || prompt.includes('SOURCE_SCOPED_DEFAULT_REMAINS_WRITE')
         ? 'dangerFullAccess'
@@ -283,7 +298,7 @@ rl.on('line', line => {
     if (prompt.includes('PAUSE_E2E')) setTimeout(() => emitPendingTurn(threadId, prompt, turnCwd), 5)
     else if (prompt.includes('DISCONNECT')) setTimeout(() => { recordFailedTurn(threadId, prompt); process.exit(23) }, 5)
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
-    else setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
+    else setTimeout(() => emitTurn(threadId, prompt, turnCwd), prompt.includes('SLOW_E2E') ? 1800 : 5)
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })
   else if (message.id === 700 + turnSequence) {
     const turnId = `turn-${turnSequence}`

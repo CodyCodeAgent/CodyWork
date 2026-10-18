@@ -280,6 +280,8 @@ export interface CodyWorkRuntime {
   checkWorkspace(request: WorkspaceCheckRequest): Promise<WorkspaceCheckResult>
   initializeWorkspace(request: WorkspaceInitializationRequest): Promise<WorkspaceInitializationResult>
   createConversation(request: CreateConversationRequest): Promise<ConversationHandle>
+  /** Forks native history without sharing the source thread's live Turn. */
+  forkConversation?(request: CreateConversationRequest & { source: ConversationHandle }): Promise<ConversationHandle>
   /** Renames the native Codex Thread owned by this conversation. */
   renameConversation(conversation: ConversationHandle, title: string): Promise<void>
   /** Accepts an outbox command immediately; Core owns queueing and native Turn binding. */

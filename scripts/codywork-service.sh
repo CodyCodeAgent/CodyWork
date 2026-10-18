@@ -30,6 +30,8 @@ TRAE_NO_PROXY_DEFAULTS=(
 
 append_no_proxy_rule() {
   local current="$1" candidate="$2" entry trimmed
+  # macOS Bash 3 treats an empty array as unset under `set -u`.
+  [[ -z "$current" ]] && { printf '%s' "$candidate"; return; }
   local -a entries=()
   local IFS=','
   read -r -a entries <<< "$current"
@@ -49,6 +51,7 @@ normalise_no_proxy_environment() {
   local merged='' source rule
   local -a rules=()
   for source in "${no_proxy:-}" "${NO_PROXY:-}"; do
+    [[ -z "$source" ]] && continue
     local IFS=','
     read -r -a rules <<< "$source"
     for rule in "${rules[@]}"; do

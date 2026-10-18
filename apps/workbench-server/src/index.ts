@@ -1,7 +1,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WorkbenchDb } from './db/index.js'
-import { AppContext, channelService, isLoopbackBindHost, startServer } from './routes/index.js'
+import { AppContext, channelService, followupService, isLoopbackBindHost, startServer } from './routes/index.js'
 import { reconcileDemandOperations } from './services/demands.js'
 
 function argument(name: string): string | undefined {
@@ -31,11 +31,12 @@ if (reconciled > 0) console.error(`[codywork] reconciled ${reconciled} interrupt
 const appContext: AppContext = { db }
 const server = startServer(appContext, { host, port, staticRoot, password })
 void channelService(appContext).start().catch(error => console.error(`[codywork] channel startup failed: ${error instanceof Error ? error.message : String(error)}`))
+followupService(appContext).start()
 
 function close() {
   server.closeRealtime(1012, 'service restart')
   server.close(() => {
-    void Promise.resolve(appContext.channels?.close()).finally(() => appContext.conversations?.closeRuntimes()).finally(() => {
+    void Promise.resolve(appContext.followups?.close()).finally(() => appContext.channels?.close()).finally(() => appContext.conversations?.closeRuntimes()).finally(() => {
       void appContext.dashboards?.dispose().finally(() => {
         db.close()
         process.exit(0)

@@ -238,6 +238,13 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toBe('CODEX_FIXTURE_OK')
     expect(result.events.map(event => event.type)).toContain('assistant.delta')
     expect(result.events.at(-1)?.type).toBe('turn.completed')
+    const background = await runtime.forkConversation({ source: conversation, conversationId: 'followup-fork', context: { ...context, effectivePolicy: { ...context.effectivePolicy, writableRoots: [] } } })
+    expect(background.nativeId).not.toBe(conversation.nativeId)
+    const forkHistory = await runtime.readConversationSnapshot({ conversationId: background.id, nativeId: background.nativeId, context })
+    expect(forkHistory.events.some(event => event.data.text === 'CODEX_FIXTURE_OK')).toBe(true)
+    await runtime.sendTurn({ conversation: background, prompt: 'EXPECT_READ_ONLY background-only-check', executionProfile: { permissionMode: 'read-only' } })
+    const sourceHistory = await runtime.readConversationSnapshot({ conversationId: conversation.id, nativeId: conversation.nativeId, context })
+    expect(JSON.stringify(sourceHistory.events)).not.toContain('background-only-check')
     const dynamicToolResult = await runtime.sendTurn({ conversation, prompt: 'DYNAMIC_QUICK_ACTION' })
     expect(JSON.parse(dynamicToolResult.finalText)).toEqual({ saved: true, name: 'Fixture shortcut' })
     expect(productToolCalls).toEqual([expect.objectContaining({

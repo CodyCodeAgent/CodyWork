@@ -48,6 +48,11 @@ export class ConversationRepository {
       .get(conversationId) as ConversationRow | undefined) ?? null
   }
 
+  isFollowupBackground(conversationId: string): boolean {
+    return Boolean(this.database.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='followup_tasks'").get()
+      && this.database.db.prepare("SELECT id FROM followup_tasks WHERE json_extract(data, '$.backgroundConversationId') = ? LIMIT 1").get(conversationId))
+  }
+
   getByNativeId(runtimeType: ConversationRuntimeType, nativeId: string): ConversationRow | null {
     return (this.database.db.prepare('SELECT * FROM conversations WHERE runtime_type = ? AND native_id = ?')
       .get(runtimeType, nativeId) as ConversationRow | undefined) ?? null

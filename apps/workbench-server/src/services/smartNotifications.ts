@@ -261,6 +261,10 @@ export class SmartNotificationService {
   }
 
   private async onTerminal(event: ConversationEvent): Promise<void> {
+    // Followups have their own per-task policy and Outbox identity. Never send
+    // an additional long-task notification for the same background check.
+    if (this.database.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'followup_tasks'").get()
+      && this.database.db.prepare("SELECT id FROM followup_tasks WHERE json_extract(data, '$.backgroundConversationId') = ? LIMIT 1").get(event.conversationId)) return
     const conversation = this.database.db.prepare('SELECT workspace_id, demand_id, title FROM conversations WHERE id = ?').get(event.conversationId) as { workspace_id: string; demand_id: string | null; title: string } | undefined
     if (!conversation || !event.turnId) return
     const settings = this.get(conversation.workspace_id)

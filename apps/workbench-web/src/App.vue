@@ -40,6 +40,7 @@
         <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
         <FeishuChannelSettings v-else-if="settingsSection === 'feishu'" />
         <SmartNotificationSettings v-else-if="settingsSection === 'smart-notifications'" :workspace-id="workspace.id" />
+        <FollowupSettings v-else-if="settingsSection === 'followups'" :key="workspace.id" :workspace-id="workspace.id" :origin-conversation-id="followupOriginWorkspaceId === workspace.id ? followupOriginConversationId : ''" />
         <div v-else class="runtime-settings-body">
           <section class="settings-intro"><div><div class="card-kicker">CODEX RUNTIME</div><h2>App Server 运行状态</h2><p>CodyWork 只展示 Core 的权威状态，不自行重启或复制 Runtime 状态。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
           <div class="runtime-settings-grid">
@@ -58,6 +59,7 @@
       </section>
       <section v-else-if="activePage === 'chat' && (selectedDemand || isWorkspaceConversationPage)" class="demand-chat-page">
         <header class="topbar chat-topbar">
+          <button v-if="selectedConversation" class="btn" type="button" @click="openConversationFollowup">定时跟进</button>
           <div v-if="selectedDemand"><button class="back-link" @click="returnToDemandList">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
           <div v-else><button class="back-link" @click="returnToWorkspace">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 {{ activeRuntimeLabel }}</strong><span>默认 YOLO，可切换只读或 Normal；可用能力以当前 Runtime 声明为准</span></div></div>
           <div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button v-if="selectedConversation && traeCache" :class="['runtime-base-badge', activeRuntimeType, 'runtime-cache-trigger']" type="button" :title="traeCacheBadgeTitle" @click="openTraeCacheDialog"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><small>SESSION · 缓存</small></button><span v-else-if="selectedConversation" :class="['runtime-base-badge', activeRuntimeType]"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><small>NATIVE SESSION</small></span><button v-if="selectedConversation && runtimeOptions.length > 1" class="btn runtime-migrate-trigger" type="button" :disabled="!canMigrateConversation(selectedConversation)" @click="openRuntimeMigration()">切换 Runtime</button><button v-if="selectedDemand && runtimeCapabilities.aiCodeReports" :class="['btn', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" @click="openAiCodeReport"><span class="ai-report-trigger-dot" />代码上报</button><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" @click="openConversationShare">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="settleConversation" @compact="compactConversation" @add-repository="openAddDemandRepository" @sync="syncRepositoryBaseline" @cleanup="requestBaselineCleanup" @execute-quick-action="executeQuickAction" /><button v-if="selectedDemand && runtimeCapabilities.nativeSessionList" class="btn" @click="openBindConversation">绑定会话</button><span v-else-if="selectedDemand" class="runtime-unavailable-note">不支持绑定历史会话</span><button class="btn" :disabled="creatingConversation" @click="openCreateConversation">＋ 新会话</button></div>
@@ -214,6 +216,7 @@ import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
 import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
 import SmartNotificationSettings from './components/SmartNotificationSettings.vue'
+import FollowupSettings from './components/FollowupSettings.vue'
 import SkillInstallDialog from './components/SkillInstallDialog.vue'
 import ConversationChannelDialog from './components/ConversationChannelDialog.vue'
 import ConversationShareDialog from './components/ConversationShareDialog.vue'
@@ -295,6 +298,8 @@ const activePage = ref<Page>('dashboard'); const dashboard = ref<DashboardSnapsh
 const runtimeType = ref<string>('codex')
 const composerCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-composer'))
 const settingsSection = ref<WorkbenchSettingsSection>('overview')
+const followupOriginConversationId = ref('')
+const followupOriginWorkspaceId = ref('')
 const quickActions = ref<QuickAction[]>([])
 const selectedQuickActionId = ref('')
 const savingQuickAction = ref(false)
@@ -429,7 +434,7 @@ const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.tr
 const filteredSkills = computed(() => filterSkills(skills.value, skillQuery.value))
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
 const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
-const settingsTitle = computed(() => settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : settingsSection.value === 'smart-notifications' ? '智能通知' : '设置')
+const settingsTitle = computed(() => settingsSection.value === 'followups' ? '定时跟进' : settingsSection.value === 'quick-actions' ? '快捷指令' : settingsSection.value === 'runtime' ? 'Runtime' : settingsSection.value === 'feishu' ? '飞书机器人' : settingsSection.value === 'smart-notifications' ? '智能通知' : '设置')
 const runtimeOptions = computed(() => (runtime.value?.runtimes ?? []).map(runtime => ({ value: runtime.id, label: runtime.label })))
 const runtimeDescriptor = (runtimeType: string): RuntimeDescriptor | undefined => runtime.value?.runtimes.find(item => item.id === runtimeType)
 const selectedRuntimeDescriptor = computed(() => runtimeDescriptor(runtimeType.value))
@@ -688,11 +693,19 @@ function goTo(page: Exclude<Page, 'chat'>): void {
   if (page === 'settings') void loadQuickActions()
 }
 async function openSettingsSection(section: WorkbenchSettingsSection): Promise<void> {
+  followupOriginConversationId.value = ''
   settingsSection.value = section
   activePage.value = 'settings'
   updateRoute(null, 'push')
   if (section === 'runtime') await loadRuntime()
   if (section === 'quick-actions') await Promise.all([loadQuickActions(), loadSkills()])
+}
+function openConversationFollowup(): void {
+  if (!selectedConversation.value) return
+  const conversationId = selectedConversation.value.id
+  void openSettingsSection('followups')
+  followupOriginConversationId.value = conversationId
+  followupOriginWorkspaceId.value = workspace.value?.id ?? ''
 }
 async function selectWorkspace(next: Workspace, options: { demandId?: string | null; conversationId?: string | null; page?: Exclude<Page, 'chat'>; settingsSection?: WorkbenchSettingsSection; history?: HistoryMode } = {}): Promise<void> {
   // The list response is already authoritative enough to restore the shell.  Do
