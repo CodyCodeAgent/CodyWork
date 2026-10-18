@@ -16,6 +16,7 @@ import type {
   RuntimeComposerOptions,
   RuntimeConversationSnapshot,
   RuntimeDescriptorView,
+  SubmitTurnResult,
   RuntimeSubmitMode,
 } from '../runtime/protocol.js'
 import type { CodyWorkRuntimeRegistry } from '../runtime/registry.js'
@@ -385,6 +386,22 @@ export class ConversationService implements ConversationCommandGateway {
     return this.get(workspaceId, id)
   }
 
+  async forkForFollowup(workspaceId: string, sourceConversationId: string, title: string): Promise<ConversationView> {
+    const source = this.requireConversation(workspaceId, sourceConversationId)
+    await this.ensureHandle(source)
+    const runtime = this.runtimeFor(source)
+    if (!runtime.forkConversation) throw new Error('当前 Runtime 不支持原生 fork，无法创建定时跟进会话')
+    const id = makeId('conversation')
+    const context = this.contexts.forRow({ ...source, permission_mode: 'read-only' })
+    const handle = await runtime.forkConversation({ source: this.handleFor(source), conversationId: id, context })
+    const timestamp = nowIso()
+    this.repository.insert({ ...source, id, native_id: handle.nativeId, title: `定时跟进 · ${title}`, status: 'idle', permission_mode: 'read-only', policy_hash: context.effectivePolicy.hash, instruction_hash: context.instructionBundle.sha256, created_at: timestamp, updated_at: timestamp })
+    this.handles.set(id, handle)
+    this.attachRuntimeStream(handle)
+    this.audit(id, 'conversation.followup_forked', { sourceConversationId })
+    return this.get(workspaceId, id)
+  }
+
   /**
    * Starts a new native conversation on the other Runtime with a bounded,
    * visible-history handoff. Native Codex Threads and ACP Sessions use
@@ -559,8 +576,21 @@ export class ConversationService implements ConversationCommandGateway {
   }
 
   async submitCommand(command: ConversationCommand): Promise<ConversationCommandReceipt> {
+    const submission = await this.admitCommand(command)
+    return { accepted: true, commandId: submission.clientCommandId }
+  }
+
+  /** Scheduled work shares the normal admission, policy and event path. */
+  async submitScheduledCommand(command: ConversationCommand): Promise<import('../runtime/protocol.js').SendTurnResult> {
+    if (command.origin.kind !== 'schedule') throw new Error('定时执行缺少任务来源')
+    return (await this.admitCommand(command)).completed
+  }
+
+  private async admitCommand(command: ConversationCommand): Promise<SubmitTurnResult> {
+    command.signal?.throwIfAborted()
     const { workspaceId, conversationId } = command
     const row = this.requireConversation(workspaceId, conversationId)
+    if (this.isFollowupBackground(conversationId) && (command.origin.kind !== 'schedule' || command.executionProfile?.permissionMode !== 'read-only')) throw new Error('后台跟进会话仅允许定时任务以只读方式检查，请在原会话发起其他操作')
     await this.ensureHandle(row)
     const text = command.prompt.trim()
     const localImages = command.localImages ?? []
@@ -577,6 +607,8 @@ export class ConversationService implements ConversationCommandGateway {
       ...(command.settings?.collaborationMode ? { collaborationMode: command.settings.collaborationMode } : {}),
       ...(selectedSkills.length ? { skills: selectedSkills } : {}),
     }
+    command.signal?.throwIfAborted()
+    command.beforeSubmit?.()
     this.repository.touch(conversationId)
     const submission = runtime.submitTurn({
       conversation: this.handleFor(row),
@@ -597,10 +629,11 @@ export class ConversationService implements ConversationCommandGateway {
       () => this.onTurnFinished?.(row.workspace_id),
       () => this.onTurnFinished?.(row.workspace_id),
     )
-    return { accepted: true, commandId: submission.clientCommandId }
+    return submission
   }
 
   async setPermission(workspaceId: string, conversationId: string, mode: ConversationPermissionMode): Promise<ConversationView> {
+    if (this.isFollowupBackground(conversationId) && mode !== 'read-only') throw new Error('后台跟进会话不能提升执行权限')
     const row = this.requireConversation(workspaceId, conversationId)
     await this.ensureHandle(row)
     await this.runtimeFor(row).setPermission(this.handleFor(row), mode)
@@ -713,6 +746,10 @@ export class ConversationService implements ConversationCommandGateway {
     const row = this.repository.getById(conversationId)
     if (!row) throw new Error('会话不存在')
     return row
+  }
+
+  private isFollowupBackground(conversationId: string): boolean {
+    return this.repository.isFollowupBackground(conversationId)
   }
 
   private audit(conversationId: string, action: string, data: unknown): void {

@@ -4,6 +4,7 @@ import type { RuntimeSubmitMode } from '../runtime/protocol.js'
 /** The source that admitted a command into the shared native Codex Thread. */
 export type ConversationCommandOrigin =
   | { kind: 'browser' }
+  | { kind: 'schedule'; taskId: string; runId: string }
   | {
       kind: 'channel'
       provider: 'feishu'
@@ -29,6 +30,9 @@ export type ConversationCommandSettings = {
 }
 
 export type ConversationCommand = {
+  /** Server-only cancellation and fence, checked immediately before native admission. */
+  signal?: AbortSignal
+  beforeSubmit?: () => void
   id?: string
   workspaceId: string
   conversationId: string

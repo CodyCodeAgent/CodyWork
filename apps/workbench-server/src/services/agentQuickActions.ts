@@ -48,6 +48,7 @@ export const QUICK_ACTION_DYNAMIC_TOOLS = [{
 }]
 
 export interface AgentQuickActionCall {
+  namespace?: string
   conversationId: string
   threadId: string
   turnId: string
@@ -115,6 +116,8 @@ export class AgentQuickActionTools {
       return { query, matches }
     }
     if (call.tool !== 'save') throw new Error(`不支持的快捷指令工具：${call.tool}`)
+    if (this.db.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='followup_tasks'").get()
+      && this.db.db.prepare("SELECT id FROM followup_tasks WHERE json_extract(data, '$.backgroundConversationId') = ? LIMIT 1").get(call.conversationId)) throw new Error('后台跟进会话不能修改 Workspace 快捷指令')
 
     const catalog = await this.skills(workspace)
     const actionId = text(args.actionId)

@@ -2,6 +2,7 @@
   <div class="settings-overview">
     <p class="settings-lead">管理当前 Workspace 的运行环境和可复用工作入口。</p>
     <div class="settings-grid">
+      <button type="button" class="settings-tile" @click="emit('open', 'followups')"><span class="tile-copy"><strong>定时跟进</strong><small>管理后台跟进任务、完成条件、运行记录与通知投递。</small></span><span class="tile-arrow" aria-hidden="true">→</span></button>
       <button type="button" class="settings-tile" @click="emit('open', 'quick-actions')">
         <span class="tile-icon accent" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 8h8v8H8zM5 8a3 3 0 1 1 3-3v14a3 3 0 1 1-3-3h14a3 3 0 1 1-3 3V5a3 3 0 1 1 3 3H5Z" /></svg></span>
         <span class="tile-copy"><strong>快捷指令</strong><small>组合 Prompt、多个 Skill 和使用场景，在需求会话中一键执行。</small></span>
@@ -28,7 +29,7 @@
 
 <script setup lang="ts">
 defineProps<{ actionCount: number }>()
-const emit = defineEmits<{ open: [section: 'runtime' | 'quick-actions' | 'feishu' | 'smart-notifications'] }>()
+const emit = defineEmits<{ open: [section: 'runtime' | 'quick-actions' | 'feishu' | 'smart-notifications' | 'followups'] }>()
 </script>
 
 <style scoped>

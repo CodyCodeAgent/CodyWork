@@ -194,6 +194,11 @@ export class CodyWorkChannelService {
   saveSmartNotificationSettings(workspaceId: string, input: SmartNotificationSettingsInput) { return this.notifications.save(workspaceId, input) }
   testSmartNotification(workspaceId: string) { return this.notifications.test(workspaceId) }
 
+  /** Shared durable delivery for product notifications; never executes a task. */
+  queueNotification(accountId: string, recipientOpenId: string, card: import('@codycodeagent/cody-web-core/feishu').FeishuCard, dedupeKey: string) {
+    return this.accounts.queueDurable(accountId, { kind: 'send_user_card', targetId: recipientOpenId, payload: { card }, dedupeKey, terminal: true })
+  }
+
   permissionTemplate() { return feishuPermissionTemplate() }
 
   async permissions(accountId: string) {

@@ -31,6 +31,8 @@ import { CodyWorkChannelService } from '../services/channelBot.js'
 import { AgentQuickActionTools } from '../services/agentQuickActions.js'
 import type { SmartNotificationSettingsInput } from '../services/smartNotifications.js'
 import { AiCodeReportService } from '../services/aiCodeReports.js'
+import { FollowupService } from '../services/followupService.js'
+import { AgentFollowupTools, FOLLOWUP_TOOL_NAMESPACE } from '../services/agentFollowups.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -75,6 +77,7 @@ export interface AppContext {
   images?: ConversationImageUploads
   channels?: CodyWorkChannelService
   aiReports?: AiCodeReportService
+  followups?: FollowupService
 }
 
 export function normalizeRepositoryInput(body: Record<string, unknown>): {
@@ -216,7 +219,7 @@ function requiredParam(ctx: Ctx, key: string): string {
 }
 
 function conversationService(ctx: AppContext): ConversationService {
-  if (!ctx.conversations) ctx.conversations = new ConversationService(ctx.db, createRuntimeRegistry(ctx.db), () => runtimeSettings(ctx.db).runtimeType, (workspaceId: string) => {
+  if (!ctx.conversations) ctx.conversations = new ConversationService(ctx.db, createRuntimeRegistry(ctx), () => runtimeSettings(ctx.db).runtimeType, (workspaceId: string) => {
     setTimeout(() => {
       const workspace = ctx.db.db.prepare('SELECT * FROM workspaces WHERE id = ?').get(workspaceId) as WorkspaceRow | undefined
       if (workspace) void dashboardCache(ctx).refresh(workspace)
@@ -256,6 +259,16 @@ export function channelService(ctx: AppContext): CodyWorkChannelService {
     },
   })
   return ctx.channels
+}
+
+export function followupService(ctx: AppContext): FollowupService {
+  if (!ctx.followups) ctx.followups = new FollowupService(ctx.db, conversationService(ctx), () => channelService(ctx), task => {
+    const source = conversationService(ctx).get(task.workspaceId, task.sourceConversationId)
+    const query = new URLSearchParams({ workspace: task.workspaceId, conversation: task.sourceConversationId })
+    if (source.demandId) query.set('demand', source.demandId)
+    return publicOrigin ? `${publicOrigin}/?${query}` : ''
+  })
+  return ctx.followups
 }
 
 function aiCodeReports(ctx: AppContext): AiCodeReportService {
@@ -308,16 +321,18 @@ function skillInstalls(ctx: AppContext): SkillInstallCoordinator {
   return ctx.skillInstalls
 }
 
-function createRuntimeRegistry(db: WorkbenchDb): CodyWorkRuntimeRegistry {
+function createRuntimeRegistry(ctx: AppContext): CodyWorkRuntimeRegistry {
+  const db = ctx.db
   const saved = runtimeSettings(db)
   const command = saved.commands.codex?.trim() || process.env.CODY_CODEX_COMMAND?.trim() || 'codex app-server --stdio'
   const model = process.env.CODY_CODEX_MODEL?.trim()
   let runtime: CodyWorkCodexRuntime
   const quickActionTools = new AgentQuickActionTools(db, workspace => listSkills(runtime, workspace))
+  const followupTools = new AgentFollowupTools(db, () => followupService(ctx), workspaceId => channelService(ctx).smartNotificationSettings(workspaceId))
   runtime = new CodyWorkCodexRuntime({
     command,
     ...(model ? { model } : {}),
-    productToolHandler: call => quickActionTools.handle(call),
+    productToolHandler: call => call.namespace === FOLLOWUP_TOOL_NAMESPACE ? followupTools.handle(call) : quickActionTools.handle(call),
   })
   const traeCommand = saved.commands.trae?.trim() || process.env.CODY_TRAE_COMMAND?.trim() || 'traex acp serve'
   return createCodyWorkRuntimeRegistry(saved.runtimeType, { codex: runtime, trae: new CodyWorkTraeRuntime({ command: traeCommand }) })
@@ -470,6 +485,27 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/smart-notifications', (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return channelService(ctx).smartNotificationSettings(workspace.id)
+  })
+
+  add('GET', '/api/workspaces/:id/followups', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return followupService(ctx).list(workspace.id, c.query.get('conversationId') ?? undefined)
+  })
+  add('POST', '/api/workspaces/:id/followups', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return followupService(ctx).create(workspace.id, c.body)
+  })
+  add('PUT', '/api/workspaces/:id/followups/:taskId', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return followupService(ctx).update(workspace.id, requiredParam(c, 'taskId'), c.body)
+  })
+  add('GET', '/api/workspaces/:id/followups/:taskId/runs', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return followupService(ctx).runs(workspace.id, requiredParam(c, 'taskId'))
+  })
+  add('POST', '/api/workspaces/:id/followups/:taskId/:action', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return followupService(ctx).action(workspace.id, requiredParam(c, 'taskId'), requiredParam(c, 'action'), Number(c.body.expectedRevision))
   })
 
   add('PATCH', '/api/workspaces/:id/smart-notifications', (c) => {

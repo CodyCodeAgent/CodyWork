@@ -594,7 +594,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return payload.data as T
 }
 
+const followupRoot = (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/followups`
 export const api = {
+  listFollowups: (workspaceId: string) => request<{ items: import('./followups').FollowupTask[] }>('GET', followupRoot(workspaceId)),
+  createFollowup: (workspaceId: string, input: import('./followups').FollowupInput) => request<unknown>('POST', followupRoot(workspaceId), input),
+  updateFollowup: (workspaceId: string, id: string, input: import('./followups').FollowupInput & { expectedRevision: number }) => request<unknown>('PUT', `${followupRoot(workspaceId)}/${encodeURIComponent(id)}`, input),
+  followupAction: (workspaceId: string, id: string, action: import('./followups').FollowupAction, expectedRevision: number) => request<unknown>('POST', `${followupRoot(workspaceId)}/${encodeURIComponent(id)}/${action}`, { expectedRevision }),
+  followupRuns: (workspaceId: string, id: string) => request<{ items: import('./followups').FollowupRun[] }>('GET', `${followupRoot(workspaceId)}/${encodeURIComponent(id)}/runs`),
   listFeishuAccounts: () => request<FeishuChannelAccount[]>('GET', '/api/channels/feishu/accounts'),
   feishuPermissionTemplate: () => request<FeishuPermissionTemplate>('GET', '/api/channels/feishu/permission-template'),
   createFeishuAccount: (input: FeishuChannelAccountInput) => request<FeishuChannelAccount>('POST', '/api/channels/feishu/accounts', input),

@@ -48,6 +48,7 @@ import type {
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION } from './protocol.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from './policy.js'
 import { QUICK_ACTION_DYNAMIC_TOOLS, QUICK_ACTION_TOOL_NAMESPACE, type AgentQuickActionCall } from '../services/agentQuickActions.js'
+import { FOLLOWUP_DYNAMIC_TOOLS, FOLLOWUP_TOOL_NAMESPACE } from '../services/agentFollowups.js'
 
 type ProductToolHandler = (call: AgentQuickActionCall) => Promise<unknown>
 type CodexOptions = { command?: string; model?: string; env?: NodeJS.ProcessEnv; appServerCwd?: string; productToolHandler?: ProductToolHandler }
@@ -103,7 +104,7 @@ function executionContext(context: RuntimeContext, mode: RuntimePermissionMode, 
       sandbox: mode === 'read-only' ? 'read-only' : mode === 'yolo' ? 'danger-full-access' : 'workspace-write',
       runtimeWorkspaceRoots,
       baseInstructions: context.instructionBundle.systemInstructions,
-      ...(productToolsEnabled && context.demandPath ? { dynamicTools: QUICK_ACTION_DYNAMIC_TOOLS } : {}),
+      ...(productToolsEnabled ? { dynamicTools: [...(context.demandPath ? QUICK_ACTION_DYNAMIC_TOOLS : []), ...FOLLOWUP_DYNAMIC_TOOLS] } : {}),
       experimentalRawEvents: false, ephemeral: false,
     },
     turn: {
@@ -179,6 +180,15 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const binding = { id, threadId: request.nativeId }
     await manager.resume(binding, executionContext(request.context, mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
     return this.attach(id, binding, request.context, mode)
+  }
+
+  async forkConversation(request: CreateConversationRequest & { source: ConversationHandle }): Promise<ConversationHandle> {
+    const manager = await this.ensureRuntime()
+    const source = this.require(request.source)
+    const snapshot = manager.snapshot(source.binding.id)
+    if (snapshot?.activeTurnId || snapshot?.pendingRequestCount) throw new Error('来源会话仍在执行或等待确认，请在本轮结束后创建跟进分支')
+    const nativeId = await manager.forkThread(source.binding.threadId)
+    return this.resumeConversation({ conversationId: request.conversationId, nativeId, context: request.context })
   }
 
   async renameConversation(conversation: ConversationHandle, title: string): Promise<void> {
@@ -516,10 +526,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const response = (success: boolean, payload: unknown): ServerRequestReply => ({
       result: { success, contentItems: [{ type: 'inputText', text: JSON.stringify(payload) }] },
     })
-    if (namespace !== QUICK_ACTION_TOOL_NAMESPACE) return response(false, { error: `CodyWork 不支持动态工具命名空间：${namespace || '(empty)'}` })
+    if (namespace !== QUICK_ACTION_TOOL_NAMESPACE && namespace !== FOLLOWUP_TOOL_NAMESPACE) return response(false, { error: `CodyWork 不支持动态工具命名空间：${namespace || '(empty)'}` })
     if (!conversationId || !threadId || !turnId || !tool) return response(false, { error: '动态工具调用缺少当前会话或 Turn 标识' })
     try {
-      return response(true, await this.options.productToolHandler({ conversationId, threadId, turnId, tool, arguments: params.arguments }))
+      return response(true, await this.options.productToolHandler({ namespace, conversationId, threadId, turnId, tool, arguments: params.arguments }))
     } catch (error) {
       return response(false, { error: error instanceof Error ? error.message : String(error) })
     }
