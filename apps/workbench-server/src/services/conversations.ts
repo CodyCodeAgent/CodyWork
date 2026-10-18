@@ -23,6 +23,7 @@ import type { CodyWorkRuntimeRegistry } from '../runtime/registry.js'
 import { ConversationEventHub } from './conversationEventHub.js'
 import { ConversationContextResolver } from './conversationContext.js'
 import { ConversationRepository } from './conversationRepository.js'
+import { FOLLOWUP_SKILL_NAME, FOLLOWUP_SKILL_PATH, openFollowupBridge } from './followupSkill.js'
 import type { TraeConversationCacheInfo } from './conversationRepository.js'
 import type {
   ConversationAction,
@@ -110,6 +111,8 @@ function persistedStatusForEvent(event: RuntimeEvent): ConversationRow['status']
 
 /** Provides durable CodyWork conversation metadata and a reconnectable event stream. */
 export class ConversationService implements ConversationCommandGateway {
+  followupSkillHandler?: (call: import('./agentQuickActions.js').AgentQuickActionCall) => Promise<unknown>
+  private readonly followupBridges = new Set<() => void>()
   private readonly handles = new Map<string, ConversationHandle>()
   private readonly runtimeSubscriptions = new Map<string, () => void>()
   private readonly repository: ConversationRepository
@@ -192,6 +195,7 @@ export class ConversationService implements ConversationCommandGateway {
 
   /** Closes every registered owner exactly once during service shutdown. */
   async closeRuntimes(): Promise<void> {
+    for (const close of this.followupBridges) close()
     await Promise.all([...new Set(this.runtimes.list().map(descriptor => descriptor.create(undefined)))].map(runtime => runtime.close()))
   }
 
@@ -600,7 +604,10 @@ export class ConversationService implements ConversationCommandGateway {
     const permissionMode = command.executionProfile?.permissionMode ?? row.permission_mode
     const context = this.contexts.forRow(row)
     const runtime = this.runtimeFor(row)
-    const selectedSkills = await runtime.resolveSkills(context, requestedSkills)
+    const useFollowupSkill = row.runtime_type === 'codex' && (requestedSkills.includes(FOLLOWUP_SKILL_PATH) || /\$codywork-followup(?![a-zA-Z0-9_-])/u.test(text))
+    if (useFollowupSkill && (!this.followupSkillHandler || command.origin.kind === 'schedule')) throw new Error('当前来源不支持创建跟进任务')
+    const selectedSkills = await runtime.resolveSkills(context, requestedSkills.filter(id => id !== FOLLOWUP_SKILL_PATH))
+    if (useFollowupSkill) selectedSkills.push({ name: FOLLOWUP_SKILL_NAME, path: FOLLOWUP_SKILL_PATH })
     const runtimeSettings: RuntimeTurnSettings = {
       ...(command.settings?.model ? { model: command.settings.model } : {}),
       ...(command.settings?.reasoningEffort ? { reasoningEffort: command.settings.reasoningEffort } : {}),
@@ -609,8 +616,17 @@ export class ConversationService implements ConversationCommandGateway {
     }
     command.signal?.throwIfAborted()
     command.beforeSubmit?.()
+    let bridgeTurnId = commandId
+    const bridge = useFollowupSkill ? await openFollowupBridge((tool, args) => this.followupSkillHandler!({
+      conversationId, threadId: row.native_id!, turnId: bridgeTurnId, tool, arguments: args,
+    })) : undefined
+    const closeBridge = () => { bridge?.close(); this.followupBridges.delete(closeBridge) }
+    if (bridge) this.followupBridges.add(closeBridge)
+    if (bridge) selectedSkills[selectedSkills.length - 1] = { name: FOLLOWUP_SKILL_NAME, path: bridge.skillPath }
+    try { command.signal?.throwIfAborted(); command.beforeSubmit?.() } catch (error) { closeBridge(); throw error }
     this.repository.touch(conversationId)
-    const submission = runtime.submitTurn({
+    let submission: SubmitTurnResult
+    try { submission = runtime.submitTurn({
       conversation: this.handleFor(row),
       prompt: text,
       ...(localImages.length ? { localImages } : {}),
@@ -619,8 +635,11 @@ export class ConversationService implements ConversationCommandGateway {
       executionProfile: { permissionMode },
       ...(Object.keys(runtimeSettings).length ? { settings: runtimeSettings } : {}),
       ...(!this.runtimeSubscriptions.has(conversationId) ? { onEvent: (event: RuntimeEvent) => this.appendRuntimeEvent(event) } : {}),
-    })
+    }) } catch (error) { closeBridge(); throw error }
+    if (bridge) void submission.completed.then(closeBridge, closeBridge)
     void submission.started.then((handle) => {
+      bridgeTurnId = handle.turnId
+      bridge?.activate()
       this.audit(conversationId, 'turn.bound', { commandId, nativeTurnId: handle.turnId, origin: command.origin, executionProfile: { permissionMode } })
     }).catch((error: unknown) => {
       this.audit(conversationId, 'command.failed', { commandId, error: error instanceof Error ? error.message : String(error) })

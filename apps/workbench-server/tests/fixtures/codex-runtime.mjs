@@ -1,5 +1,6 @@
 import readline from 'node:readline'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 
 const rl = readline.createInterface({ input: process.stdin })
 const catalogHistory = [{
@@ -75,11 +76,25 @@ function recordFailedTurn(threadId, prompt) {
   persistState()
 }
 
-function emitTurn(threadId, prompt, turnCwd = '') {
+function emitTurn(threadId, prompt, turnCwd = '', selectedSkills = []) {
   const turnId = `turn-${++turnSequence}`
   const itemId = `item-${turnSequence}`
   pendingTurns.set(turnId, { threadId, prompt, itemId })
   notify('turn/started', { threadId, turnId, turn: { id: turnId } })
+  if (prompt.includes('SKILL_FOLLOWUP_CREATE')) {
+    const skill = selectedSkills.find(item => item.name === 'codywork-followup')
+    const bridge = (skill ? readFileSync(skill.path, 'utf8') : '').match(/node ("[^"\n]+") ("[^"\n]+") list/)
+    if (!bridge) throw new Error('missing built-in skill bridge')
+    execFile(process.execPath, [JSON.parse(bridge[1]), JSON.parse(bridge[2]), 'create', JSON.stringify({ name: 'Skill followup', prompt: 'PENDING_FIXTURE 只读检查合成任务', completionCondition: '合成任务完成', intervalMinutes: 10, deadlineAt: new Date(Date.now() + 3_600_000).toISOString(), notificationPolicy: 'change' })], (error, stdout) => {
+      const text = stdout || String(error)
+      recordTurn(threadId, turnId, itemId, prompt, text)
+      notify('item/agentMessage/delta', { threadId, turnId, itemId, delta: text })
+      notify('item/completed', { threadId, turnId, item: { id: itemId, type: 'agentMessage', text } })
+      notify('turn/completed', { threadId, turnId, turn: { id: turnId, status: error ? 'failed' : 'completed' } })
+      pendingTurns.delete(turnId)
+    })
+    return
+  }
   if (prompt.includes('APPROVAL')) {
     write({ id: 900 + turnSequence, method: 'item/commandExecution/requestApproval', params: { threadId, turnId, itemId, approvalId: `approval-${turnSequence}`, reason: 'fixture approval', command: ['touch', 'fixture.txt'], cwd: process.cwd() } })
     return
@@ -183,7 +198,7 @@ rl.on('line', line => {
   }
   else if (message.method === 'thread/resume') {
     const threadId = message.params?.threadId ?? 'native-fixture-thread'
-    if (Array.isArray(message.params?.dynamicTools)) threadDynamicTools.set(threadId, message.params.dynamicTools)
+    // Real resume cannot install new dynamic tools into an existing Thread.
     if (!threadHistories.has(threadId)) {
       threadHistories.set(threadId, [])
       persistState()
@@ -298,7 +313,7 @@ rl.on('line', line => {
     if (prompt.includes('PAUSE_E2E')) setTimeout(() => emitPendingTurn(threadId, prompt, turnCwd), 5)
     else if (prompt.includes('DISCONNECT')) setTimeout(() => { recordFailedTurn(threadId, prompt); process.exit(23) }, 5)
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
-    else setTimeout(() => emitTurn(threadId, prompt, turnCwd), prompt.includes('SLOW_E2E') ? 1800 : 5)
+    else setTimeout(() => emitTurn(threadId, prompt, turnCwd, input.filter(item => item?.type === 'skill')), prompt.includes('SLOW_E2E') ? 1800 : 5)
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })
   else if (message.id === 700 + turnSequence) {
     const turnId = `turn-${turnSequence}`
