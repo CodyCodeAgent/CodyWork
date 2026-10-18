@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { FOLLOWUP_SKILL } from '../src/services/followupSkill.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { isWithinRoot, resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
 import { WORKBENCH_RUNTIME_PROTOCOL_VERSION, type RuntimeEvent } from '../src/runtime/protocol.js'
@@ -151,7 +152,7 @@ describe('generic runtime protocol', () => {
         defaultReasoningEffort: 'high',
         supportedReasoningEfforts: ['medium', 'high'],
       }],
-      skills: [{
+      skills: [FOLLOWUP_SKILL, {
         id: '/skills/fixture-skill/SKILL.md',
         name: 'fixture-skill',
         label: 'fixture-skill',
@@ -193,6 +194,7 @@ describe('generic runtime protocol', () => {
       }],
     })
     await expect(runtime.listSkillCatalog({ workspacePath: root, forceReload: true })).resolves.toEqual([
+      FOLLOWUP_SKILL,
       {
         id: '/skills/fixture-skill/SKILL.md',
         name: 'fixture-skill',

@@ -11,8 +11,30 @@ import { ChannelStore } from '../src/services/channelStore.js'
 import type { CodyWorkChannelService } from '../src/services/channelBot.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { ConversationEventHub } from '../src/services/conversationEventHub.js'
+import { AgentFollowupTools } from '../src/services/agentFollowups.js'
 
 describe('Followup product integration', () => {
+  it('creates through the real skill helper on a resumed old thread without dynamic tools', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'followup-old-skill-'))
+    const db = new WorkbenchDb(':memory:')
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))}` })
+    const conversations = new ConversationService(db, runtime)
+    let service: FollowupService | undefined
+    try {
+      const now = nowIso()
+      db.db.prepare('INSERT INTO workspaces(id,name,path,created_at,last_opened_at) VALUES(?,?,?,?,?)').run('ws', 'Fixture', root, now, now)
+      db.db.prepare("INSERT INTO channel_accounts(id,provider,name,app_id,secret_cipher,enabled,created_at,updated_at) VALUES('account','feishu','Fixture','fixture','synthetic',1,?,?)").run(now, now)
+      db.db.prepare("INSERT INTO conversations(id,scope,workspace_id,native_id,title,created_via,status,permission_mode,policy_hash,instruction_hash,created_at,updated_at) VALUES('old','workspace','ws','old-native','Old','browser','completed','yolo','','',?,?)").run(now, now)
+      const channels = { smartNotificationSettings: () => ({ accountId: 'account', recipientOpenId: 'ou_fixture' }) } as unknown as CodyWorkChannelService
+      service = new FollowupService(db, conversations, () => channels, () => '')
+      conversations.followupSkillHandler = call => new AgentFollowupTools(db, () => service!, () => ({})).handle(call)
+      await conversations.submitCommand({ workspaceId: 'ws', conversationId: 'old', origin: { kind: 'browser' }, prompt: '$codywork-followup SKILL_FOLLOWUP_CREATE EXPECT_YOLO' })
+      await expect.poll(() => service!.list('ws', 'old').items.length).toBe(1)
+      await expect.poll(() => conversations.get('ws', 'old').status).toBe('completed')
+      expect(service.list('ws', 'old').items[0]).toMatchObject({ sourceConversationId: 'old', name: 'Skill followup', notification: { mode: 'change' } })
+      expect(JSON.stringify((await conversations.historyCanonical('ws', 'old')).events)).not.toContain('本轮跟进执行桥接')
+    } finally { await service?.close(); await conversations.closeRuntimes(); db.close(); rmSync(root, { recursive: true, force: true }) }
+  })
   it('does not admit a command cancelled while runtime context preparation is waiting', async () => {
     const root = mkdtempSync(join(tmpdir(), 'followup-abort-'))
     const db = new WorkbenchDb(':memory:')

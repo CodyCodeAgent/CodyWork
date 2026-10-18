@@ -225,6 +225,7 @@ function conversationService(ctx: AppContext): ConversationService {
       if (workspace) void dashboardCache(ctx).refresh(workspace)
     }, 30_000)
   }, (workspaceId, conversationId, path) => imageUploads(ctx).urlForPath(workspaceId, conversationId, path), (workspaceId, conversationId) => imageUploads(ctx).removeConversation(workspaceId, conversationId))
+  ctx.conversations.followupSkillHandler ??= call => new AgentFollowupTools(ctx.db, () => followupService(ctx), workspaceId => channelService(ctx).smartNotificationSettings(workspaceId)).handle(call)
   return ctx.conversations
 }
 

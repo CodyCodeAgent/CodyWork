@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
+import { FOLLOWUP_SKILL } from '../services/followupSkill.js'
 import {
   CODY_WEB_CORE_VERSION,
   createAppServerHost,
@@ -298,7 +299,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     await this.ensureRuntime()
     const cwd = request.demandPath ?? request.workspacePath
     const cwds = [...new Set([cwd, request.workspacePath].map(value => value.trim()).filter(Boolean))]
-    return (await this.requireCatalog().listSkills(cwds, request.forceReload === true)).map(skill => ({
+    const skills: RuntimeSkillCatalogEntry[] = (await this.requireCatalog().listSkills(cwds, request.forceReload === true)).map(skill => ({
       id: skill.path,
       name: skill.name,
       label: skill.displayName || skill.name,
@@ -307,6 +308,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       scope: skill.scope,
       enabled: skill.enabled,
     }))
+    return this.options.productToolHandler ? [FOLLOWUP_SKILL, ...skills.filter(skill => skill.name !== FOLLOWUP_SKILL.name)] : skills
   }
 
   async resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
