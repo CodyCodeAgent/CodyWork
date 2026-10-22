@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { WorkbenchDb, makeId, nowIso, WorkspaceRow } from '../src/db/index.js'
 import { addRepositoryToDemand, createDemand, importExistingWorktrees, listDemands, reconcileDemandOperations } from '../src/services/demands.js'
+import { bindDemandToFlux, unbindDemandFromFlux } from '../src/services/fluxBindings.js'
 import { dashboardSnapshot } from '../src/services/dashboard.js'
 import { addRepository, inspectRepository, listRepositories } from '../src/services/repositories.js'
 
@@ -93,6 +94,49 @@ describe('demand worktree construction', () => {
     expect(listDemands(db, workspace)[0]?.repositories).toHaveLength(2)
     expect(currentBranch(join(root, 'services', 'repo1'))).toBe('main')
     expect(currentBranch(join(root, 'worktrees', 'coupon-rule', 'services', 'repo1'))).toBe('coupon-rule')
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('persists an optional Flux collaboration binding without treating it as a runtime provider', () => {
+    const { root, db, workspace } = fixture()
+    const repository = listRepositories(db, workspace)[0]!
+    const fluxUrl = 'https://flux.bytedance.net/home/91115103721654403/collaboration/95455704273397855?view=files&preview_task=95458484711183219'
+    createDemand(db, workspace, { name: 'Flux demand', repositoryIds: [repository.id], fluxUrl })
+    expect(listDemands(db, workspace)[0]?.fluxBinding).toEqual({
+      deliveryId: '95455704273397855',
+      spaceId: '91115103721654403',
+      url: fluxUrl,
+      previewTaskId: '95458484711183219',
+    })
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('rejects an invalid Flux URL before creating a Demand worktree', () => {
+    const { root, db, workspace } = fixture()
+    const repository = listRepositories(db, workspace)[0]!
+    expect(() => createDemand(db, workspace, { name: 'Bad Flux demand', repositoryIds: [repository.id], fluxUrl: 'https://example.com/home/1/collaboration/2' })).toThrow('Bits Flux')
+    expect(listDemands(db, workspace)).toEqual([])
+    expect(existsSync(join(root, 'worktrees', 'bad-flux-demand'))).toBe(false)
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('can bind, replace and remove Flux independently from Demand creation', () => {
+    const { root, db, workspace } = fixture()
+    const repository = listRepositories(db, workspace)[0]!
+    const created = createDemand(db, workspace, { name: 'Late Flux binding', repositoryIds: [repository.id] })
+    expect(listDemands(db, workspace)[0]?.fluxBinding).toBeNull()
+
+    bindDemandToFlux(db, workspace, created.demand.id, 'https://bits.bytedance.net/flux/home/sp-1/collaboration/delivery-1?tab=chat')
+    expect(listDemands(db, workspace)[0]?.fluxBinding).toMatchObject({ spaceId: 'sp-1', deliveryId: 'delivery-1' })
+
+    bindDemandToFlux(db, workspace, created.demand.id, 'https://flux.bytedance.net/team/sp-2/collaboration/delivery-2')
+    expect(listDemands(db, workspace)[0]?.fluxBinding).toMatchObject({ spaceId: 'sp-2', deliveryId: 'delivery-2' })
+
+    expect(unbindDemandFromFlux(db, workspace, created.demand.id)).toEqual({ removed: true })
+    expect(listDemands(db, workspace)[0]?.fluxBinding).toBeNull()
     db.close()
     rmSync(root, { recursive: true, force: true })
   })

@@ -281,6 +281,8 @@ describe('generic runtime protocol', () => {
 
     const planResult = await runtime.sendTurn({ conversation, prompt: 'REAL', settings: { collaborationMode: 'plan' } })
     expect(planResult.finalText).toBe('CODEX_FIXTURE_REAL')
+    await expect(runtime.sendTurn({ conversation, prompt: 'REAL' })).rejects.toThrow('invalid current Codex sandbox policy')
+    await expect(runtime.sendTurn({ conversation, prompt: 'runtime remains healthy after rejected start' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
     const approvalEvents: string[] = []
     let pendingApprovalId = ''
     let signalApproval!: () => void

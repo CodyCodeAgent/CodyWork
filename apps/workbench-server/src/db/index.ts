@@ -35,6 +35,16 @@ export interface DemandRow {
   updated_at: string
 }
 
+export interface DemandFluxBindingRow {
+  demand_id: string
+  delivery_id: string
+  space_id: string
+  collaboration_url: string
+  preview_task_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type ConversationStatus = 'idle' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'disconnected'
 export type ConversationPermissionMode = 'read-only' | 'workspace-write' | 'yolo'
 export type ConversationCreatedVia = 'browser' | 'feishu'
@@ -163,6 +173,15 @@ export class WorkbenchDb {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(workspace_id, worktree_key)
+      );
+      CREATE TABLE IF NOT EXISTS demand_flux_bindings (
+        demand_id TEXT PRIMARY KEY REFERENCES demands(id) ON DELETE CASCADE,
+        delivery_id TEXT NOT NULL,
+        space_id TEXT NOT NULL,
+        collaboration_url TEXT NOT NULL,
+        preview_task_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS demand_repositories (
         demand_id TEXT NOT NULL REFERENCES demands(id) ON DELETE CASCADE,

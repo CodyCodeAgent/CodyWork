@@ -215,6 +215,13 @@ export interface RepositoryCleanupResult {
   repository: Repository
 }
 
+export interface FluxBinding {
+  deliveryId: string
+  spaceId: string
+  url: string
+  previewTaskId: string | null
+}
+
 export interface Demand {
   id: string
   name: string
@@ -222,6 +229,7 @@ export interface Demand {
   worktreeKey: string
   path: string
   status: 'in_progress' | 'completed' | 'blocked'
+  fluxBinding: FluxBinding | null
   createdAt: string
   updatedAt: string
   repositories: { id: string; name: string; worktreePath: string }[]
@@ -669,9 +677,13 @@ export const api = {
     request<RepositoryCleanupResult>('POST', `/api/workspaces/${workspaceId}/repositories/${repositoryId}/clear-baseline`, { confirm: true }),
   listDemands: (id: string) => request<Demand[]>('GET', `/api/workspaces/${id}/demands`),
   importExistingWorktrees: (id: string) => request<ExistingWorktreeImportResult>('POST', `/api/workspaces/${id}/worktrees/import`),
-  createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[] }) =>
-    request<{ demand: { id: string; name: string; branch_name: string; worktree_key: string; status: Demand['status'] }; repositories: Demand['repositories'] }>('POST', `/api/workspaces/${id}/demands`, input),
+  createDemand: (id: string, input: { name: string; branchName?: string; repositoryIds: string[]; fluxUrl?: string }) =>
+    request<{ demand: { id: string; name: string; branchName: string; worktreeKey: string; status: Demand['status']; fluxBinding: Demand['fluxBinding'] }; repositories: Demand['repositories'] }>('POST', `/api/workspaces/${id}/demands`, input),
   getDemand: (workspaceId: string, demandId: string) => request<Demand>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}`),
+  bindDemandFlux: (workspaceId: string, demandId: string, url: string) =>
+    request<{ binding: FluxBinding }>('PUT', `/api/workspaces/${workspaceId}/demands/${demandId}/flux-binding`, { url }),
+  unbindDemandFlux: (workspaceId: string, demandId: string) =>
+    request<{ removed: boolean }>('DELETE', `/api/workspaces/${workspaceId}/demands/${demandId}/flux-binding`),
   demandAiReport: (workspaceId: string, demandId: string) =>
     request<AiReportDemandSummary>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/ai-report`),
   backfillDemandAiReport: (workspaceId: string, demandId: string) =>

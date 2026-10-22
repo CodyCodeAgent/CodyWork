@@ -110,7 +110,12 @@ export interface SendTurnRequest {
   /** Stable product command id. This is an outbox identity, never a native Turn id. */
   clientCommandId?: string
   /** Turn-scoped source policy. It never mutates the shared conversation default. */
-  executionProfile?: { permissionMode: RuntimePermissionMode }
+  executionProfile?: {
+    permissionMode: RuntimePermissionMode
+    /** One-shot background coordinators can suppress interactive approval
+     * while retaining the selected native filesystem sandbox. */
+    approvalPolicy?: 'never' | 'untrusted'
+  }
   mode?: RuntimeSubmitMode
   settings?: {
     model?: string

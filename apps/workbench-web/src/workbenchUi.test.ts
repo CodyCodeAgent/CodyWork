@@ -31,7 +31,7 @@ const conversation = (status: Conversation['status']): Conversation => ({
 })
 
 const demand = (id: string, branchName = id): Demand => ({
-  id, name: id, branchName, worktreeKey: `key-${id}`, path: `/worktrees/${id}`, status: 'in_progress', createdAt: '', updatedAt: '', repositories: [],
+  id, name: id, branchName, worktreeKey: `key-${id}`, path: `/worktrees/${id}`, status: 'in_progress', fluxBinding: null, createdAt: '', updatedAt: '', repositories: [],
 })
 
 const thread = (nativeId: string, cwd: string, preview = nativeId): AvailableNativeThread => ({ nativeId, cwd, preview, bound: false })
