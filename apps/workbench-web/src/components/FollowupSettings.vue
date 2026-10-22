@@ -28,8 +28,8 @@
             <div class="field-grid"><label>截止时间（本地时间）<input v-model="deadlineLocal" name="deadline" type="datetime-local" required /></label><label>间隔（分钟）<input v-model.number="form.intervalMinutes" name="intervalMinutes" type="number" min="1" step="1" required /></label></div>
             <label>通知频率<select v-model="form.notification.mode" name="notificationMode"><option value="every">每次运行</option><option value="change">有变化时</option><option value="terminal">仅结束时</option></select></label>
             <button type="button" :disabled="!defaults" @click="useDefaults">使用智能通知默认设置</button>
-            <div class="field-grid"><label>发送账号<select v-model="form.notification.accountId" name="accountId" required><option value="">请选择已启用机器人</option><option v-for="account in accounts.filter(item => item.enabled)" :key="account.id" :value="account.id">{{ account.botName || account.name }}</option></select></label><label>接收人 Open ID<input v-model.trim="form.notification.recipientOpenId" name="recipientOpenId" required /></label></div>
-            <small>接收人 Open ID 必须属于所选飞书应用。</small>
+            <NotificationRecipientFields :workspace-id="workspaceId" v-model:account-id="form.notification.accountId" :email="form.notification.recipientEmail || ''" :enabled="form.notification.feishuEnabled" @update:email="form.notification.recipientEmail = $event" @update:enabled="form.notification.feishuEnabled = $event" />
+            <small v-if="form.notification.recipientOpenId && !form.notification.recipientEmail">旧配置使用 Open ID，建议改填邮箱。已完成任务可在下方修正接收人并补发。</small>
             <button type="submit" class="primary">{{ busy ? '处理中…' : selected ? '保存修改' : '创建跟进' }}</button>
           </fieldset>
         </form>
@@ -38,9 +38,10 @@
             <button v-if="selected.status === 'active' || selected.status === 'running'" type="button" :disabled="busy" @click="act('pause')">暂停</button>
             <button v-if="selected.status === 'paused' || selected.status === 'needs_attention'" type="button" :disabled="busy" @click="act('resume')">恢复</button>
             <button v-if="selected.status === 'active'" type="button" :disabled="busy" @click="act('run-now')">立即运行</button>
-            <button v-if="canRetryNotification" type="button" :disabled="busy || runsLoading" @click="act('retry-notification')">重试通知（不重新检查）</button>
+            <button v-if="canRetryNotification" type="button" :disabled="busy || runsLoading" @click="resendOpen = !resendOpen">重试通知（不重新检查）</button>
             <button v-if="!terminal(selected)" type="button" :disabled="busy" @click="act('cancel')">{{ confirmingCancel ? '确认取消任务' : '取消任务' }}</button>
           </fieldset>
+          <form v-if="resendOpen" class="resend-result" @submit.prevent="resendResult"><h3>修正接收人并补发已有结果</h3><NotificationRecipientFields :workspace-id="workspaceId" v-model:account-id="resendAccount" v-model:email="resendEmail" always-enabled :disabled="busy" /><button type="submit" :disabled="busy || !resendAccount || !resendEmail">确认补发（不重新检查）</button></form>
           <section aria-label="运行记录"><header><h3>运行记录与投递</h3><button type="button" :disabled="runsLoading || busy" @click="loadRuns">刷新记录</button></header>
             <p v-if="runsLoading" role="status">加载记录中…</p><p v-else-if="runsError" role="alert">{{ runsError }}</p><p v-else-if="!runs.length">暂无运行记录。</p>
             <article v-for="run in runs" :key="run.id" class="run"><strong>{{ run.status }}</strong><small>{{ formatDate(run.startedAt) }}<template v-if="run.finishedAt"> — {{ formatDate(run.finishedAt) }}</template></small><p>{{ run.summary || run.error || '暂无摘要' }}</p><p>投递：{{ run.deliveryStatus }}<template v-if="run.deliveryError"> · {{ run.deliveryError }}</template></p></article>
@@ -56,6 +57,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import type { FollowupAction, FollowupInput, FollowupRun, FollowupTask } from '../followups'
 import { api, type FeishuChannelAccount, type SmartNotificationSettings } from '../api'
 import { workbenchUrl } from '../workbenchUi'
+import NotificationRecipientFields from './NotificationRecipientFields.vue'
 
 const props = defineProps<{ workspaceId: string; originConversationId?: string }>()
 const tasks = ref<FollowupTask[]>([])
@@ -64,9 +66,10 @@ const runs = ref<FollowupRun[]>([])
 const loading = ref(false), busy = ref(false), runsLoading = ref(false)
 const error = ref(''), runsError = ref(''), message = ref(''), deadlineLocal = ref(''), confirmingCancel = ref(false)
 let generation = 0, runGeneration = 0, mutationGeneration = 0
+const resendOpen = ref(false), resendAccount = ref(''), resendEmail = ref('')
 const accounts = ref<FeishuChannelAccount[]>([]), defaults = ref<SmartNotificationSettings | null>(null)
-const empty = (): FollowupInput => ({ conversationId: props.originConversationId || '', name: '', prompt: '', completionCondition: '', deadlineAt: '', intervalMinutes: 30, notification: { mode: 'change', accountId: '', recipientOpenId: '' } })
-function useDefaults(): void { if (defaults.value) { form.notification.accountId = defaults.value.accountId; form.notification.recipientOpenId = defaults.value.recipientOpenId } }
+const empty = (): FollowupInput => ({ conversationId: props.originConversationId || '', name: '', prompt: '', completionCondition: '', deadlineAt: '', intervalMinutes: 30, notification: { mode: 'change', accountId: '', recipientOpenId: '', recipientEmail: '', feishuEnabled: false } })
+function useDefaults(): void { if (defaults.value) { form.notification.accountId = defaults.value.accountId; form.notification.recipientOpenId = defaults.value.recipientOpenId; form.notification.recipientEmail = defaults.value.recipientEmail ?? ''; form.notification.feishuEnabled = defaults.value.feishuEnabled ?? Boolean(defaults.value.accountId) } }
 async function loadNotificationOptions(): Promise<void> {
   const token = generation
   const results = await Promise.allSettled([api.listFeishuAccounts(), api.smartNotificationSettings(props.workspaceId)])
@@ -84,7 +87,7 @@ const canRetryNotification = computed(() => {
   const run = task.lastRun ? runs.value.find(item => item.id === task.lastRun?.id) : runs.value[0]
   if (!run) return false
   return (task.status === 'needs_attention' && run.phase === 'interrupted' && Boolean(run.result))
-    || ['failed', 'dead_letter', 'retry_wait'].includes(run.deliveryStatus)
+    || ['failed', 'dead_letter', 'superseded', 'local_only'].includes(run.deliveryStatus)
 })
 const statusLabel = (status: string) => ({ active: '进行中', paused: '已暂停', running: '运行中', needs_attention: '待人工处理', completed: '已完成', cancelled: '已取消', expired: '已到期' }[status] || status)
 function conversationUrl(conversationId: string): string {
@@ -97,10 +100,12 @@ function localDate(value: string): string {
   return Number.isNaN(date.getTime()) ? '' : new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 function newTask(): void {
+  resendOpen.value = false
   selected.value = null; Object.assign(form, empty()); deadlineLocal.value = ''; confirmingCancel.value = false
   runs.value = []; runsError.value = ''; runsLoading.value = false; runGeneration++; message.value = ''
 }
 function selectTask(task: FollowupTask): void {
+  resendOpen.value = false; resendAccount.value = task.notification.accountId; resendEmail.value = task.notification.recipientEmail ?? ''
   selected.value = task
   Object.assign(form, { conversationId: task.conversationId, name: task.name, prompt: task.prompt, completionCondition: task.completionCondition, deadlineAt: task.deadlineAt, intervalMinutes: task.intervalMinutes, notification: { ...task.notification } })
   deadlineLocal.value = localDate(task.deadlineAt); confirmingCancel.value = false; message.value = ''
@@ -143,7 +148,7 @@ async function mutate(operation: () => Promise<unknown>): Promise<void> {
 function save(): void {
   if (busy.value || loading.value || (selected.value && terminal(selected.value))) return
   const deadline = new Date(deadlineLocal.value)
-  if (!form.conversationId.trim() || !form.name.trim() || !form.prompt.trim() || !form.completionCondition.trim() || !form.notification.accountId.trim() || !form.notification.recipientOpenId.trim()) { error.value = '请填写所有必填项。'; return }
+  if (!form.conversationId.trim() || !form.name.trim() || !form.prompt.trim() || !form.completionCondition.trim() || (form.notification.feishuEnabled && (!form.notification.accountId.trim() || !form.notification.recipientEmail?.trim()))) { error.value = '请填写所有必填项；开启飞书时需要机器人及企业邮箱。'; return }
   if (!Number.isInteger(form.intervalMinutes) || form.intervalMinutes < 1) { error.value = '间隔必须为正整数分钟。'; return }
   if (!Number.isFinite(deadline.getTime()) || deadline.getTime() <= Date.now()) { error.value = '截止时间必须晚于当前时间。'; return }
   const input: FollowupInput = { ...form, deadlineAt: deadline.toISOString(), notification: { ...form.notification } }
@@ -163,6 +168,12 @@ function act(action: FollowupAction): void {
   confirmingCancel.value = false
   const workspaceId = props.workspaceId
   void mutate(() => api.followupAction(workspaceId, task.id, action, task.revision))
+}
+function resendResult(): void {
+  const task = selected.value
+  if (!task || busy.value || !canRetryNotification.value) return
+  const workspaceId = props.workspaceId
+  void mutate(() => api.resendFollowupResult(workspaceId, task.id, task.revision, resendAccount.value, resendEmail.value))
 }
 watch(() => [props.workspaceId, props.originConversationId], () => { generation++; runGeneration++; mutationGeneration++; tasks.value = []; accounts.value = []; defaults.value = null; busy.value = false; newTask(); void load(); void loadNotificationOptions() }, { immediate: true })
 onBeforeUnmount(() => { generation++; runGeneration++; mutationGeneration++ })

@@ -617,8 +617,8 @@ export class ConversationService implements ConversationCommandGateway {
     command.signal?.throwIfAborted()
     command.beforeSubmit?.()
     let bridgeTurnId = commandId
-    const bridge = useFollowupSkill ? await openFollowupBridge((tool, args) => this.followupSkillHandler!({
-      conversationId, threadId: row.native_id!, turnId: bridgeTurnId, tool, arguments: args,
+    const bridge = useFollowupSkill ? await openFollowupBridge((tool, args, beforeWrite) => this.followupSkillHandler!({
+      conversationId, threadId: row.native_id!, turnId: bridgeTurnId, tool, arguments: args, beforeWrite,
     })) : undefined
     const closeBridge = () => { bridge?.close(); this.followupBridges.delete(closeBridge) }
     if (bridge) this.followupBridges.add(closeBridge)

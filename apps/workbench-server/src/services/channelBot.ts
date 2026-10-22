@@ -28,6 +28,8 @@ import {
   type CodyWorkChannelBinding,
 } from './channelStore.js'
 import { SmartNotificationService, type SmartNotificationSettingsInput } from './smartNotifications.js'
+import { NotificationCenter, type NotificationInput } from './notificationCenter.js'
+import { NotificationRecipientResolver } from './notificationRecipient.js'
 
 export { feishuProjectionBody } from './channelFeishuRenderer.js'
 
@@ -64,6 +66,7 @@ export class CodyWorkChannelService {
   private readonly bindings: ChannelBindingService
   private readonly settings: ChannelSessionSettingsService
   private readonly notifications: SmartNotificationService
+  readonly notificationCenter: NotificationCenter
 
   constructor(
     private readonly database: WorkbenchDb,
@@ -75,6 +78,7 @@ export class CodyWorkChannelService {
       providerFactory?: ChannelProviderFactory
       documentPublisher?: ConversationDocumentPublisher
       permissionInspector?: { inspect(account: import('./channelStore.js').ChannelAccountSecret): Promise<FeishuPermissionStatus> }
+      recipientResolver?: Pick<NotificationRecipientResolver, 'resolve'>
       persistConversationImage?: (
         workspaceId: string,
         conversationId: string,
@@ -94,7 +98,12 @@ export class CodyWorkChannelService {
       detachAccountObservations: accountId => this.projection.detachAccount(accountId),
       validateLocalImage: (path, root) => this.projection.isAllowedImage(path, root),
     }, this.options.providerFactory)
+    this.notificationCenter = new NotificationCenter(database, {
+      resolve: (id, email) => this.resolveNotificationRecipient(id, email),
+      queue: (id, recipient, card, dedupeKey) => this.queueNotification(id, recipient, card, dedupeKey),
+    })
     this.notifications = new SmartNotificationService(database, conversations, workspaces, {
+      publish: input => this.notificationCenter.publish(input),
       queue: (accountId, input) => this.accounts.queueDurable(accountId, input),
       account: accountId => this.repositories.accounts.get(accountId),
       audit: (accountId, action, targetType, targetId, success, metadata, error) => this.repositories.audit.record(accountId, action, targetType, targetId, success, metadata, error),
@@ -179,11 +188,13 @@ export class CodyWorkChannelService {
   }
 
   async start(): Promise<void> {
+    void this.notificationCenter.recover().catch(error => console.error('[notifications] recovery failed:', error instanceof Error ? error.message : 'unknown error'))
     await this.accounts.start()
   }
 
   async close(): Promise<void> {
     this.notifications.close()
+    await this.notificationCenter.close()
     await this.accounts.close()
     this.projection.close()
   }
@@ -191,8 +202,13 @@ export class CodyWorkChannelService {
   listAccounts(): ChannelAccount[] { return this.repositories.accounts.list() }
 
   smartNotificationSettings(workspaceId: string) { return this.notifications.get(workspaceId) }
-  saveSmartNotificationSettings(workspaceId: string, input: SmartNotificationSettingsInput) { return this.notifications.save(workspaceId, input) }
+  async saveSmartNotificationSettings(workspaceId: string, input: SmartNotificationSettingsInput) {
+    if (input.feishuEnabled && input.recipientEmail) await this.resolveNotificationRecipient(input.accountId ?? '', input.recipientEmail)
+    return this.notifications.save(workspaceId, input)
+  }
   testSmartNotification(workspaceId: string) { return this.notifications.test(workspaceId) }
+  publishNotification(input: NotificationInput) { return this.notificationCenter.publish(input) }
+  resolveNotificationRecipient(accountId: string, email: string) { return (this.options.recipientResolver ?? new NotificationRecipientResolver()).resolve(this.repositories.accounts.get(accountId), email) }
 
   /** Shared durable delivery for product notifications; never executes a task. */
   queueNotification(accountId: string, recipientOpenId: string, card: import('@codycodeagent/cody-web-core/feishu').FeishuCard, dedupeKey: string) {

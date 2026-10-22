@@ -6,22 +6,11 @@
     </section>
 
     <form class="notification-card" @submit.prevent="save">
-      <div class="card-head"><div><div class="kicker">DELIVERY</div><h3>飞书私聊通知</h3></div><label class="switch"><input v-model="form.enabled" type="checkbox" /><span>启用智能通知</span></label></div>
+      <div class="card-head"><div><div class="kicker">DELIVERY</div><h3>站内小铃铛 · 可选飞书通知</h3></div><label class="switch"><input v-model="form.enabled" type="checkbox" /><span>启用智能通知</span></label></div>
       <div v-if="loading" class="loading">正在加载配置…</div>
       <template v-else>
-        <div class="field-grid">
-          <label>发送机器人
-            <select v-model="form.accountId" :disabled="saving">
-              <option value="">请选择已启用机器人</option>
-              <option v-for="account in enabledAccounts" :key="account.id" :value="account.id">{{ account.botName || account.name }} · {{ account.connectionState === 'connected' ? '已连接' : '等待重连' }}</option>
-            </select>
-          </label>
-          <label>接收人 Open ID
-            <input v-model.trim="form.recipientOpenId" :disabled="saving" list="notification-recipients" placeholder="ou_xxxxxxxxxx" autocomplete="off" />
-            <datalist id="notification-recipients"><option v-for="id in recipientSuggestions" :key="id" :value="id" /></datalist>
-          </label>
-        </div>
-        <p class="field-note">Open ID 属于当前飞书应用，不能复用另一个机器人的 Open ID。已配置的允许用户会出现在输入建议中。</p>
+        <NotificationRecipientFields :workspace-id="workspaceId" v-model:account-id="form.accountId" :email="form.recipientEmail || ''" :enabled="form.feishuEnabled" :disabled="saving" @update:email="form.recipientEmail = $event" @update:enabled="form.feishuEnabled = $event" />
+        <p v-if="settings?.recipientOpenId && !form.recipientEmail" class="field-note">旧配置仍保留 Open ID；请改填邮箱并保存，避免跨应用投递失败。</p>
 
         <div class="policy-box">
           <div><strong>智能判断</strong><small>等待审批、等待回答的时间会从有效执行时间中扣除；普通聊天即使回复较长也不会仅凭文字长度触发。</small></div>
@@ -39,7 +28,7 @@
 
         <div class="preview"><div class="preview-icon">✓</div><div><strong>通知包含什么</strong><p>完成状态、有效执行时长、结果摘要、工具与文件修改信号，以及返回原会话的链接。每个 Turn 最多发送一次。</p></div></div>
         <p v-if="message" :class="['message',messageKind]" role="status">{{ message }}</p>
-        <div class="actions"><button type="button" :disabled="saving || testing || !settings?.enabled" @click="testNotification">{{ testing ? '发送中…' : '发送测试通知' }}</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存设置' }}</button></div>
+        <div class="actions"><button type="button" :disabled="saving || testing || !settings?.enabled" @click="testNotification">{{ testing ? '处理中…' : '创建测试通知' }}</button><button class="primary" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存设置' }}</button></div>
       </template>
     </form>
   </div>
@@ -48,18 +37,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { api, type FeishuChannelAccount, type SmartNotificationSettings, type SmartNotificationSettingsInput } from '../api'
+import NotificationRecipientFields from './NotificationRecipientFields.vue'
 
 const props = defineProps<{ workspaceId: string }>()
 const accounts=ref<FeishuChannelAccount[]>([]);const settings=ref<SmartNotificationSettings|null>(null);const loading=ref(true);const saving=ref(false);const testing=ref(false);const message=ref('');const messageKind=ref<'ok'|'error'>('ok')
-const form=reactive<SmartNotificationSettingsInput>({enabled:false,accountId:'',recipientOpenId:'',minActiveMinutes:30,notifyDemand:true,notifyWorkspace:true})
+const form=reactive<SmartNotificationSettingsInput>({enabled:true,feishuEnabled:false,recipientEmail:'',accountId:'',recipientOpenId:'',minActiveMinutes:30,notifyDemand:true,notifyWorkspace:true})
 const enabledAccounts=computed(()=>accounts.value.filter(account=>account.enabled))
 const selectedAccount=computed(()=>accounts.value.find(account=>account.id===form.accountId))
 const recipientSuggestions=computed(()=>selectedAccount.value?.allowedUserIds??[])
-function apply(value:SmartNotificationSettings):void{settings.value=value;form.enabled=value.enabled;form.accountId=value.accountId;form.recipientOpenId=value.recipientOpenId;form.minActiveMinutes=value.minActiveMinutes;form.notifyDemand=value.notifyDemand;form.notifyWorkspace=value.notifyWorkspace}
+function apply(value:SmartNotificationSettings):void{settings.value=value;form.enabled=value.enabled;form.feishuEnabled=value.feishuEnabled??Boolean(value.accountId);form.recipientEmail=value.recipientEmail??'';form.accountId=value.accountId;form.recipientOpenId=value.recipientOpenId;form.minActiveMinutes=value.minActiveMinutes;form.notifyDemand=value.notifyDemand;form.notifyWorkspace=value.notifyWorkspace}
 async function load():Promise<void>{loading.value=true;message.value='';try{const [nextAccounts,nextSettings]=await Promise.all([api.listFeishuAccounts(),api.smartNotificationSettings(props.workspaceId)]);accounts.value=nextAccounts;apply(nextSettings)}catch(cause){messageKind.value='error';message.value=cause instanceof Error?cause.message:String(cause)}finally{loading.value=false}}
-async function save():Promise<void>{message.value='';if(form.enabled&&!form.accountId){messageKind.value='error';message.value='请选择发送机器人。';return}if(form.enabled&&!form.recipientOpenId){messageKind.value='error';message.value='请输入接收人的 Open ID。';return}if(form.enabled&&!form.notifyDemand&&!form.notifyWorkspace){messageKind.value='error';message.value='至少选择一种通知范围。';return}saving.value=true;try{apply(await api.updateSmartNotificationSettings(props.workspaceId,{...form}));messageKind.value='ok';message.value='智能通知设置已保存。'}catch(cause){messageKind.value='error';message.value=cause instanceof Error?cause.message:String(cause)}finally{saving.value=false}}
-async function testNotification():Promise<void>{testing.value=true;message.value='';try{await api.testSmartNotification(props.workspaceId);messageKind.value='ok';message.value='测试通知已进入飞书投递队列。'}catch(cause){messageKind.value='error';message.value=cause instanceof Error?cause.message:String(cause)}finally{testing.value=false}}
-watch(()=>form.accountId,()=>{if(!form.recipientOpenId&&recipientSuggestions.value.length===1)form.recipientOpenId=recipientSuggestions.value[0]??''})
+async function save():Promise<void>{message.value='';if(form.enabled&&form.feishuEnabled&&(!form.accountId||!form.recipientEmail)){messageKind.value='error';message.value='请选择发送机器人并填写企业邮箱。';return}if(form.enabled&&!form.notifyDemand&&!form.notifyWorkspace){messageKind.value='error';message.value='至少选择一种通知范围。';return}saving.value=true;try{apply(await api.updateSmartNotificationSettings(props.workspaceId,{...form,recipientOpenId:form.recipientEmail?'':form.recipientOpenId}));messageKind.value='ok';message.value='智能通知设置已保存。'}catch(cause){messageKind.value='error';message.value=cause instanceof Error?cause.message:String(cause)}finally{saving.value=false}}
+async function testNotification():Promise<void>{testing.value=true;message.value='';try{await api.testSmartNotification(props.workspaceId);messageKind.value='ok';message.value='测试结果已保存到通知中心；如开启飞书，可在那里查看投递状态。'}catch(cause){messageKind.value='error';message.value=cause instanceof Error?cause.message:String(cause)}finally{testing.value=false}}
 onMounted(load)
 </script>
 

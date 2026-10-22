@@ -50,8 +50,8 @@ function recordTurn(threadId, turnId, itemId, prompt, text) {
   const history = threadHistories.get(threadId) ?? []
   history.push({
     id: turnId, status: 'completed', error: null, itemsView: 'full',
-    startedAt: 1_700_000_100 + turnSequence * 2,
-    completedAt: 1_700_000_101 + turnSequence * 2,
+    startedAt: Math.floor(Date.now() / 1_000) - 1,
+    completedAt: Math.floor(Date.now() / 1_000),
     durationMs: 1_000,
     items: [
       { id: `user-${turnId}`, type: 'userMessage', content: [{ type: 'text', text: prompt }] },

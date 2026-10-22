@@ -85,6 +85,8 @@ export interface QuickActionRow {
 }
 
 export interface SmartNotificationSettingsRow {
+  recipient_email?: string
+  feishu_enabled?: number
   workspace_id: string
   enabled: number
   account_id: string | null
@@ -522,6 +524,12 @@ export class WorkbenchDb {
       );
       CREATE INDEX IF NOT EXISTS channel_audit_recent ON channel_audit_events(account_id, created_at DESC);
     `)
+    const notificationColumns = new Set((this.db.prepare('PRAGMA table_info(smart_notification_settings)').all() as { name?: string }[]).map(column => column.name))
+    if (!notificationColumns.has('recipient_email')) this.db.exec("ALTER TABLE smart_notification_settings ADD COLUMN recipient_email TEXT NOT NULL DEFAULT ''")
+    if (!notificationColumns.has('feishu_enabled')) {
+      this.db.exec('ALTER TABLE smart_notification_settings ADD COLUMN feishu_enabled INTEGER NOT NULL DEFAULT 0')
+      this.db.exec("UPDATE smart_notification_settings SET feishu_enabled = 1 WHERE account_id IS NOT NULL AND recipient_open_id <> ''")
+    }
     const quickActionColumns = new Set((this.db.prepare('PRAGMA table_info(quick_actions)').all() as { name?: string }[]).map(column => column.name))
     const quickActionMigrations = [
       ['revision', 'INTEGER NOT NULL DEFAULT 1'],

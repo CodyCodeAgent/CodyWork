@@ -48,6 +48,7 @@ export const QUICK_ACTION_DYNAMIC_TOOLS = [{
 }]
 
 export interface AgentQuickActionCall {
+  beforeWrite?: () => void
   namespace?: string
   conversationId: string
   threadId: string

@@ -13,6 +13,7 @@ export type FeishuRequiredScope = {
  * sharing surface.
  */
 export const CODYWORK_FEISHU_REQUIRED_SCOPES: readonly FeishuRequiredScope[] = [
+  { name: 'contact:user.id:readonly', label: '通过邮箱解析当前应用的通知接收人' },
   { name: 'application:application:self_manage', label: '读取应用所有者与管理员' },
   { name: 'application:bot.basic_info:read', label: '读取机器人身份' },
   { name: 'im:chat:read', label: '读取群聊与话题模式' },

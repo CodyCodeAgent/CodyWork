@@ -117,7 +117,13 @@ export interface QuickActionInput {
   enabled: boolean
 }
 
+export interface WorkbenchNotification {
+  id: string; workspaceId: string; title: string; summary: string; outcome: string; conversationId: string; demandId: string | null
+  createdAt: string; readAt: string | null; accountId: string; recipientEmail: string; deliveryStatus: string; deliveryError: string
+}
 export interface SmartNotificationSettings {
+  recipientEmail?: string
+  feishuEnabled?: boolean
   workspaceId: string
   enabled: boolean
   accountId: string
@@ -596,6 +602,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 const followupRoot = (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/followups`
 export const api = {
+  listNotifications: (id: string, unread = false, before?: number) => request<{ items: WorkbenchNotification[]; unreadCount: number; nextCursor: number | null }>('GET', `/api/workspaces/${id}/notifications?unread=${unread ? '1' : '0'}${before ? `&before=${before}` : ''}`),
+  readNotifications: (id: string, notificationId?: string, read = true) => request('POST', `/api/workspaces/${id}/notifications/read`, notificationId ? { id: notificationId, read } : {}),
+  validateNotificationRecipient: (id: string, accountId: string, email: string) => request<{ valid: true; email: string }>('POST', `/api/workspaces/${id}/notifications/validate-recipient`, { accountId, email }),
+  resendNotification: (id: string, notificationId: string, accountId: string, email: string) => request<WorkbenchNotification>('POST', `/api/workspaces/${id}/notifications/${encodeURIComponent(notificationId)}/resend`, { accountId, email }),
+  resendFollowupResult: (id: string, taskId: string, expectedRevision: number, accountId: string, email: string) => request<WorkbenchNotification>('POST', `${followupRoot(id)}/${encodeURIComponent(taskId)}/resend-result`, { expectedRevision, accountId, email }),
   listFollowups: (workspaceId: string) => request<{ items: import('./followups').FollowupTask[] }>('GET', followupRoot(workspaceId)),
   createFollowup: (workspaceId: string, input: import('./followups').FollowupInput) => request<unknown>('POST', followupRoot(workspaceId), input),
   updateFollowup: (workspaceId: string, id: string, input: import('./followups').FollowupInput & { expectedRevision: number }) => request<unknown>('PUT', `${followupRoot(workspaceId)}/${encodeURIComponent(id)}`, input),

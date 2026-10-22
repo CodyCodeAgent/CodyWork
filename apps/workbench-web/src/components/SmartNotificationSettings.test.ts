@@ -20,18 +20,19 @@ beforeEach(()=>{vi.clearAllMocks();api.listFeishuAccounts.mockResolvedValue([acc
 
 describe('SmartNotificationSettings',()=>{
   it('explains the smart threshold and persists one workspace policy',async()=>{
-    api.updateSmartNotificationSettings.mockResolvedValue({...settings,enabled:true,accountId:'account-1',recipientOpenId:'ou_owner',updatedAt:'now'})
+    api.updateSmartNotificationSettings.mockResolvedValue({...settings,enabled:true,feishuEnabled:true,recipientEmail:'fixture@example.test',accountId:'account-1',updatedAt:'now'})
     const wrapper=mount(SmartNotificationSettings,{props:{workspaceId:'workspace-1'}})
     await flushPromises()
     expect(wrapper.text()).toContain('只在值得打断你时通知')
     expect(wrapper.text()).toContain('等待审批、等待回答的时间会从有效执行时间中扣除')
     await wrapper.find('.switch input').setValue(true)
-    await wrapper.find('select').setValue('account-1')
+    await wrapper.get('.recipient-fields .check input').setValue(true)
+    await wrapper.get('.recipient-fields select').setValue('account-1')
     await flushPromises()
-    expect((wrapper.find('input[placeholder="ou_xxxxxxxxxx"]').element as HTMLInputElement).value).toBe('ou_owner')
+    await wrapper.get('input[type=email]').setValue('fixture@example.test')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
-    expect(api.updateSmartNotificationSettings).toHaveBeenCalledWith('workspace-1',expect.objectContaining({enabled:true,accountId:'account-1',recipientOpenId:'ou_owner',minActiveMinutes:30,notifyDemand:true,notifyWorkspace:true}))
+    expect(api.updateSmartNotificationSettings).toHaveBeenCalledWith('workspace-1',expect.objectContaining({enabled:true,accountId:'account-1',recipientEmail:'fixture@example.test',feishuEnabled:true,recipientOpenId:'',minActiveMinutes:30,notifyDemand:true,notifyWorkspace:true}))
     expect(wrapper.text()).toContain('智能通知设置已保存')
   })
 
@@ -40,11 +41,11 @@ describe('SmartNotificationSettings',()=>{
     api.testSmartNotification.mockResolvedValue({queued:true,outboxId:'outbox-1'})
     const wrapper=mount(SmartNotificationSettings,{props:{workspaceId:'workspace-1'}})
     await flushPromises()
-    const button=wrapper.findAll('button').find(item=>item.text()==='发送测试通知')!
+    const button=wrapper.findAll('button').find(item=>item.text()==='创建测试通知')!
     expect(button.attributes('disabled')).toBeUndefined()
     await button.trigger('click')
     await flushPromises()
     expect(api.testSmartNotification).toHaveBeenCalledWith('workspace-1')
-    expect(wrapper.text()).toContain('测试通知已进入飞书投递队列')
+    expect(wrapper.text()).toContain('测试结果已保存到通知中心')
   })
 })

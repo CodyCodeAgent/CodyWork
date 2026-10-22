@@ -4,6 +4,7 @@ import { ConversationEventHub } from '../src/services/conversationEventHub.js'
 import { ChannelStore } from '../src/services/channelStore.js'
 import { SmartNotificationService, analyzeSmartTask, smartNotificationCard } from '../src/services/smartNotifications.js'
 import { WorkspaceRegistry } from '../src/services/workspaceRegistry.js'
+import { NotificationCenter } from '../src/services/notificationCenter.js'
 import type { ConversationEvent } from '../src/services/conversations.js'
 
 const workspaceId = 'workspace-smart'
@@ -40,6 +41,21 @@ function insertFixture(db: WorkbenchDb): void {
 }
 
 describe('smart completion notifications', () => {
+  it('saves one long-task result to the local inbox without any Feishu configuration', async () => {
+    const db = new WorkbenchDb(':memory:'); insertFixture(db)
+    const events = new ConversationEventHub(), history = complexTurn(), queue = vi.fn()
+    const center = new NotificationCenter(db, { resolve: vi.fn(), queue })
+    const service = new SmartNotificationService(db, { events, historyCanonical: async () => ({ events: history }) } as never, new WorkspaceRegistry(db), {
+      publish: input => center.publish(input), queue, account: vi.fn(), audit: vi.fn(), openUrl: () => '',
+    })
+    try {
+      service.save(workspaceId, { enabled: true, feishuEnabled: false, minActiveMinutes: 30 })
+      events.publish(history.at(-1)!); events.publish(history.at(-1)!)
+      await vi.waitFor(() => expect(center.list(workspaceId).unreadCount).toBe(1))
+      expect(center.list(workspaceId).items[0]).toMatchObject({ deliveryStatus: 'local_only', outcome: 'completed', conversationId })
+      expect(queue).not.toHaveBeenCalled()
+    } finally { service.close(); db.close() }
+  })
   it('subtracts approval waiting time and ignores ordinary short replies', () => {
     const events = complexTurn()
     events.splice(3, 0,
@@ -93,7 +109,7 @@ describe('smart completion notifications', () => {
     const service = new SmartNotificationService(db, { events: new ConversationEventHub() } as never, new WorkspaceRegistry(db), {
       queue: vi.fn(), account: () => ({ id: 'account-smart', name: 'Cody Work', enabled: true }), audit: vi.fn(), openUrl: () => '',
     })
-    expect(() => service.save(workspaceId, { enabled: true, accountId: '', recipientOpenId: '', minActiveMinutes: 30 })).toThrow('请选择用于发送通知的飞书机器人')
+    expect(() => service.save(workspaceId, { enabled: true, feishuEnabled: true, accountId: '', recipientOpenId: '', minActiveMinutes: 30 })).toThrow('请选择用于发送通知的飞书机器人')
     service.close()
     db.close()
   })

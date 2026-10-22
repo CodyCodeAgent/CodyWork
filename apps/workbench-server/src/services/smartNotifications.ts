@@ -6,6 +6,8 @@ import { makeId, nowIso } from '../db/index.js'
 import type { ConversationEvent, ConversationService } from './conversations.js'
 import type { WorkspaceRegistry } from './workspaceRegistry.js'
 import { getDemand } from './demands.js'
+import type { NotificationInput } from './notificationCenter.js'
+import { normalizeNotificationEmail } from './notificationRecipient.js'
 
 const TERMINAL_TYPES = new Set<CodexEvent['type']>(['turn.completed', 'turn.failed'])
 
@@ -14,6 +16,8 @@ export interface SmartNotificationSettings {
   enabled: boolean
   accountId: string
   recipientOpenId: string
+  recipientEmail?: string
+  feishuEnabled?: boolean
   minActiveMinutes: number
   notifyDemand: boolean
   notifyWorkspace: boolean
@@ -24,6 +28,8 @@ export interface SmartNotificationSettingsInput {
   enabled?: boolean
   accountId?: string
   recipientOpenId?: string
+  recipientEmail?: string
+  feishuEnabled?: boolean
   minActiveMinutes?: number
   notifyDemand?: boolean
   notifyWorkspace?: boolean
@@ -51,6 +57,7 @@ type QueueInput = {
 }
 
 type Hooks = {
+  publish?: (input: NotificationInput) => Promise<{ id: string }>
   queue: (accountId: string, input: QueueInput) => Promise<{ id: string; status?: string }>
   account: (accountId: string) => { id: string; name: string; enabled: boolean }
   audit: (accountId: string | null, action: string, targetType: string, targetId: string, success: boolean, metadata?: unknown, error?: string) => void
@@ -180,9 +187,11 @@ export function smartNotificationCard(input: {
 function toView(workspaceId: string, row?: SmartNotificationSettingsRow): SmartNotificationSettings {
   return {
     workspaceId,
-    enabled: row?.enabled === 1,
+    enabled: row ? row.enabled === 1 : true,
     accountId: row?.account_id ?? '',
     recipientOpenId: row?.recipient_open_id ?? '',
+    recipientEmail: row?.recipient_email ?? '',
+    feishuEnabled: row?.feishu_enabled === 1,
     minActiveMinutes: row?.min_active_minutes ?? 30,
     notifyDemand: row ? row.notify_demand === 1 : true,
     notifyWorkspace: row ? row.notify_workspace === 1 : true,
@@ -217,13 +226,18 @@ export class SmartNotificationService {
     this.workspaces.get(workspaceId)
     const accountId = typeof input.accountId === 'string' ? input.accountId.trim() : ''
     const recipientOpenId = typeof input.recipientOpenId === 'string' ? input.recipientOpenId.trim() : ''
+    const recipientEmail = input.recipientEmail ? normalizeNotificationEmail(input.recipientEmail) : ''
+    const feishuEnabled = input.feishuEnabled ?? Boolean(accountId && recipientOpenId)
+    if (typeof feishuEnabled !== 'boolean') throw new Error('飞书通知开关必须为布尔值')
     const minutes = Number(input.minActiveMinutes ?? 30)
     if (!Number.isInteger(minutes) || minutes < 5 || minutes > 240) throw new Error('最短有效执行时间必须是 5 到 240 分钟之间的整数')
     if (input.enabled !== false) {
-      if (!accountId) throw new Error('请选择用于发送通知的飞书机器人')
-      if (!recipientOpenId) throw new Error('请输入接收人的 Open ID')
-      const account = this.hooks.account(accountId)
-      if (!account.enabled) throw new Error('请选择已启用的飞书机器人')
+      if (feishuEnabled) {
+        if (!accountId) throw new Error('请选择用于发送通知的飞书机器人')
+        if (!recipientEmail && !recipientOpenId) throw new Error('请输入接收人的企业邮箱')
+        const account = this.hooks.account(accountId)
+        if (!account.enabled) throw new Error('请选择已启用的飞书机器人')
+      }
       if (input.notifyDemand === false && input.notifyWorkspace === false) throw new Error('至少选择一种通知范围')
     } else if (accountId) {
       this.hooks.account(accountId)
@@ -237,21 +251,22 @@ export class SmartNotificationService {
       notify_demand = excluded.notify_demand, notify_workspace = excluded.notify_workspace, updated_at = excluded.updated_at`)
       .run(workspaceId, input.enabled === false ? 0 : 1, accountId || null, recipientOpenId, minutes,
         input.notifyDemand === false ? 0 : 1, input.notifyWorkspace === false ? 0 : 1, now, now)
+    this.database.db.prepare('UPDATE smart_notification_settings SET recipient_email=?, feishu_enabled=? WHERE workspace_id=?').run(recipientEmail, feishuEnabled ? 1 : 0, workspaceId)
     return this.get(workspaceId)
   }
 
   async test(workspaceId: string): Promise<{ queued: true; outboxId: string }> {
     const workspace = this.workspaces.get(workspaceId)
     const settings = this.get(workspaceId)
-    if (!settings.enabled || !settings.accountId || !settings.recipientOpenId) throw new Error('请先启用并保存智能通知')
-    const account = this.hooks.account(settings.accountId)
-    if (!account.enabled) throw new Error('飞书机器人未启用')
+    if (!settings.enabled) throw new Error('请先启用并保存智能通知')
     const analysis: SmartTaskAnalysis = {
       eligible: true, activeDurationMs: settings.minActiveMinutes * 60_000, wallDurationMs: settings.minActiveMinutes * 60_000,
       waitingDurationMs: 0, toolCount: 8, fileChangeCount: 3, hasPlan: true, hasVerification: true,
       assistantText: '这是一条智能完工通知测试。真实任务只会在达到有效执行时长并具备复杂任务信号后发送。', status: 'completed',
     }
-    const item = await this.hooks.queue(settings.accountId, {
+    const card = smartNotificationCard({ workspaceName: workspace.name, conversationTitle: '通知链路测试', analysis, test: true })
+    const sourceKey = `smart-notification:test:${workspaceId}:${makeId('delivery')}`
+    const item = this.hooks.publish ? await this.hooks.publish({ ...settings, sourceKey, title: '通知链路测试', summary: analysis.assistantText, outcome: 'completed', conversationId: '', card }) : await this.hooks.queue(settings.accountId, {
       kind: 'send_user_card', targetId: settings.recipientOpenId,
       payload: { card: smartNotificationCard({ workspaceName: workspace.name, conversationTitle: '通知链路测试', analysis, test: true }) },
       dedupeKey: `smart-notification:test:${workspaceId}:${makeId('delivery')}`, terminal: true,
@@ -268,7 +283,7 @@ export class SmartNotificationService {
     const conversation = this.database.db.prepare('SELECT workspace_id, demand_id, title FROM conversations WHERE id = ?').get(event.conversationId) as { workspace_id: string; demand_id: string | null; title: string } | undefined
     if (!conversation || !event.turnId) return
     const settings = this.get(conversation.workspace_id)
-    if (!settings.enabled || !settings.accountId || !settings.recipientOpenId) return
+    if (!settings.enabled) return
     if (conversation.demand_id ? !settings.notifyDemand : !settings.notifyWorkspace) return
     const snapshot = await this.conversations.historyCanonical(conversation.workspace_id, event.conversationId)
     const analysis = analyzeSmartTask(snapshot.events, event.turnId, settings.minActiveMinutes)
@@ -276,7 +291,8 @@ export class SmartNotificationService {
     const workspace = this.workspaces.get(conversation.workspace_id)
     const demand = conversation.demand_id ? getDemand(this.database, workspace, conversation.demand_id) : null
     const openUrl = this.hooks.openUrl({ workspaceId: workspace.id, demandId: conversation.demand_id, conversationId: event.conversationId })
-    const item = await this.hooks.queue(settings.accountId, {
+    const card = smartNotificationCard({ workspaceName: workspace.name, demandName: demand?.name, conversationTitle: conversation.title, analysis, openUrl })
+    const item = this.hooks.publish ? await this.hooks.publish({ workspaceId: workspace.id, sourceKey: `smart-notification:${workspace.id}:${event.conversationId}:${event.turnId}`, title: `${analysis.status === 'completed' ? '长任务已完成' : '长任务失败'} · ${conversation.title}`, summary: compactResult(analysis.assistantText), outcome: analysis.status, conversationId: event.conversationId, demandId: conversation.demand_id, card, accountId: settings.accountId, recipientEmail: settings.recipientEmail, recipientOpenId: settings.recipientOpenId, feishuEnabled: settings.feishuEnabled }) : await this.hooks.queue(settings.accountId, {
       kind: 'send_user_card', targetId: settings.recipientOpenId,
       payload: { card: smartNotificationCard({ workspaceName: workspace.name, demandName: demand?.name, conversationTitle: conversation.title, analysis, openUrl }) },
       dedupeKey: `smart-notification:${workspace.id}:${event.conversationId}:${event.turnId}`, terminal: true,

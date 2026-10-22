@@ -16,6 +16,8 @@ export interface FollowupInput {
   creationTurnId?: string | null
   accountId?: string | null
   recipientOpenId?: string | null
+  recipientEmail?: string
+  feishuEnabled?: boolean
   notificationTarget?: JsonValue
 }
 export interface FollowupResult {
@@ -124,6 +126,7 @@ export class FollowupRepository {
       intervalMinutes: input.intervalMinutes, deadlineAt: input.deadlineAt === null ? null : new Date(input.deadlineAt).toISOString(),
       notificationPolicy: input.notificationPolicy, backgroundConversationId: input.backgroundConversationId ?? null,
       creationTurnId: input.creationTurnId ?? null, accountId: input.accountId ?? null, recipientOpenId: input.recipientOpenId ?? null,
+      recipientEmail: input.recipientEmail ?? '', feishuEnabled: input.feishuEnabled,
       ...(input.notificationTarget === undefined ? {} : { notificationTarget: input.notificationTarget }),
     }
   }

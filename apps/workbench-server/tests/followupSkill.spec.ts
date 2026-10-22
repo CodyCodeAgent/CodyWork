@@ -8,6 +8,20 @@ import { openFollowupBridge } from '../src/services/followupSkill.js'
 const run = promisify(execFile)
 const helper = fileURLToPath(new URL('../skills/codywork-followup/scripts/invoke.mjs', import.meta.url))
 describe('built-in followup skill bridge', () => {
+  it('does not write after the turn closes during asynchronous email validation', async () => {
+    let release!: () => void
+    const write = vi.fn()
+    const bridge = await openFollowupBridge(async (_tool, _args, assertActive) => {
+      await new Promise<void>(resolve => { release = resolve })
+      assertActive(); write(); return { saved: true }
+    })
+    bridge.activate()
+    const socket = JSON.parse(bridge.instruction.match(/node "[^"]+" ("[^"]+") list/)![1]!) as string
+    const request = run(process.execPath, [helper, socket, 'create', '{}'])
+    const failed = expect(request).rejects.toMatchObject({ stdout: expect.stringContaining('未执行写入') })
+    try { await vi.waitFor(() => expect(release).toBeTypeOf('function')); bridge.close(); release(); await failed; expect(write).not.toHaveBeenCalled() }
+    finally { bridge.close() }
+  })
   it('executes the real helper over a private local socket and revokes on close', async () => {
     const invoke = vi.fn(async (tool, args) => ({ taskId: 'synthetic-task', tool, args }))
     const bridge = await openFollowupBridge(invoke)
@@ -19,7 +33,7 @@ describe('built-in followup skill bridge', () => {
       bridge.activate()
       const result = await run(process.execPath, [helper, socket, 'create', JSON.stringify({ name: 'Fixture' })])
       expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, data: { taskId: 'synthetic-task' } })
-      expect(invoke).toHaveBeenCalledExactlyOnceWith('create', { name: 'Fixture' })
+      expect(invoke).toHaveBeenCalledExactlyOnceWith('create', { name: 'Fixture' }, expect.any(Function))
     } finally { bridge.close() }
     expect(existsSync(socket)).toBe(false)
     await expect(run(process.execPath, [helper, socket, 'list'])).rejects.toThrow()

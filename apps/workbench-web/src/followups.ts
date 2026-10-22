@@ -6,7 +6,7 @@ export interface FollowupInput {
   completionCondition: string
   deadlineAt: string
   intervalMinutes: number
-  notification: { mode: 'every' | 'change' | 'terminal'; accountId: string; recipientOpenId: string }
+  notification: { mode: 'every' | 'change' | 'terminal'; accountId: string; recipientOpenId: string; recipientEmail?: string; feishuEnabled?: boolean }
 }
 export interface FollowupTask extends FollowupInput {
   id: string
@@ -19,6 +19,7 @@ export interface FollowupTask extends FollowupInput {
   nextRunAt?: string | null
 }
 export interface FollowupRun {
+  notificationId?: string
   id: string
   phase?: 'executing' | 'notifying' | 'finished' | 'interrupted' | 'deferred'
   result?: { status: string; summary?: string } | null

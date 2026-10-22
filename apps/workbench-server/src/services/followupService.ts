@@ -3,6 +3,7 @@ import type { WorkbenchDb, ConversationRow } from '../db/index.js'
 import type { ConversationService } from './conversations.js'
 import type { CodyWorkChannelService } from './channelBot.js'
 import { FollowupRepository, FollowupScheduler, FollowupDeferredError, type FollowupTask, type FollowupScope, type FollowupInput, type FollowupRun, type FollowupResult } from './followups.js'
+import { normalizeNotificationEmail } from './notificationRecipient.js'
 
 const SERVER_ID = 'codywork-local'
 type Body = Record<string, unknown>
@@ -22,7 +23,9 @@ export class FollowupService {
   private readonly unsubscribe: () => void
   constructor(private readonly db: WorkbenchDb, private readonly conversations: ConversationService, private readonly channels: () => CodyWorkChannelService, private readonly openUrl: (task: FollowupTask) => string) {
     this.repository = new FollowupRepository(db, { validateIdentity: (_scope, input) => {
-      if (!input.accountId || !input.recipientOpenId?.startsWith('ou_')) throw new Error('请配置通知机器人及该应用的接收人 Open ID')
+      if (input.feishuEnabled === false) return
+      if (!input.accountId || (!input.recipientEmail && !input.recipientOpenId?.startsWith('ou_'))) throw new Error('请配置通知机器人及接收人企业邮箱')
+      if (input.recipientEmail) normalizeNotificationEmail(input.recipientEmail)
       const account = db.db.prepare('SELECT enabled FROM channel_accounts WHERE id = ?').get(input.accountId) as { enabled: number } | undefined
       if (!account?.enabled) throw new Error('通知机器人不存在或未启用')
     } })
@@ -58,14 +61,19 @@ export class FollowupService {
     const pick = (key: string, fallback: unknown) => body[key] === undefined ? fallback : body[key]
     const deadlineAt = pick('deadlineAt', existing?.deadlineAt)
     const intervalMinutes = pick('intervalMinutes', existing?.intervalMinutes ?? 10)
+    const feishuEnabled = notification.feishuEnabled ?? body.feishuEnabled ?? existing?.feishuEnabled ?? defaults.feishuEnabled ?? Boolean(defaults.accountId)
+    if (typeof feishuEnabled !== 'boolean') throw new Error('飞书通知开关必须为布尔值')
+    const emailValue = notification.recipientEmail ?? body.recipientEmail ?? existing?.recipientEmail ?? defaults.recipientEmail ?? ''
+    const recipientEmail = emailValue ? normalizeNotificationEmail(emailValue) : ''
     if (typeof deadlineAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(deadlineAt)) throw new Error('必须指定含时区的 ISO 截止时间，不能无限轮询')
     if (typeof intervalMinutes !== 'number' || !Number.isSafeInteger(intervalMinutes)) throw new Error('检查间隔必须为正整数分钟')
     return {
       name: pick('name', existing?.name) as string, prompt: pick('prompt', existing?.prompt) as string,
       completionCondition: pick('completionCondition', existing?.completionCondition) as string, intervalMinutes, deadlineAt,
       notificationPolicy: (notification.mode ?? body.notificationPolicy ?? existing?.notificationPolicy ?? 'change') as FollowupInput['notificationPolicy'],
-      accountId: (notification.accountId ?? body.accountId ?? existing?.accountId ?? defaults.accountId) as string,
-      recipientOpenId: (notification.recipientOpenId ?? body.recipientOpenId ?? existing?.recipientOpenId ?? defaults.recipientOpenId) as string,
+      accountId: (notification.accountId ?? body.accountId ?? existing?.accountId ?? defaults.accountId) as string || null,
+      recipientOpenId: (notification.recipientOpenId ?? body.recipientOpenId ?? existing?.recipientOpenId ?? defaults.recipientOpenId) as string || null,
+      recipientEmail, feishuEnabled,
       backgroundConversationId: existing?.backgroundConversationId ?? null, creationTurnId: existing?.creationTurnId ?? null,
     }
   }
@@ -82,6 +90,10 @@ export class FollowupService {
     const task = this.repository.create(scope, { ...this.input(workspaceId, body), creationTurnId: origin?.turnId ?? null })
     if (source.status !== 'running' && source.status !== 'awaiting_approval') void this.prepare(task).catch(() => {})
     return this.view(task)
+  }
+  async validateNotification(workspaceId: string, body: Body, taskId?: string) {
+    const input = this.input(workspaceId, body, taskId ? this.task(workspaceId, taskId) : undefined)
+    if (input.feishuEnabled && input.recipientEmail) await this.channels().resolveNotificationRecipient(input.accountId ?? '', input.recipientEmail)
   }
   update(workspaceId: string, id: string, body: Body) {
     const task = this.task(workspaceId, id)
@@ -102,16 +114,36 @@ export class FollowupService {
     if (!fn) throw new Error('不支持的定时任务操作')
     return this.view(fn.call(this.repository, task, id, revision))
   }
+  async resendResult(workspaceId: string, id: string, body: Body) {
+    const task = this.task(workspaceId, id)
+    if (task.revision !== Number(body.expectedRevision)) throw new Error('任务已变化，请刷新后重试')
+    const run = task.lastRun
+    if (!run?.result) throw new Error('尚无可补发的检查结果')
+    const center = this.channels().notificationCenter
+    let note = center.findSource(workspaceId, `followup:${run.id}`)
+    if (!note) {
+      const delivery = run.outboxId ? this.db.db.prepare('SELECT status FROM channel_outbox WHERE id=?').get(run.outboxId) as { status: string } | undefined : undefined
+      if (delivery && !['dead_letter', 'superseded'].includes(delivery.status)) throw new Error('原结果已发送或仍在投递，不能重复补发')
+      const source = this.conversations.get(workspaceId, task.sourceConversationId)
+      const url = this.openUrl(task)
+      await center.publish({ workspaceId, sourceKey: `followup:${run.id}`, title: task.name, summary: run.result.summary, outcome: run.result.status, conversationId: task.sourceConversationId, demandId: source.demandId, existingOutboxId: delivery ? run.outboxId! : undefined, card: feishuTextCard(`CodyWork · ${task.name}`, run.result.summary, { ...(url ? { actions: [{ text: '查看原会话', url }] } : {}) }) })
+      note = center.findSource(workspaceId, `followup:${run.id}`)!
+    }
+    // Also repair any older interrupted import before deciding whether to resend.
+    if (run.outboxId) center.adoptReceipt(workspaceId, note.id, run.outboxId)
+    return center.retry(workspaceId, note.id, String(body.accountId ?? ''), String(body.email ?? ''))
+  }
   runs(workspaceId: string, id: string) {
     const task = this.task(workspaceId, id)
     return { items: this.repository.listRuns(task, id).reverse().map(run => {
       const delivery = run.outboxId ? this.db.db.prepare('SELECT status, last_error FROM channel_outbox WHERE id = ? AND account_id = ?').get(run.outboxId, task.accountId!) as { status: string; last_error: string | null } | undefined : undefined
-      return { ...run, status: run.result?.status ?? run.phase, summary: run.result?.summary ?? '', deliveryStatus: delivery?.status ?? (run.phase === 'notifying' ? 'pending' : run.phase === 'interrupted' ? 'needs_attention' : 'not_requested'), deliveryError: delivery?.last_error ?? run.error ?? '' }
+      const notification = this.channels().notificationCenter?.findSource(workspaceId, `followup:${run.id}`)
+      return { ...run, notificationId: notification?.id, status: run.result?.status ?? run.phase, summary: run.result?.summary ?? '', deliveryStatus: notification?.deliveryStatus ?? delivery?.status ?? (run.phase === 'notifying' ? 'pending' : run.phase === 'interrupted' ? 'needs_attention' : 'not_requested'), deliveryError: notification?.deliveryError ?? delivery?.last_error ?? run.error ?? '' }
     }) }
   }
   private view(task: FollowupTask) {
     const source = this.db.db.prepare('SELECT demand_id FROM conversations WHERE id = ? AND workspace_id = ?').get(task.sourceConversationId, task.workspaceId) as Pick<ConversationRow, 'demand_id'> | undefined
-    return { ...task, status: task.status === 'active' && task.lastRun?.phase === 'executing' ? 'running' as const : task.status, conversationId: task.sourceConversationId, demandId: source?.demand_id ?? null, notification: { mode: task.notificationPolicy, accountId: task.accountId, recipientOpenId: task.recipientOpenId } }
+    return { ...task, status: task.status === 'active' && task.lastRun?.phase === 'executing' ? 'running' as const : task.status, conversationId: task.sourceConversationId, demandId: source?.demand_id ?? null, notification: { mode: task.notificationPolicy, accountId: task.accountId ?? '', recipientOpenId: task.recipientOpenId ?? '', recipientEmail: task.recipientEmail ?? '', feishuEnabled: task.feishuEnabled ?? Boolean(task.accountId) } }
   }
   private isBackground(id: string): boolean {
     return (this.db.db.prepare("SELECT data FROM followup_tasks WHERE server_id = ?").all(SERVER_ID) as { data: string }[]).some(row => (JSON.parse(row.data) as FollowupTask).backgroundConversationId === id)
@@ -161,7 +193,9 @@ export class FollowupService {
     if (fresh.status === 'cancelled' || fresh.status === 'paused') throw new Error('任务已停止，不再投递检查通知')
     const url = this.openUrl(task)
     const card = feishuTextCard(`CodyWork · ${task.name}`, run.result?.summary ?? '定时跟进已到截止时间', { ...(url ? { actions: [{ text: '查看原会话', url, type: 'primary' as const }] } : {}), note: `通知策略：${task.notificationPolicy} · 每 ${task.intervalMinutes} 分钟检查` })
-    const item = await this.channels().queueNotification(task.accountId!, task.recipientOpenId!, card, `followup:${run.id}`)
+    const channels = this.channels()
+    const source = this.conversations.get(task.workspaceId, task.sourceConversationId)
+    const item = channels.publishNotification ? await channels.publishNotification({ workspaceId: task.workspaceId, sourceKey: `followup:${run.id}`, title: task.name, summary: run.result?.summary ?? '定时跟进已到截止时间', outcome: run.result?.status ?? 'expired', conversationId: task.sourceConversationId, demandId: source.demandId, card, accountId: task.accountId ?? '', recipientEmail: task.recipientEmail, recipientOpenId: task.recipientOpenId ?? '', feishuEnabled: task.feishuEnabled ?? Boolean(task.accountId) }) : await channels.queueNotification(task.accountId!, task.recipientOpenId!, card, `followup:${run.id}`)
     return item.id
   }
 }

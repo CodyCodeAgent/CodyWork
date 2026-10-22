@@ -12,8 +12,36 @@ import type { CodyWorkChannelService } from '../src/services/channelBot.js'
 import { TestRuntimeAdapter } from './fixtures/test-runtime.js'
 import { ConversationEventHub } from '../src/services/conversationEventHub.js'
 import { AgentFollowupTools } from '../src/services/agentFollowups.js'
+import { NotificationCenter } from '../src/services/notificationCenter.js'
 
 describe('Followup product integration', () => {
+  it('finishes with a local inbox receipt without a bot, and resends the stored result without another check', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'followup-local-inbox-')), db = new WorkbenchDb(':memory:')
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))}` })
+    const conversations = new ConversationService(db, runtime)
+    let service: FollowupService | undefined
+    try {
+      const now = nowIso()
+      db.db.prepare('INSERT INTO workspaces(id,name,path,created_at,last_opened_at) VALUES(?,?,?,?,?)').run('ws', 'Fixture', root, now, now)
+      const queue = vi.fn(async () => ({ id: 'delivery-fixture' })), resolve = vi.fn(async (_id, email) => ({ email, openId: 'ou_fixture' }))
+      const center = new NotificationCenter(db, { queue, resolve })
+      const channels = { notificationCenter: center, publishNotification: (input: Parameters<NotificationCenter['publish']>[0]) => center.publish(input), smartNotificationSettings: () => ({ feishuEnabled: false }) } as unknown as CodyWorkChannelService
+      service = new FollowupService(db, conversations, () => channels, () => '')
+      const source = await conversations.createWorkspace('ws', 'Local only')
+      const task = service.create('ws', { conversationId: source.id, name: 'Local result', prompt: 'Read fixture', completionCondition: 'done', intervalMinutes: 1, deadlineAt: new Date(Date.now() + 3_600_000).toISOString() })
+      await expect.poll(() => service!.list('ws').items[0]?.backgroundConversationId).toBeTruthy()
+      const ready = service.list('ws').items[0]!
+      service.action('ws', task.id, 'run-now', ready.revision); await service.scheduler.tick()
+      expect(service.list('ws').items[0]?.status).toBe('completed')
+      expect(center.list('ws')).toMatchObject({ unreadCount: 1, items: [{ deliveryStatus: 'local_only' }] })
+      expect(service.runs('ws', task.id).items[0]?.notificationId).toBe(center.list('ws').items[0]!.id)
+      expect(queue).not.toHaveBeenCalled()
+      const check = vi.spyOn(conversations, 'submitScheduledCommand')
+      await service.resendResult('ws', task.id, { expectedRevision: service.list('ws').items[0]!.revision, accountId: 'bot', email: 'fixture@example.test' })
+      expect(check).not.toHaveBeenCalled(); expect(queue).toHaveBeenCalledTimes(1)
+      expect(service.runs('ws', task.id).items).toHaveLength(1)
+    } finally { await service?.close(); await conversations.closeRuntimes(); db.close(); rmSync(root, { recursive: true, force: true }) }
+  })
   it('creates through the real skill helper on a resumed old thread without dynamic tools', async () => {
     const root = mkdtempSync(join(tmpdir(), 'followup-old-skill-'))
     const db = new WorkbenchDb(':memory:')

@@ -1,6 +1,8 @@
 <template>
   <div class="app-shell codywork-vue" data-testid="codywork-app">
-    <WorkbenchSidebar :workspace="workspace" :workspaces="workspaces" :demands="demands" :selected-demand-id="selectedDemand?.id ?? ''" :active-page="activePage" :realtime-active="Boolean(selectedConversation)" :socket-state="socketState" :workspace-picker-open="showWorkspacePicker" :demand-expanded="demandNavExpanded" :collapsed="workspaceSidebarCollapsed" :workspace-conversation-count="workspaceConversations.length" :workspace-conversation-active="isWorkspaceConversationPage" @update:workspace-picker-open="showWorkspacePicker = $event" @update:demand-expanded="demandNavExpanded = $event" @update:collapsed="setWorkspaceSidebarCollapsed" @select-workspace="selectWorkspace" @remove-workspace="openDeleteWorkspace" @create-workspace="showCreateWorkspace = true" @create-demand="showCreateDemand = true" @navigate="goTo" @open-demand="openDemand" @open-workspace-conversations="openWorkspaceConversations" />
+    <WorkbenchSidebar :workspace="workspace" :workspaces="workspaces" :demands="demands" :selected-demand-id="selectedDemand?.id ?? ''" :active-page="activePage" :realtime-active="Boolean(selectedConversation)" :socket-state="socketState" :workspace-picker-open="showWorkspacePicker" :demand-expanded="demandNavExpanded" :collapsed="workspaceSidebarCollapsed" :workspace-conversation-count="workspaceConversations.length" :workspace-conversation-active="isWorkspaceConversationPage" @update:workspace-picker-open="showWorkspacePicker = $event" @update:demand-expanded="demandNavExpanded = $event" @update:collapsed="setWorkspaceSidebarCollapsed" @select-workspace="selectWorkspace" @remove-workspace="openDeleteWorkspace" @create-workspace="showCreateWorkspace = true" @create-demand="showCreateDemand = true" @navigate="goTo" @open-demand="openDemand" @open-workspace-conversations="openWorkspaceConversations">
+      <template #notifications><NotificationBell v-if="workspace" :key="workspace.id" :workspace-id="workspace.id" :collapsed="workspaceSidebarCollapsed" /></template>
+    </WorkbenchSidebar>
 
     <main class="main">
       <div v-if="error" class="app-error-banner" role="alert"><span>{{ error }}</span><button type="button" aria-label="关闭错误提示" @click="error = ''">×</button></div>
@@ -39,7 +41,7 @@
         <SettingsOverview v-if="settingsSection === 'overview'" :action-count="quickActions.length" @open="openSettingsSection" />
         <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
         <FeishuChannelSettings v-else-if="settingsSection === 'feishu'" />
-        <SmartNotificationSettings v-else-if="settingsSection === 'smart-notifications'" :workspace-id="workspace.id" />
+        <SmartNotificationSettings v-else-if="settingsSection === 'smart-notifications'" :key="workspace.id" :workspace-id="workspace.id" />
         <FollowupSettings v-else-if="settingsSection === 'followups'" :key="workspace.id" :workspace-id="workspace.id" :origin-conversation-id="followupOriginWorkspaceId === workspace.id ? followupOriginConversationId : ''" />
         <div v-else class="runtime-settings-body">
           <section class="settings-intro"><div><div class="card-kicker">CODEX RUNTIME</div><h2>App Server 运行状态</h2><p>CodyWork 只展示 Core 的权威状态，不自行重启或复制 Runtime 状态。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
@@ -216,6 +218,7 @@ import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
 import FeishuChannelSettings from './components/FeishuChannelSettings.vue'
 import SmartNotificationSettings from './components/SmartNotificationSettings.vue'
+import NotificationBell from './components/NotificationBell.vue'
 import FollowupSettings from './components/FollowupSettings.vue'
 import SkillInstallDialog from './components/SkillInstallDialog.vue'
 import ConversationChannelDialog from './components/ConversationChannelDialog.vue'

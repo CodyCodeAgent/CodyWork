@@ -492,12 +492,14 @@ function buildRoutes(ctx: AppContext) {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     return followupService(ctx).list(workspace.id, c.query.get('conversationId') ?? undefined)
   })
-  add('POST', '/api/workspaces/:id/followups', c => {
+  add('POST', '/api/workspaces/:id/followups', async c => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    await followupService(ctx).validateNotification(workspace.id, c.body)
     return followupService(ctx).create(workspace.id, c.body)
   })
-  add('PUT', '/api/workspaces/:id/followups/:taskId', c => {
+  add('PUT', '/api/workspaces/:id/followups/:taskId', async c => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    await followupService(ctx).validateNotification(workspace.id, c.body, requiredParam(c, 'taskId'))
     return followupService(ctx).update(workspace.id, requiredParam(c, 'taskId'), c.body)
   })
   add('GET', '/api/workspaces/:id/followups/:taskId/runs', c => {
@@ -506,7 +508,31 @@ function buildRoutes(ctx: AppContext) {
   })
   add('POST', '/api/workspaces/:id/followups/:taskId/:action', c => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    if (requiredParam(c, 'action') === 'resend-result') return followupService(ctx).resendResult(workspace.id, requiredParam(c, 'taskId'), c.body)
     return followupService(ctx).action(workspace.id, requiredParam(c, 'taskId'), requiredParam(c, 'action'), Number(c.body.expectedRevision))
+  })
+
+  add('GET', '/api/workspaces/:id/notifications', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const cursor = c.query.get('before')
+    if (cursor && (!Number.isSafeInteger(Number(cursor)) || Number(cursor) < 1)) throw new Error('无效的通知分页参数')
+    return channelService(ctx).notificationCenter.list(workspace.id, c.query.get('unread') === '1', cursor ? Number(cursor) : undefined)
+  })
+  add('POST', '/api/workspaces/:id/notifications/read', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    if ('id' in c.body && (typeof c.body.id !== 'string' || !c.body.id)) throw new Error('无效的通知 ID')
+    if ('read' in c.body && typeof c.body.read !== 'boolean') throw new Error('无效的已读标记')
+    if (c.body.read === false && !c.body.id) throw new Error('标记未读需要指定通知')
+    return channelService(ctx).notificationCenter.markRead(workspace.id, typeof c.body.id === 'string' ? c.body.id : undefined, c.body.read !== false)
+  })
+  add('POST', '/api/workspaces/:id/notifications/validate-recipient', async c => {
+    getWorkspace(ctx, requiredParam(c, 'id'))
+    const result = await channelService(ctx).resolveNotificationRecipient(String(c.body.accountId ?? ''), String(c.body.email ?? ''))
+    return { valid: true, email: result.email }
+  })
+  add('POST', '/api/workspaces/:id/notifications/:notificationId/resend', c => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return channelService(ctx).notificationCenter.retry(workspace.id, requiredParam(c, 'notificationId'), String(c.body.accountId ?? ''), String(c.body.email ?? ''))
   })
 
   add('PATCH', '/api/workspaces/:id/smart-notifications', (c) => {

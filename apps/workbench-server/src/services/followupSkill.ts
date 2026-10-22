@@ -13,7 +13,7 @@ export const FOLLOWUP_SKILL: RuntimeSkillCatalogEntry = {
 }
 
 /** Local, per-command capability. No browser password or public HTTP bypass. */
-export async function openFollowupBridge(invoke: (tool: string, args: unknown) => Promise<unknown>) {
+export async function openFollowupBridge(invoke: (tool: string, args: unknown, assertActive: () => void) => Promise<unknown>) {
   const directory = mkdtempSync(join(tmpdir(), 'cw-followup-'))
   chmodSync(directory, 0o700)
   const socketPath = join(directory, 'bridge.sock')
@@ -31,7 +31,7 @@ export async function openFollowupBridge(invoke: (tool: string, args: unknown) =
           if (closed || !active || input.length > 65_536) throw new Error('跟进桥接未进入执行轮次、已失效或请求过大')
           const request = JSON.parse(input) as { tool?: unknown; arguments?: unknown }
           if (typeof request.tool !== 'string' || !['list', 'create', 'update', 'pause', 'resume', 'cancel', 'run_now'].includes(request.tool)) throw new Error('未知跟进操作')
-          const result = await invoke(request.tool, request.arguments)
+          const result = await invoke(request.tool, request.arguments, () => { if (closed || !active) throw new Error('当前轮次已结束，未执行写入') })
           socket.end(JSON.stringify({ ok: true, data: result }))
         } catch (error) { socket.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })) }
       })()

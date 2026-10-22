@@ -20,7 +20,7 @@
       </button>
       <button type="button" class="settings-tile" @click="emit('open', 'smart-notifications')">
         <span class="tile-icon notify" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10 21h4"/></svg></span>
-        <span class="tile-copy"><strong>智能通知</strong><small>长时间复杂任务完成后，将结果摘要私聊发送到飞书。</small></span>
+        <span class="tile-copy"><strong>智能通知</strong><small>长时间复杂任务完成后保留站内通知，可选同步发送到飞书。</small></span>
         <span class="tile-arrow" aria-hidden="true">→</span>
       </button>
     </div>

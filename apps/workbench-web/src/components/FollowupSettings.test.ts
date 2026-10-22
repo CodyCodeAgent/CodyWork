@@ -6,10 +6,11 @@ import type { FollowupTask } from '../followups'
 import FollowupSettings from './FollowupSettings.vue'
 
 vi.mock('../api', () => ({ api: {
-  listFollowups: vi.fn(), createFollowup: vi.fn(), updateFollowup: vi.fn(), followupAction: vi.fn(), followupRuns: vi.fn(), listFeishuAccounts: vi.fn(), smartNotificationSettings: vi.fn(),
+  listFollowups: vi.fn(), createFollowup: vi.fn(), updateFollowup: vi.fn(), followupAction: vi.fn(), followupRuns: vi.fn(), listFeishuAccounts: vi.fn(), smartNotificationSettings: vi.fn(), resendFollowupResult: vi.fn(), validateNotificationRecipient: vi.fn(),
 } }))
-const task: FollowupTask = { id: 't1', workspaceId: 'w1', demandId: 'd1', conversationId: 'c1', name: '检查构建', prompt: '检查最新构建', completionCondition: '构建成功', deadlineAt: '2099-12-01T12:00:00.000Z', intervalMinutes: 15, notification: { mode: 'change', accountId: 'a1', recipientOpenId: 'ou_test' }, revision: 4, status: 'active' }
+const task: FollowupTask = { id: 't1', workspaceId: 'w1', demandId: 'd1', conversationId: 'c1', name: '检查构建', prompt: '检查最新构建', completionCondition: '构建成功', deadlineAt: '2099-12-01T12:00:00.000Z', intervalMinutes: 15, notification: { mode: 'change', accountId: 'a1', recipientOpenId: 'ou_test', recipientEmail: 'fixture@example.test', feishuEnabled: true }, revision: 4, status: 'active' }
 const button = (wrapper: ReturnType<typeof mount>, text: string) => wrapper.findAll('button').find(item => item.text() === text)!
+async function retry(wrapper: ReturnType<typeof mount>) { await button(wrapper, '重试通知（不重新检查）').trigger('click'); await flushPromises(); await wrapper.get('.resend-result').trigger('submit'); await flushPromises() }
 async function setup(items: FollowupTask[] = []) {
   vi.mocked(api.listFollowups).mockResolvedValue({ items })
   const wrapper = mount(FollowupSettings, { props: { workspaceId: 'w1', originConversationId: 'c1' } })
@@ -21,10 +22,10 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(api.followupRuns).mockResolvedValue({ items: [] })
   vi.mocked(api.listFeishuAccounts).mockResolvedValue([{ id: 'a1', enabled: true, name: 'Test bot', botName: 'Test bot' }] as Awaited<ReturnType<typeof api.listFeishuAccounts>>)
-  vi.mocked(api.smartNotificationSettings).mockResolvedValue({ accountId: 'a1', recipientOpenId: 'ou_test' } as Awaited<ReturnType<typeof api.smartNotificationSettings>>)
+  vi.mocked(api.smartNotificationSettings).mockResolvedValue({ accountId: 'a1', recipientOpenId: 'ou_test', recipientEmail: 'fixture@example.test', feishuEnabled: true } as Awaited<ReturnType<typeof api.smartNotificationSettings>>)
 })
 describe('FollowupSettings', () => {
-  it.each(['failed', 'dead_letter', 'retry_wait'].flatMap(deliveryStatus =>
+  it.each(['failed', 'dead_letter'].flatMap(deliveryStatus =>
     ['completed', 'pending', 'failed', 'needs_attention'].map(runStatus => ({ deliveryStatus, runStatus })),
   ))('retries $deliveryStatus delivery for a $runStatus run without executing again', async ({ deliveryStatus, runStatus }) => {
     const taskStatus = runStatus === 'pending' ? 'active' : 'completed'
@@ -32,19 +33,20 @@ describe('FollowupSettings', () => {
     vi.mocked(api.followupRuns).mockResolvedValue({ items: [{ id: 'r1', status: runStatus, startedAt: '2026-10-18T00:00:00Z', deliveryStatus, outboxId: 'outbox-1' }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
     expect(wrapper.get('fieldset').attributes('disabled') !== undefined).toBe(taskStatus === 'completed')
-    await button(wrapper, '重试通知（不重新检查）').trigger('click'); await flushPromises()
-    expect(api.followupAction).toHaveBeenCalledExactlyOnceWith('w1', 't1', 'retry-notification', 9)
+    await retry(wrapper)
+    expect(api.resendFollowupResult).toHaveBeenCalledExactlyOnceWith('w1', 't1', 9, 'a1', 'fixture@example.test')
+    expect(api.followupAction).not.toHaveBeenCalled()
     expect(api.updateFollowup).not.toHaveBeenCalled()
     expect(api.createFollowup).not.toHaveBeenCalled()
   })
-  it.each(['failed', 'dead_letter', 'retry_wait'])('allows %s notification retry after task expiry', async deliveryStatus => {
+  it.each(['failed', 'dead_letter'])('allows %s notification retry after task expiry', async deliveryStatus => {
     const wrapper = await setup([{ ...task, status: 'expired', revision: 12, lastRun: { id: 'expiry-run', phase: 'finished', outboxId: 'expiry-outbox' } }])
     vi.mocked(api.followupRuns).mockResolvedValue({ items: [{ id: 'expiry-run', status: 'failed', startedAt: '2026-10-18T00:00:00Z', deliveryStatus, outboxId: 'expiry-outbox' }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
-    await button(wrapper, '重试通知（不重新检查）').trigger('click'); await flushPromises()
-    expect(api.followupAction).toHaveBeenCalledExactlyOnceWith('w1', 't1', 'retry-notification', 12)
+    await retry(wrapper)
+    expect(api.resendFollowupResult).toHaveBeenCalledExactlyOnceWith('w1', 't1', 12, 'a1', 'fixture@example.test')
   })
-  it.each(['pending', 'sent', 'delivered', 'not_requested'])('does not offer retry for %s delivery', async deliveryStatus => {
+  it.each(['pending', 'leased', 'sending', 'retry_wait', 'sent', 'delivered', 'not_requested'])('does not offer retry for %s delivery', async deliveryStatus => {
     const wrapper = await setup([{ ...task, status: 'completed' }])
     vi.mocked(api.followupRuns).mockResolvedValue({ items: [{ id: 'r1', status: 'completed', startedAt: '2026-10-18T00:00:00Z', deliveryStatus }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
@@ -54,8 +56,8 @@ describe('FollowupSettings', () => {
     const wrapper = await setup([{ ...task, status: 'needs_attention', revision: 8, lastRun: { id: 'r1', phase: 'interrupted', result: { status: 'pending' }, outboxId: null } }])
     vi.mocked(api.followupRuns).mockResolvedValue({ items: [{ id: 'r1', status: 'pending', phase: 'interrupted', result: { status: 'pending' }, startedAt: '2026-10-18T00:00:00Z', deliveryStatus: 'needs_attention' }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
-    await button(wrapper, '重试通知（不重新检查）').trigger('click'); await flushPromises()
-    expect(api.followupAction).toHaveBeenCalledExactlyOnceWith('w1', 't1', 'retry-notification', 8)
+    await retry(wrapper)
+    expect(api.resendFollowupResult).toHaveBeenCalledExactlyOnceWith('w1', 't1', 8, 'a1', 'fixture@example.test')
   })
   it('blocks duplicate retries and refreshes delivery and revision after retry admission', async () => {
     const wrapper = await setup([{ ...task, status: 'completed', lastRun: { id: 'r1', phase: 'finished' } }])
@@ -63,11 +65,11 @@ describe('FollowupSettings', () => {
     vi.mocked(api.followupRuns).mockResolvedValueOnce({ items: [run] }).mockResolvedValue({ items: [{ ...run, deliveryStatus: 'pending' }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
     let resolve!: (value: unknown) => void
-    vi.mocked(api.followupAction).mockReturnValueOnce(new Promise(done => { resolve = done }))
-    const retry = button(wrapper, '重试通知（不重新检查）')
-    await retry.trigger('click'); await retry.trigger('click')
-    expect(api.followupAction).toHaveBeenCalledExactlyOnceWith('w1', 't1', 'retry-notification', 4)
-    expect(retry.attributes()).toHaveProperty('disabled')
+    vi.mocked(api.resendFollowupResult).mockReturnValueOnce(new Promise(done => { resolve = done }) as never)
+    await button(wrapper, '重试通知（不重新检查）').trigger('click'); await flushPromises()
+    await wrapper.get('.resend-result').trigger('submit'); await wrapper.get('.resend-result').trigger('submit')
+    expect(api.resendFollowupResult).toHaveBeenCalledExactlyOnceWith('w1', 't1', 4, 'a1', 'fixture@example.test')
+    expect(button(wrapper, '重试通知（不重新检查）').attributes()).toHaveProperty('disabled')
     vi.mocked(api.listFollowups).mockResolvedValue({ items: [{ ...task, status: 'completed', revision: 5, lastRun: { id: 'r1', phase: 'finished' } }] })
     resolve({}); await flushPromises()
     expect(wrapper.text()).toContain('v5')
@@ -147,7 +149,7 @@ describe('FollowupSettings', () => {
     await wrapper.get('[name=notificationMode]').setValue('terminal')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(api.createFollowup).toHaveBeenCalledWith('w1', expect.objectContaining({ conversationId: 'c1', name: '检查构建', intervalMinutes: 15, deadlineAt: new Date('2099-12-01T20:00').toISOString(), notification: { mode: 'terminal', accountId: 'a1', recipientOpenId: 'ou_test' } }))
+    expect(api.createFollowup).toHaveBeenCalledWith('w1', expect.objectContaining({ conversationId: 'c1', name: '检查构建', intervalMinutes: 15, deadlineAt: new Date('2099-12-01T20:00').toISOString(), notification: expect.objectContaining({ mode: 'terminal', accountId: 'a1', recipientEmail: 'fixture@example.test', feishuEnabled: true }) }))
   })
   it('validates required fields, integer interval and future deadline without requests', async () => {
     const wrapper = await setup([task])
