@@ -4,7 +4,7 @@ import type { Demand, Repository } from './api'
 
 const repository = (id: string): Repository => ({ id, name: `repo-${id}`, path: `/workspace/services/repo-${id}`, originUrl: null, defaultRef: 'main', syncStatus: 'ok', dirty: false })
 const demand = (repositoryIds: string[]): Demand => ({
-  id: 'demand-1', name: 'Demand', branchName: 'feat/demand', worktreeKey: 'demand', path: '/workspace/worktrees/demand', status: 'in_progress', createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
+  id: 'demand-1', name: 'Demand', branchName: 'feat/demand', worktreeKey: 'demand', path: '/workspace/worktrees/demand', status: 'in_progress', fluxBinding: null, createdAt: '2026-09-04T00:00:00.000Z', updatedAt: '2026-09-04T00:00:00.000Z',
   repositories: repositoryIds.map(id => ({ id, name: `repo-${id}`, worktreePath: `/workspace/worktrees/demand/services/repo-${id}` })),
 })
 

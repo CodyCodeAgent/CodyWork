@@ -38,7 +38,10 @@ const fixtureSkills = [{
 }, {
   name: 'runtime-research', description: 'System fixture research skill', path: '/skills/runtime-research/SKILL.md',
   scope: 'system', enabled: true,
-}].filter(skill => process.env.CODY_FIXTURE_DISABLED_SKILL !== skill.name)
+}, ...(process.env.CODY_FIXTURE_ENABLE_FLUX_SKILL === '1' ? [{
+  name: 'flux-collab', description: 'Official Flux collaboration fixture skill', path: '/skills/flux-collab/SKILL.md',
+  scope: 'repo', enabled: true,
+}] : [])].filter(skill => process.env.CODY_FIXTURE_DISABLED_SKILL !== skill.name)
 
 function write(value) { process.stdout.write(`${JSON.stringify(value)}\n`) }
 function notify(method, params) { write({ method, params }) }
@@ -129,7 +132,8 @@ function emitTurn(threadId, prompt, turnCwd = '', selectedSkills = []) {
     })
     return
   }
-  const text = prompt.includes('CODYWORK_FOLLOWUP_CHECK') ? JSON.stringify({ status: prompt.includes('PENDING_FIXTURE') ? 'pending' : 'completed', summary: '合成任务检查结果', facts: { fixture: prompt.includes('PENDING_FIXTURE') ? 'waiting' : 'done' } })
+  const text = prompt.includes('<codywork_flux_context>') ? 'FLUX_SKILL_ATTACHED'
+    : prompt.includes('CODYWORK_FOLLOWUP_CHECK') ? JSON.stringify({ status: prompt.includes('PENDING_FIXTURE') ? 'pending' : 'completed', summary: '合成任务检查结果', facts: { fixture: prompt.includes('PENDING_FIXTURE') ? 'waiting' : 'done' } })
     : prompt.includes('SERVER_CWD') ? process.cwd()
     : prompt.includes('THREAD_CWD') ? lastThreadCwd
       : prompt.includes('TURN_CWD') ? turnCwd
@@ -244,6 +248,7 @@ rl.on('line', line => {
     turns: threadHistories.get(threadId) ?? [],
   } } })
   }
+  else if (message.method === 'thread/name/set') write({ id: message.id, result: {} })
   else if (message.method === 'model/list') write({ id: message.id, result: { data: [{
     id: 'gpt-5.6-sol',
     model: 'gpt-5.6-sol',
@@ -290,17 +295,27 @@ rl.on('line', line => {
         return
       }
     }
+    if (prompt.includes('<codywork_flux_context>')) {
+      const skillInputs = input.filter(item => item?.type === 'skill')
+      const selectedSkill = skillInputs[0]
+      if (skillInputs.length !== 1 || selectedSkill?.name !== 'flux-collab' || selectedSkill?.path !== '/skills/flux-collab/SKILL.md') {
+        write({ id: message.id, error: { code: -32602, message: 'Flux instruction must attach the official flux-collab Skill' } })
+        return
+      }
+    }
     const policy = message.params?.sandboxPolicy
     const expectedPolicy = prompt.includes('EXPECT_READ_ONLY') || prompt.includes('CODYWORK_FOLLOWUP_CHECK')
       ? 'readOnly'
       : prompt.includes('EXPECT_YOLO') || prompt.includes('SOURCE_SCOPED_DEFAULT_REMAINS_WRITE')
         ? 'dangerFullAccess'
         : 'workspaceWrite'
+    const invalidSkillInstallApproval = prompt.includes('Install or add this Agent Skill') && message.params?.approvalPolicy !== 'never'
     const invalidWritePolicy = expectedPolicy !== 'readOnly' && (
       policy?.type !== expectedPolicy
       || Object.hasOwn(message.params ?? {}, 'permissions')
       || !Array.isArray(message.params?.runtimeWorkspaceRoots)
       || message.params.runtimeWorkspaceRoots.length !== 1
+      || invalidSkillInstallApproval
     )
     const invalidReadPolicy = expectedPolicy === 'readOnly' && (policy?.type !== 'readOnly' || policy?.networkAccess !== true)
     const invalidCollaborationMode = prompt.includes('REAL') && message.params?.collaborationMode?.mode !== 'plan'
@@ -313,7 +328,10 @@ rl.on('line', line => {
     if (prompt.includes('PAUSE_E2E')) setTimeout(() => emitPendingTurn(threadId, prompt, turnCwd), 5)
     else if (prompt.includes('DISCONNECT')) setTimeout(() => { recordFailedTurn(threadId, prompt); process.exit(23) }, 5)
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd), 5)
-    else setTimeout(() => emitTurn(threadId, prompt, turnCwd, input.filter(item => item?.type === 'skill')), prompt.includes('SLOW_E2E') ? 1800 : 5)
+    else setTimeout(
+      () => emitTurn(threadId, prompt, turnCwd, input.filter(item => item?.type === 'skill')),
+      prompt.includes('LONG_INSTALL_E2E') ? 121_000 : prompt.includes('QUEUE_E2E') ? 10_000 : prompt.includes('SLOW_E2E') ? 4_000 : 5,
+    )
   } else if (message.method === 'turn/interrupt') write({ id: message.id, result: {} })
   else if (message.id === 700 + turnSequence) {
     const turnId = `turn-${turnSequence}`

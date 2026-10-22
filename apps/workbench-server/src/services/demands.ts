@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync,
 import { isAbsolute, relative, resolve } from 'node:path'
 import { DemandRow, RepositoryRow, WorkbenchDb, WorkspaceRow, makeId, nowIso } from '../db/index.js'
 import { listRepositories, prepareRepositoryBaselineForDemand, type PreparedRepositoryBaseline } from './repositories.js'
+import { getDemandFluxBinding, insertDemandFluxBinding, parseFluxCollaborationUrl } from './fluxBindings.js'
 
 function runGit(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
@@ -146,11 +147,12 @@ export function importExistingWorktrees(db: WorkbenchDb, workspace: WorkspaceRow
   return result
 }
 
-export interface CreateDemandInput { name: string; branchName?: string; repositoryIds: string[] }
+export interface CreateDemandInput { name: string; branchName?: string; repositoryIds: string[]; fluxUrl?: string }
 
 export function createDemand(db: WorkbenchDb, workspace: WorkspaceRow, input: CreateDemandInput) {
   const name = input.name.trim()
   if (!name) throw new Error('需求名不能为空')
+  const fluxBinding = parseFluxCollaborationUrl(input.fluxUrl)
   if (!Array.isArray(input.repositoryIds) || input.repositoryIds.length === 0) throw new Error('至少选择一个 Repo')
   const repositoryIds = [...new Set(input.repositoryIds)]
   const repositories = listRepositories(db, workspace).filter(row => repositoryIds.includes(row.id))
@@ -212,7 +214,9 @@ export function createDemand(db: WorkbenchDb, workspace: WorkspaceRow, input: Cr
     const updatedAt = nowIso()
     db.db.exec('BEGIN')
     try {
-      db.db.prepare('INSERT INTO demands (id, workspace_id, name, branch_name, worktree_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(demandId, workspace.id, name, branchName, worktreeKey, 'in_progress', createdAt, updatedAt)
+      db.db.prepare('INSERT INTO demands (id, workspace_id, name, branch_name, worktree_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(demandId, workspace.id, name, branchName, worktreeKey, 'in_progress', createdAt, updatedAt)
+      if (fluxBinding) insertDemandFluxBinding(db, demandId, fluxBinding, createdAt)
       for (const item of created) db.db.prepare('INSERT INTO demand_repositories (demand_id, repository_id, branch_name, worktree_path, base_ref, base_commit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(demandId, item.repository.id, branchName, item.path, item.baseRef, item.baseCommit, createdAt)
       db.db.prepare('UPDATE demand_operations SET status = ?, completed_at = ? WHERE id = ?').run('completed', updatedAt, operationId)
       db.db.exec('COMMIT')
@@ -221,7 +225,7 @@ export function createDemand(db: WorkbenchDb, workspace: WorkspaceRow, input: Cr
       throw error
     }
     const demand = db.db.prepare('SELECT * FROM demands WHERE id = ?').get(demandId) as unknown as DemandRow
-    return { demand: { id: demand.id, name: demand.name, branchName: demand.branch_name, worktreeKey: demand.worktree_key, status: demand.status }, repositories: created.map(item => ({ id: item.repository.id, name: item.repository.name, worktreePath: item.path })) }
+    return { demand: { id: demand.id, name: demand.name, branchName: demand.branch_name, worktreeKey: demand.worktree_key, status: demand.status, fluxBinding }, repositories: created.map(item => ({ id: item.repository.id, name: item.repository.name, worktreePath: item.path })) }
   } catch (error) {
     for (const item of created.reverse()) {
       try { runGit(item.repository.baseline_path, ['worktree', 'remove', '--force', item.path]) } catch { /* best-effort rollback */ }
@@ -242,6 +246,7 @@ export function listDemands(db: WorkbenchDb, workspace: WorkspaceRow) {
     worktreeKey: demand.worktree_key,
     path: resolve(workspace.path, 'worktrees', demand.worktree_key),
     status: demand.status,
+    fluxBinding: getDemandFluxBinding(db, demand.id),
     createdAt: demand.created_at,
     updatedAt: demand.updated_at,
     repositories: db.db.prepare('SELECT r.id, r.name, dr.worktree_path AS worktreePath FROM demand_repositories dr JOIN repositories r ON r.id = dr.repository_id WHERE dr.demand_id = ? ORDER BY r.name').all(demand.id) as { id: string; name: string; worktreePath: string }[],

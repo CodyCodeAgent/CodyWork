@@ -6,6 +6,7 @@ import { WorkbenchDb, WorkspaceRow, makeId, nowIso } from '../db/index.js'
 import type { ConversationRuntimeType } from '../db/index.js'
 import { ensureWorkspaceControlPlane, inspectWorkspace, prepareWorkspace, WorkspaceSource } from '../services/workspace.js'
 import { addRepositoryToDemand, createDemand, getDemand, importExistingWorktrees, listDemands } from '../services/demands.js'
+import { bindDemandToFlux, unbindDemandFromFlux } from '../services/fluxBindings.js'
 import { addRepository, clearRepositoryBaselineChanges, listCachedRepositories, syncRepositoryBaseline } from '../services/repositories.js'
 import { DEFAULT_WORKSPACE_SETUP_PROMPT } from '../runtime/bootstrap.js'
 import { CodyWorkCodexRuntime } from '../runtime/codex.js'
@@ -684,8 +685,9 @@ function buildRoutes(ctx: AppContext) {
     const body = c.body
     const name = typeof body.name === 'string' ? body.name : ''
     const branchName = typeof body.branchName === 'string' ? body.branchName : undefined
+    const fluxUrl = typeof body.fluxUrl === 'string' ? body.fluxUrl : undefined
     const repositoryIds = Array.isArray(body.repositoryIds) ? body.repositoryIds.filter((value): value is string => typeof value === 'string') : []
-    const result = createDemand(ctx.db, row, { name, ...(branchName === undefined ? {} : { branchName }), repositoryIds })
+    const result = createDemand(ctx.db, row, { name, ...(branchName === undefined ? {} : { branchName }), ...(fluxUrl === undefined ? {} : { fluxUrl }), repositoryIds })
     void dashboardCache(ctx).refresh(row)
     return result
   })
@@ -693,6 +695,17 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/demands/:demandId', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return getDemand(ctx.db, row, requiredParam(c, 'demandId'))
+  })
+
+  add('PUT', '/api/workspaces/:id/demands/:demandId/flux-binding', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const url = typeof c.body.url === 'string' ? c.body.url : ''
+    return { binding: bindDemandToFlux(ctx.db, workspace, requiredParam(c, 'demandId'), url) }
+  })
+
+  add('DELETE', '/api/workspaces/:id/demands/:demandId/flux-binding', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return unbindDemandFromFlux(ctx.db, workspace, requiredParam(c, 'demandId'))
   })
 
   add('GET', '/api/workspaces/:id/demands/:demandId/ai-report', (c) => {

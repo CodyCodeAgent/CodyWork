@@ -6,7 +6,7 @@ import AddDemandRepositoryDialog from './AddDemandRepositoryDialog.vue'
 
 const demand: Demand = {
   id: 'demand', name: 'Search repositories', branchName: 'feat/search', worktreeKey: 'search', path: '/workspace/worktrees/search',
-  status: 'in_progress', createdAt: '', updatedAt: '', repositories: [],
+  status: 'in_progress', fluxBinding: null, createdAt: '', updatedAt: '', repositories: [],
 }
 
 const repositories: Repository[] = [

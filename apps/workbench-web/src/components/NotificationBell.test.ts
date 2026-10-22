@@ -15,6 +15,19 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount() })
 async function open() { wrapper = mount(NotificationBell, { props: { workspaceId: 'w1' }, global: { stubs: { Teleport: true } }, attachTo: document.body }); await flushPromises(); await wrapper.get('.bell').trigger('click'); await flushPromises() }
 describe('NotificationBell', () => {
+  it('uses an accessible icon-only utility button with a capped unread badge', async () => {
+    vi.mocked(api.listNotifications).mockResolvedValue({ items: [note], unreadCount: 123, nextCursor: null })
+    await open()
+    expect(wrapper.get('.bell').attributes('title')).toBe('通知中心')
+    expect(wrapper.get('.bell').attributes('aria-label')).toBe('通知中心，123 条未读')
+    expect(wrapper.get('.bell').text()).toBe('99+')
+    expect(wrapper.get('.bell svg').attributes('aria-hidden')).toBe('true')
+    await wrapper.get('[role=dialog]').trigger('keydown', { key: 'Escape' })
+    expect(document.activeElement).toBe(wrapper.get('.bell').element)
+    vi.mocked(api.listNotifications).mockResolvedValue({ items: [], unreadCount: 0, nextCursor: null })
+    await wrapper.get('.bell').trigger('click'); await flushPromises()
+    expect(wrapper.find('.badge').exists()).toBe(false)
+  })
   it('shows persisted unread status, separates result from delivery and links original context', async () => {
     await open()
     expect(wrapper.get('.bell').attributes('aria-label')).toContain('1 条未读')

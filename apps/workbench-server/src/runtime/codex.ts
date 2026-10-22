@@ -335,7 +335,12 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   }
 
   async sendTurn(request: SendTurnRequest): Promise<SendTurnResult> {
-    return this.submitTurn(request).completed
+    const submission = this.submitTurn(request)
+    // A native start failure rejects both promises. Observe both so one-shot
+    // callers do not leave the discarded `started` branch as an unhandled
+    // rejection that can terminate the server process.
+    const [, completed] = await Promise.all([submission.started, submission.completed])
+    return completed
   }
 
   submitTurn(request: SendTurnRequest): import('./protocol.js').SubmitTurnResult {
@@ -348,7 +353,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
       runtimeWorkspaceRoots: [realpathSync.native(session.context.demandPath ?? session.context.workspacePath)],
-      approvalPolicy: approvalPolicy(turnMode), ...turnPermissions(turnMode),
+      approvalPolicy: request.executionProfile?.approvalPolicy ?? approvalPolicy(turnMode), ...turnPermissions(turnMode),
       ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
     if (request.clientCommandId) this.commandPermissionModes.set(request.clientCommandId, turnMode)
