@@ -1,0 +1,128 @@
+/* Product shell tokens. Vue/Core retain ownership of conversation behaviour. */
+:root {
+  --bg: #f4f5f7;
+  --text: #202735;
+  --muted: #6e7a8b;
+  --blue: #4c57cb;
+  --blue-soft: #eeeffc;
+  --line: #e3e6ed;
+  --sidebar: #171b27;
+}
+.app-shell { height: 100dvh; }
+.mobile-workbench-bar { display: none; }
+.sidebar { width: 264px; flex-basis: 264px; padding: 24px 16px 16px; background: linear-gradient(165deg, #202536, #141925); }
+.brand { padding-bottom: 28px; }
+.brand-mark, .workspace-large-mark { background: #6264dc; box-shadow: 0 5px 15px #383d9220; letter-spacing: -.08em; }
+.sidebar-item.active { background: #363c61; color: #eef0ff; box-shadow: inset 3px 0 #a8adff; }
+.sidebar-item.active span { color: #c2c7ff; }
+.sidebar-item:hover { background: #ffffff09; }
+.sidebar-item.active:hover { background: #363c61; }
+.sidebar-section-label { letter-spacing: .09em; font-size: 10px; }
+.switcher { background: #ffffff06; border-color: #ffffff14; }
+.topbar { min-height: 88px; padding: 18px 32px; background: #ffffffed; }
+.topbar h1 { font-size: 23px; letter-spacing: -.04em; }
+.eyebrow, .card-kicker { letter-spacing: .13em; }
+.workspace-body { max-width: 1400px; padding: 32px; margin: 0 auto; }
+.workspace-header-card { padding: 28px; border: 1px solid #dedff1; background: linear-gradient(115deg, #fff, #f0f1fc); box-shadow: none; }
+.workspace-header-copy h2 { font-size: 27px; }
+.metric-grid { gap: 14px; }
+.metric-card { border-radius: 16px; box-shadow: 0 3px 12px #1b254504; }
+.metric-card strong { font-variant-numeric: tabular-nums; }
+.info-card, .repository-overview-card, .settings-card, .knowledge-list-card, .knowledge-detail-card, .skills-list-card, .skill-detail-card { border-radius: 16px; }
+.btn { min-height: 38px; border-radius: 9px; font-weight: 600; }
+.btn.primary { background: var(--blue); border-color: var(--blue); box-shadow: 0 3px 8px #4c57cb20; }
+.btn.primary:hover:not(:disabled) { background: #3f49b6; }
+.conversation-sidebar { width: 250px; flex-basis: 250px; background: #fbfcfe; }
+.chat-main, .chat-scroll, .chat-layout { min-width: 0; }
+.chat-layout { height: auto; }
+.chat-scroll { background: #fff; }
+.chat-empty h2 { font-size: 25px; letter-spacing: -.04em; }
+.chat-empty p { max-width: 480px; line-height: 1.8; }
+.composer { background: #fff; padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+.create-page { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 100%; padding: clamp(28px, 7vw, 110px); background: radial-gradient(ellipse at 90% 0%, #e2e4fa, transparent 60%); }
+.create-hero { max-width: 660px; }
+.create-hero h1 { font-size: clamp(30px, 4vw, 52px); line-height: 1.25; letter-spacing: -.05em; }
+.create-hero p { max-width: 540px; font-size: 15px; line-height: 1.9; }
+.create-page > .btn { margin-top: 22px; padding: 12px 22px; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #878deb; outline-offset: 3px; }
+@media (min-width: 901px) and (max-width: 1200px) {
+  .sidebar { width: 226px; flex-basis: 226px; padding-inline: 10px; }
+  .conversation-sidebar { width: 218px; flex-basis: 218px; }
+  .workspace-body { padding: 24px; }
+}
+@media (max-width: 900px) {
+  .app-shell { flex-direction: column; overflow: hidden; }
+  .mobile-workbench-bar { display: flex; align-items: center; flex-shrink: 0; gap: 12px; height: calc(64px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 64px 0 12px; color: #f6f7ff; background: #1b2030; border-bottom: 1px solid #31374b; }
+  .mobile-workbench-bar > div { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+  .mobile-workbench-bar strong { font-size: 15px; letter-spacing: -.02em; }
+  .mobile-workbench-bar span { color: #aeb6cc; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mobile-nav-button, .mobile-session-button { min-height: 44px; padding: 8px 12px; color: #e4e7ff; background: #ffffff08; border: 1px solid #ffffff14; border-radius: 10px; }
+  .mobile-nav-button { font-size: 21px; }
+  .mobile-session-button { font-size: 12px; white-space: nowrap; }
+  .main { min-height: 0; overflow: auto; width: 100%; }
+  .topbar { position: relative; align-items: flex-start; flex-wrap: wrap; gap: 12px; min-height: 80px; padding: 18px; }
+  .topbar h1 { font-size: 21px; overflow-wrap: anywhere; }
+  .topbar-actions { flex-wrap: wrap; gap: 8px; }
+  .workspace-body, .dashboard-body, .demands-body, .shell-body, .knowledge-body, .skills-body { padding: 20px 18px 28px; }
+  .workspace-header-card { padding: 20px; flex-wrap: wrap; }
+  .workspace-header-copy { min-width: 160px; }
+  .workspace-header-copy h2 { font-size: 23px; }
+  .workspace-grid, .settings-grid, .shell-grid, .skills-layout, .knowledge-layout { grid-template-columns: minmax(0, 1fr); }
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .metric-card, .metric-card:nth-child(4), .metric-card:nth-child(5) { min-height: 116px; padding: 18px; }
+  .demand-grid { grid-template-columns: minmax(0, 1fr); }
+  .demand-card, .settings-card, .skill-install-card, .knowledge-detail-card { min-width: 0; }
+  .demand-card strong, .settings-card p, .skill-meta, .knowledge-detail-head p { overflow-wrap: anywhere; }
+  .chat-topbar { gap: 8px; padding-block: 10px; max-height: 30dvh; overflow: auto; }
+  .chat-topbar > :first-child { width: 100%; }
+  .chat-topbar .topbar-actions { max-width: 100%; justify-content: flex-start; }
+  .chat-topbar h1 { margin-top: 0; font-size: 18px; }
+  .chat-topbar .eyebrow { font-size: 9px; }
+  .workspace-readonly-note { flex-wrap: wrap; }
+  .chat-layout { height: auto; min-height: 0; }
+  .chat-scroll { padding: 18px 12px; overscroll-behavior-y: contain; }
+  .chat-empty { padding: 30px 12px; }
+  .chat-empty h2 { font-size: 22px; }
+  .composer { padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }
+  .composer input, .composer textarea, .input, input, select, textarea { font-size: 16px; }
+  .composer-model-detail { max-height: 36px; overflow: auto; }
+  .btn, .icon-button, .conversation-row, .conversation-action, summary { min-height: 44px; }
+  .modal-backdrop { padding: 12px; padding-top: max(12px, env(safe-area-inset-top)); padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .modal-card { max-width: 100%; max-height: calc(100dvh - 32px); overflow: auto; }
+  .modal-actions { flex-wrap: wrap; }
+  .directory-list button { grid-template-columns: 18px minmax(0, 1fr); }
+  .directory-list code { grid-column: 2; }
+  .create-page { padding: 30px 24px; }
+  .create-hero h1 { font-size: 36px; }
+}
+/* Drawers retain the complete navigation, rather than the old icon-only rail. */
+@media (max-width: 900px) {
+  .responsive-panel .sidebar { padding: 18px 16px 14px; }
+  .responsive-panel .brand { justify-content: flex-start; padding: 0 12px 20px; }
+  .responsive-panel .brand > span:last-child, .responsive-panel .switcher-copy,
+  .responsive-panel .sidebar-label, .responsive-panel .sidebar-section-label,
+  .responsive-panel .sidebar-note > span:last-child, .responsive-panel .sidebar-item em { display: block; }
+  .responsive-panel .sidebar-section-label { display: flex; }
+  .responsive-panel .sidebar-label small, .responsive-panel .sidebar-section-label small { display: block; }
+  .responsive-panel .switcher { justify-content: flex-start; min-height: 64px; padding: 10px; }
+  .responsive-panel .sidebar-item { justify-content: flex-start; padding: 10px 13px; }
+  .responsive-panel .sidebar-note { justify-content: flex-start; padding: 14px 13px 2px; }
+  .responsive-panel .sidebar-subnav { display: block !important; }
+  .responsive-panel .sidebar-accordion-chevron { display: block !important; }
+  .responsive-panel .sidebar-collapse-footer, .responsive-panel .conversation-panel-toggle { display: none; }
+  .responsive-panel .switcher-menu { position: absolute; inset: calc(100% + 7px) 0 auto; width: auto; }
+  .responsive-panel .conversation-sidebar { display: flex; padding: 18px 12px; }
+}
+.create-page { width: 100%; max-width: none; margin: 0; }
+.responsive-panel .conversation-sidebar { color: var(--text); }
+/* On phones, secondary session tools should not consume the transcript. */
+.chat-toolbar-menu { display: contents; }
+.chat-toolbar-menu > summary { display: none; }
+@media (max-width: 900px) {
+  .chat-topbar { overflow: visible; max-height: none; }
+  .chat-toolbar-menu { display: block; position: relative; width: 100%; }
+  .chat-toolbar-menu > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 9px 12px; color: #4b5570; background: #f5f6fa; border: 1px solid var(--line); border-radius: 9px; font-size: 12px; cursor: pointer; list-style: none; }
+  .chat-toolbar-menu > summary::-webkit-details-marker { display: none; }
+  .chat-toolbar-menu[open] > .topbar-actions { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; display: flex; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px #18233e24; max-height: 50dvh; overflow: auto; }
+}

@@ -107,6 +107,39 @@ describe('generic runtime protocol', () => {
     await runtime.close()
   })
 
+  it.each(['empty', 'generic', 'submitted', 'resumed'] as const)('keeps empty history fallback narrowly scoped: %s', async (scenario) => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-empty-history-'))
+    const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
+    const context = {
+      workspacePath: root,
+      instructionBundle: { systemInstructions: 'Synthetic history test', sources: [], skills: [], sha256: 'test' },
+      effectivePolicy: { readableRoots: [root], writableRoots: [root], deniedRoots: [], shell: 'allowlist' as const, approval: 'workbench' as const, hash: 'test' },
+    }
+    const message = scenario === 'generic' ? 'permission denied' : 'list_turns is not supported yet'
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd: root,
+      env: { ...process.env, [scenario === 'empty' ? 'CODY_FIXTURE_EMPTY_HISTORY_ERROR' : 'CODY_FIXTURE_HISTORY_ERROR']: message } })
+    try {
+      if (scenario === 'resumed') {
+        await expect(runtime.resumeConversation({ conversationId: 'resumed', nativeId: 'native-fixture-thread', context })).rejects.toThrow(message)
+        return
+      }
+      const conversation = await runtime.createConversation({ context })
+      const request = { conversationId: conversation.id, nativeId: conversation.nativeId, context }
+      if (scenario === 'generic') { await expect(runtime.readConversationSnapshot(request)).rejects.toThrow(message); return }
+      if (scenario === 'empty') {
+        await expect(runtime.readConversationSnapshot(request)).resolves.toEqual({ events: [], watermark: 0 })
+        await expect(runtime.readConversationSnapshot(request)).resolves.toEqual({ events: [], watermark: 0 })
+      }
+      await runtime.sendTurn({ conversation, prompt: 'hello' })
+      if (scenario === 'submitted') await expect(runtime.readConversationSnapshot(request)).rejects.toThrow(message)
+      else {
+        const snapshot = await runtime.readConversationSnapshot(request)
+        expect(snapshot.events.some(event => event.type === 'assistant.completed')).toBe(true)
+        expect(snapshot.events.some(event => event.data.text === 'CODEX_FIXTURE_OK')).toBe(true)
+      }
+    } finally { await runtime.close(); rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('drives a Codex App Server session, turn-scoped collaboration and runtime approvals', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-codex-adapter-'))
     const appServerCwd = mkdtempSync(join(tmpdir(), 'cody-app-server-owner-'))

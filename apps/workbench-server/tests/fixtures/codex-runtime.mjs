@@ -239,6 +239,12 @@ rl.on('line', line => {
   })), nextCursor: null } })
   else if (message.method === 'thread/read') {
     const threadId = message.params?.threadId ?? 'native-fixture-thread'
+    const historyError = process.env.CODY_FIXTURE_HISTORY_ERROR
+      || (!(threadHistories.get(threadId)?.length) ? process.env.CODY_FIXTURE_EMPTY_HISTORY_ERROR : '')
+    if (message.params?.includeTurns && historyError) {
+      write({ id: message.id, error: { code: -32600, message: historyError } })
+      return
+    }
     write({ id: message.id, result: { thread: {
     id: threadId, extra: null, sessionId: 'fixture-session', forkedFromId: null, parentThreadId: null,
     preview: 'Fixture history', ephemeral: false, section: null, sectionEnteredAt: null, historyMode: 'paginated',
