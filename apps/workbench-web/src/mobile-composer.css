@@ -1,0 +1,31 @@
+/* Product-only mobile presentation; Core still owns input, uploads and submission.
+   App supplies a disclosure button through CodyComposer's public controls slot. */
+.mobile-composer-settings-toggle, .mobile-composer-collapse { display: none; }
+
+@media (max-width: 900px) {
+  .composer { flex-shrink: 0; padding: 8px 12px max(10px, env(safe-area-inset-bottom)); }
+  .composer .composer-head { display: none; }
+  .composer .composer-head .composer-hint { display: none; }
+  .composer .chat-panel-collapse { width: 44px; height: 44px; min-height: 44px; margin: -4px 0 0; }
+  .composer .cody-composer[data-variant="embedded"] .cody-composer-shell { padding: 8px 10px; border-radius: 16px; box-shadow: 0 2px 12px #17214008; }
+  .composer .cody-composer[data-variant="embedded"] textarea { min-height: 48px; max-height: 24dvh; padding: 5px 2px 8px; font-size: 16px; line-height: 1.45; resize: vertical; }
+  .composer .cody-composer[data-variant="embedded"] .cody-composer-controls { min-height: 44px; padding-top: 4px; gap: 8px; border-top: 0; }
+  .composer .cody-composer-settings { gap: 6px; }
+  .composer .cody-composer-image-picker,
+  .composer .cody-composer-send,
+  .composer .cody-composer-stop { min-width: 44px; min-height: 44px; }
+  .composer .mobile-composer-settings-toggle { display: inline-flex; order: -1; align-items: center; gap: 6px; min-height: 44px; max-width: 100%; padding: 8px 11px; color: #46516d; background: #f5f6fa; border: 1px solid #e1e6ef; border-radius: 10px; font-size: 12px; cursor: pointer; }
+  .composer .mobile-composer-settings-toggle[aria-expanded="true"] { color: #404cbd; background: #eeeffc; border-color: #c4c9ee; }
+  /* Only hide optional selectors when a working disclosure control is present.
+     This prevents inaccessible settings if the Core controls slot ever changes. */
+  .composer:has(.mobile-composer-settings-toggle):not(.composer--settings-open) .cody-composer-compact-control { display: none; }
+  .composer:has(.mobile-composer-settings-toggle):not(.composer--settings-open) .cody-composer-policy,
+  .composer:has(.mobile-composer-settings-toggle):not(.composer--settings-open) .composer-model-detail { display: none; }
+  .composer.composer--settings-open .cody-composer-settings { align-items: stretch; }
+  .composer.composer--settings-open .cody-composer-compact-control { min-height: 44px; }
+  .composer.composer--settings-open .cody-composer-compact-control select { min-height: 44px; max-width: 100%; font-size: 16px; }
+  .composer.composer--settings-open .cody-composer-policy { margin-top: 8px; line-height: 1.5; }
+  .composer.composer--settings-open .composer-model-detail { white-space: normal; max-height: 48px; overflow: auto; }
+}
+
+@media (max-width: 900px) { .mobile-composer-collapse { display: grid; place-items: center; min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #65738a; font-size: 18px; } }

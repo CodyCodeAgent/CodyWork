@@ -126,3 +126,33 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .chat-toolbar-menu > summary::-webkit-details-marker { display: none; }
   .chat-toolbar-menu[open] > .topbar-actions { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; display: flex; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px #18233e24; max-height: 50dvh; overflow: auto; }
 }
+/* Conversation-first mobile shell: one compact context strip, not stacked headers. */
+.mobile-context-button { display: none; }
+@media (max-width: 900px) {
+  .mobile-workbench-bar { height: calc(58px + env(safe-area-inset-top)); gap: 8px; padding-right: 56px; background: #192333; }
+  .mobile-nav-button { display: flex; gap: 6px; align-items: center; padding: 8px; font-size: 12px; border: 0; background: transparent; }
+  .mobile-nav-button > span:first-child { font-size: 18px; }
+  .mobile-context-button { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 44px; padding: 4px 6px; color: #f2f5fa; border: 0; background: transparent; text-align: left; }
+  .mobile-context-button strong { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .mobile-context-button > span { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #b1bfd2; }
+  .mobile-connection-dot { width: 5px; height: 5px; border-radius: 50%; background: #e5ad55; }
+  .mobile-connection-dot.open { background: #72c8ad; }
+  .mobile-session-button { border: 0; background: transparent; padding: 8px; }
+  .responsive-panel-content:has(> .chat-topbar) { display: block; overflow: auto; background: #f8fafc; color: var(--text); }
+  .responsive-panel .chat-topbar { display: flex; flex-direction: column; padding: 20px; gap: 20px; background: transparent; }
+  .responsive-panel .chat-toolbar-menu { display: contents; }
+  .responsive-panel .chat-toolbar-menu > summary { display: none; }
+  .responsive-panel .chat-toolbar-menu[open] > .topbar-actions { position: static; display: flex; flex-direction: column; align-items: stretch; max-height: none; width: 100%; padding: 0; background: transparent; box-shadow: none; border: 0; overflow: visible; }
+  .responsive-panel .chat-toolbar-menu .topbar-actions > .btn { width: 100%; text-align: left; }
+  .responsive-panel .chat-topbar .demand-link-actions { flex-direction: column; align-items: stretch; }
+  .chat-scroll { padding: 20px 14px; }
+}
+@media (min-width: 901px) {
+  .chat-topbar { min-height: 76px; padding-block: 12px; gap: 18px; }
+  .chat-topbar h1 { font-size: 20px; }
+  .chat-topbar .eyebrow { font-size: 9px; }
+  .chat-topbar .topbar-actions { gap: 6px; }
+  .chat-topbar .btn { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+  .chat-scroll > * { max-width: 1040px; margin-inline: auto; }
+  .composer > * { max-width: 1040px; margin-inline: auto; }
+}
