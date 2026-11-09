@@ -1,7 +1,7 @@
 import { WorkbenchDb, nowIso } from '../db/index.js'
 
 export interface ParallelView {
-  layout: 'columns' | 'grid'
+  layout: 'columns' | 'three-columns' | 'grid'
   panels: Array<{ demandId: string; conversationId: string | null }>
   revision: number
 }
@@ -22,7 +22,7 @@ export function getParallelView(db: WorkbenchDb, workspaceId: string): ParallelV
 }
 
 export function saveParallelView(db: WorkbenchDb, workspaceId: string, input: Record<string, unknown>): ParallelView {
-  if (input.layout !== 'columns' && input.layout !== 'grid') throw new Error('请选择双列或四宫格布局')
+  if (input.layout !== 'columns' && input.layout !== 'three-columns' && input.layout !== 'grid') throw new Error('请选择两列、三列或四宫格布局')
   if (!Array.isArray(input.panels) || input.panels.length > MAX_PARALLEL_DEMANDS) throw new Error(`并行视图最多添加 ${MAX_PARALLEL_DEMANDS} 个需求`)
   if (!Number.isSafeInteger(input.revision) || Number(input.revision) < 0) throw new Error('视图版本无效，请重新加载')
   const seen = new Set<string>()

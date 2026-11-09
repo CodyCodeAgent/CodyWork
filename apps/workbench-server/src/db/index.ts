@@ -151,7 +151,7 @@ export class WorkbenchDb {
       );
       CREATE TABLE IF NOT EXISTS workspace_parallel_views (
         workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
-        layout TEXT NOT NULL CHECK(layout IN ('columns', 'grid')),
+        layout TEXT NOT NULL CHECK(layout IN ('columns', 'three-columns', 'grid')),
         panels_json TEXT NOT NULL,
         revision INTEGER NOT NULL,
         updated_at TEXT NOT NULL
@@ -550,6 +550,30 @@ export class WorkbenchDb {
       );
       CREATE INDEX IF NOT EXISTS channel_audit_recent ON channel_audit_events(account_id, created_at DESC);
     `)
+    const parallelSchema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_parallel_views'").get() as { sql: string }
+    if (!parallelSchema.sql.includes("'three-columns'")) {
+      // SQLite cannot alter a CHECK constraint. Preserve layout, selections and
+      // revisions together so existing tabs retain their conflict protection.
+      try {
+        this.db.exec(`
+          BEGIN IMMEDIATE;
+          CREATE TABLE workspace_parallel_views_next (
+            workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+            layout TEXT NOT NULL CHECK(layout IN ('columns', 'three-columns', 'grid')),
+            panels_json TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+          INSERT INTO workspace_parallel_views_next SELECT * FROM workspace_parallel_views;
+          DROP TABLE workspace_parallel_views;
+          ALTER TABLE workspace_parallel_views_next RENAME TO workspace_parallel_views;
+          COMMIT;
+        `)
+      } catch (error) {
+        if (this.db.isTransaction) this.db.exec('ROLLBACK;')
+        throw error
+      }
+    }
     const notificationColumns = new Set((this.db.prepare('PRAGMA table_info(smart_notification_settings)').all() as { name?: string }[]).map(column => column.name))
     if (!notificationColumns.has('recipient_email')) this.db.exec("ALTER TABLE smart_notification_settings ADD COLUMN recipient_email TEXT NOT NULL DEFAULT ''")
     if (!notificationColumns.has('feishu_enabled')) {
