@@ -16,6 +16,7 @@ const paths: Record<string, string> = {
   branch: 'M6 7v10M6 13c8 0 12-2 12-6M4 3h4v4H4zM4 17h4v4H4zM16 3h4v4h-4z',
   expand: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M3 3l5 5m13-5-5 5M3 21l5-5m13 5-5-5',
   more: 'M4 11h2v2H4zM11 11h2v2h-2zM18 11h2v2h-2z',
+  grip: 'M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01',
 }
 </script>
 <style scoped>.workbench-icon{width:18px;height:18px;flex:none;vertical-align:middle}</style>

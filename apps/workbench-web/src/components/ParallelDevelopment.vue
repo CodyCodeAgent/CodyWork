@@ -7,23 +7,26 @@
     <div v-else-if="!view.panels.length" class="parallel-page-empty"><WorkbenchIcon name="columns" /><h2>把正在推进的需求放在一起</h2><p>添加最多 4 个需求，在各自的面板内选择真实会话。原有历史和执行状态保持同步。</p><button class="btn primary" @click="openAdd">添加第一个需求</button></div>
     <template v-else>
       <nav class="parallel-mobile-tabs" aria-label="选择需求面板"><button v-for="panel in view.panels" :key="panel.demandId" type="button" :class="{ active: mobileActive === panel.demandId }" @click="mobileActive = panel.demandId; expanded = ''">{{ demandFor(panel.demandId)?.name ?? '需求已移除' }}<span v-if="summaries[panel.demandId]?.waiting" class="parallel-attention-dot" aria-label="有待确认会话" /></button></nav>
-      <div :class="['parallel-board', view.layout, { 'has-expanded': expanded }]">
-        <template v-for="panel in view.panels" :key="panel.demandId">
-          <ParallelDemandPanel v-if="demandFor(panel.demandId)" v-show="!expanded || expanded === panel.demandId" :class="{ 'mobile-active': mobileActive === panel.demandId, expanded: expanded === panel.demandId }" :workspace-id="workspace.id" :demand="demandFor(panel.demandId)!" :conversation-id="panel.conversationId" :active="(!expanded || expanded === panel.demandId) && (!compact || mobileActive === panel.demandId)" :expanded="expanded === panel.demandId" :runtimes="runtimes" @select="selectConversation(panel.demandId, $event)" @expand="expanded = expanded === panel.demandId ? '' : panel.demandId; mobileActive = panel.demandId" @remove="remove(panel.demandId)" @open="emit('open', panel.demandId, $event)" @open-file="(id, file) => emit('open-file', panel.demandId, id, file)" @summary="summaries[panel.demandId] = $event" />
+      <div ref="board" :class="['parallel-board', view.layout, { 'has-expanded': expanded, 'is-reordering': dragging }]">
+        <template v-for="(panel, index) in view.panels" :key="panel.demandId">
+          <ParallelDemandPanel v-if="demandFor(panel.demandId)" v-show="!expanded || expanded === panel.demandId" :class="{ 'mobile-active': mobileActive === panel.demandId, expanded: expanded === panel.demandId, 'is-dragging': dragging === panel.demandId, 'reorder-target': dragging && over === panel.demandId && over !== dragging }" :workspace-id="workspace.id" :demand="demandFor(panel.demandId)!" :conversation-id="panel.conversationId" :active="(!expanded || expanded === panel.demandId) && (!compact || mobileActive === panel.demandId)" :expanded="expanded === panel.demandId" :runtimes="runtimes" :can-move-earlier="!expanded && index > 0" :can-move-later="!expanded && index < view.panels.length - 1" @reorder-start="beginReorder(panel.demandId, $event)" @move="moveBy(panel.demandId, $event)" @select="selectConversation(panel.demandId, $event)" @expand="expanded = expanded === panel.demandId ? '' : panel.demandId; mobileActive = panel.demandId" @remove="remove(panel.demandId)" @open="emit('open', panel.demandId, $event)" @open-file="(id, file) => emit('open-file', panel.demandId, id, file)" @summary="summaries[panel.demandId] = $event" />
           <div v-else class="parallel-missing-demand"><p>这个需求已被移除或暂不可用。</p><button class="btn" @click="remove(panel.demandId)">移除面板</button></div>
         </template>
         <button v-if="view.layout === 'grid' && view.panels.length < 4 && !expanded" class="parallel-add-panel" @click="openAdd"><WorkbenchIcon name="plus" />添加另一个需求</button>
       </div>
     </template>
+    <div v-if="dragging" class="parallel-drag-preview" aria-hidden="true" :style="{ transform: `translate3d(${pointer.x + 16}px, ${pointer.y + 16}px, 0)` }"><WorkbenchIcon name="grip" />{{ demandFor(dragging)?.name }}</div>
+    <p class="sr-only" role="status" aria-live="polite">{{ reorderNotice }}</p>
     <footer class="parallel-footer">每个面板独立操作 · 切换会话不停止后台任务 · 最多添加 4 个需求</footer>
     <dialog ref="addDialog" class="parallel-dialog" aria-labelledby="parallel-add-title"><div class="parallel-dialog-head"><h2 id="parallel-add-title">添加需求到当前视图</h2><button class="icon-button" aria-label="关闭添加需求" @click="addDialog?.close()">×</button></div><p>选择需求后，在面板顶部切换该需求下的会话。</p><p v-if="catalogError" role="alert" class="form-error">{{ catalogError }}<button class="btn" @click="refreshCatalog">重试读取需求</button></p><p v-if="catalogLoading" role="status">正在刷新需求…</p><input v-model="query" class="input" aria-label="搜索可添加需求" placeholder="搜索需求名称或分支…" /><div class="parallel-demand-choices"><button v-for="demand in matchingDemands" :key="demand.id" :disabled="view.panels.some(panel => panel.demandId === demand.id)" @click="add(demand)"><WorkbenchIcon name="branch" /><span><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small></span><em>{{ view.panels.some(panel => panel.demandId === demand.id) ? '已添加' : '＋ 添加' }}</em></button><p v-if="!matchingDemands.length">没有匹配的需求。</p></div></dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type Demand, type ParallelView, type RuntimeDescriptor, type Workspace } from '../api'
 import { useParallelLayout } from '../useParallelLayout'
+import { usePanelReorder } from '../usePanelReorder'
 import ParallelDemandPanel from './ParallelDemandPanel.vue'
 import WorkbenchIcon from './WorkbenchIcon.vue'
 
@@ -35,6 +38,9 @@ watch(() => props.demands, value => { catalog.value = [...value] })
 const expanded = ref(''), mobileActive = ref(''), query = ref(''), addDialog = ref<HTMLDialogElement | null>(null)
 const summaries = ref<Record<string, { running: number; waiting: number }>>({}), runtimes = ref<RuntimeDescriptor[]>([])
 const media = window.matchMedia('(max-width: 900px)'), compact = ref(media.matches)
+const board = ref<HTMLElement | null>(null), reorderNotice = ref('')
+const { dragging, over, pointer, begin, cancel } = usePanelReorder(board, () => view.value.panels.map(panel => panel.demandId), movePanel)
+watch([() => view.value.layout, expanded, compact, loading], cancel)
 let alive = true
 const totals = computed(() => view.value.panels.reduce((result, panel) => { const summary = summaries.value[panel.demandId]; result.running += summary?.running ?? 0; result.waiting += summary?.waiting ?? 0; return result }, { running: 0, waiting: 0 }))
 const matchingDemands = computed(() => { const needle = query.value.trim().toLowerCase(); return catalog.value.filter(item => `${item.name} ${item.branchName}`.toLowerCase().includes(needle)) })
@@ -43,6 +49,26 @@ function onMedia(event: MediaQueryListEvent) { compact.value = event.matches }
 onMounted(() => { void load(); media.addEventListener('change', onMedia); void api.runtimeSettings().then(value => { if (alive) runtimes.value = value.runtimes }).catch(() => {}) })
 onBeforeUnmount(() => { alive = false; media.removeEventListener('change', onMedia) })
 watch(() => view.value.panels.map(panel => panel.demandId), ids => { if (!ids.includes(mobileActive.value)) mobileActive.value = ids[0] ?? ''; if (!ids.includes(expanded.value)) expanded.value = '' }, { immediate: true })
+function beginReorder(id: string, event: PointerEvent) { if (!loading.value && !expanded.value) begin(id, event) }
+function moveBy(id: string, direction: -1 | 1) {
+  const index = view.value.panels.findIndex(panel => panel.demandId === id)
+  const target = view.value.panels[index + direction]
+  if (index >= 0 && target) movePanel(id, target.demandId)
+}
+function movePanel(source: string, target: string) {
+  if (loading.value || expanded.value) return
+  const panels = [...view.value.panels], from = panels.findIndex(panel => panel.demandId === source), to = panels.findIndex(panel => panel.demandId === target)
+  if (from < 0 || to < 0 || from === to) return
+  const [panel] = panels.splice(from, 1)
+  panels.splice(to, 0, panel!)
+  update({ ...view.value, panels })
+  reorderNotice.value = `${demandFor(source)?.name ?? '需求'}已移到第 ${to + 1} 个位置`
+  void nextTick(() => {
+    if (!alive) return
+    const element = Array.from(board.value?.querySelectorAll<HTMLElement>('[data-demand-id]') ?? []).find(item => item.dataset.demandId === source)
+    element?.querySelector<HTMLButtonElement>('.parallel-drag-handle')?.focus({ preventScroll: true })
+  })
+}
 function openAdd() { query.value = ''; addDialog.value?.showModal(); void refreshCatalog() }
 async function refreshCatalog() {
   if (catalogLoading.value) return
