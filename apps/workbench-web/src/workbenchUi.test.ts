@@ -37,6 +37,11 @@ const demand = (id: string, branchName = id): Demand => ({
 const thread = (nativeId: string, cwd: string, preview = nativeId): AvailableNativeThread => ({ nativeId, cwd, preview, bound: false })
 
 describe('workbench UI rules', () => {
+  it('deep-links the workspace parallel view without a demand or global conversation selection', () => {
+    const url = workbenchUrl('http://localhost/?workspace=old&demand=d1&conversation=c1', 'w1', null, { page: 'parallel' })
+    expect(url.search).toBe('?workspace=w1&view=parallel')
+    expect(parseWorkbenchRoute(url.search)).toMatchObject({ workspaceId: 'w1', page: 'parallel', demandId: null, conversationId: null })
+  })
   it('offers every registered Runtime except the source as a migration target', () => {
     const runtimes = [{ value: 'codex', label: 'Codex' }, { value: 'trae', label: 'Trae' }, { value: 'future', label: 'Future Runtime' }]
     expect(migrationRuntimeOptions(runtimes, 'codex')).toEqual([runtimes[1], runtimes[2]])

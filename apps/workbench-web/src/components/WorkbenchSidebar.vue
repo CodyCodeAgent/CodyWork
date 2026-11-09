@@ -28,7 +28,7 @@
     </div>
     <div class="sidebar-spacer" />
     <button class="sidebar-item" :class="{ active: activePage === 'settings' }" :aria-label="collapsed ? '设置' : undefined" :title="collapsed ? '设置' : undefined" @click="emit('navigate', 'settings')"><WorkbenchIcon name="settings" /><span class="sidebar-label"><strong>设置</strong><small>运行环境与快捷指令</small></span></button>
-    <div class="sidebar-note"><span class="status-dot" :class="socketState" /><span><strong>{{ realtimeLabel }}</strong><small>{{ realtimeDetail }}</small></span></div>
+    <div class="sidebar-note"><span class="status-dot" :class="activePage === 'parallel' ? '' : socketState" /><span><strong>{{ realtimeLabel }}</strong><small>{{ realtimeDetail }}</small></span></div>
     <div class="sidebar-collapse-footer">
       <button class="sidebar-panel-toggle" type="button" :aria-label="collapsed ? '展开工作台导航' : '收起工作台导航'" :aria-expanded="!collapsed" :title="collapsed ? '展开工作台导航' : '收起工作台导航'" @click="emit('update:collapsed', !collapsed)">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="collapsed ? 'm10 6 6 6-6 6' : 'm14 6-6 6 6 6'" /></svg>
@@ -44,7 +44,7 @@ import WorkbenchIcon from './WorkbenchIcon.vue'
 import type { Demand, Workspace } from '../api'
 import { demandStatusLabel } from '../workbenchUi'
 
-type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
+type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat' | 'parallel'
 
 const props = defineProps<{
   workspace: Workspace | null
@@ -62,6 +62,7 @@ const props = defineProps<{
 }>()
 
 const realtimeLabel = computed(() => {
+  if (props.activePage === 'parallel') return '并行开发'
   if (!props.realtimeActive) return '等待连接'
   if (props.socketState === 'connected') return '已连接'
   if (props.socketState === 'connecting' || props.socketState === 'reconnecting') return '正在连接…'
@@ -69,6 +70,7 @@ const realtimeLabel = computed(() => {
 })
 
 const realtimeDetail = computed(() => {
+  if (props.activePage === 'parallel') return '连接状态见各需求面板'
   if (!props.workspace) return '选择一个 Workspace 开始'
   if (!props.realtimeActive) return '打开会话后建立 Browser WebSocket'
   if (props.socketState === 'connected') return 'Browser WebSocket connected'
@@ -93,5 +95,6 @@ const workspacePages = [
   { page: 'dashboard' as const, icon: 'grid', label: '概览', description: '健康度与进展' },
   { page: 'knowledge' as const, icon: 'book', label: '知识库', description: '规范与文档' },
   { page: 'skills' as const, icon: 'spark', label: 'Skills', description: 'Agent 可用能力' },
+  { page: 'parallel' as const, icon: 'columns', label: '并行开发', description: '多需求 · 独立会话' },
 ]
 </script>

@@ -6,3 +6,4 @@ import './responsive.css'
 createApp(App).mount('#root')
 
 import './mobile-composer.css'
+import './parallel.css'

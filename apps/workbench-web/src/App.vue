@@ -62,6 +62,7 @@
           </div>
         </div>
       </section>
+      <ParallelDevelopment v-else-if="activePage === 'parallel'" :key="workspace.id" :workspace="workspace" :demands="demands" @open="openParallelConversation" @open-file="openParallelFile" />
       <section v-else-if="activePage === 'demands' && !selectedDemand" class="demands-body">
         <header class="topbar"><div><div class="eyebrow">{{ workspace.name.toUpperCase() }} / WORK MODE</div><h1>需求工作台</h1></div><div class="topbar-actions"><button class="btn" :disabled="importingWorktrees" @click="importExistingWorktrees">{{ importingWorktrees ? '扫描中…' : '扫描已有 Worktree' }}</button><button class="btn primary" @click="showCreateDemand = true">＋ 新建需求</button></div></header>
         <div class="dashboard-note"><div><strong>执行权限直接交给 Codex</strong><p>需求用于组织 Worktree、文档和上下文，不再叠加 CodyWork 目录白名单；只读、Normal 与 YOLO 分别使用 Codex 原生权限。</p></div><code>{{ workspace.path }}</code></div>
@@ -72,7 +73,32 @@
         <header class="topbar chat-topbar">
           <div v-if="selectedDemand"><button class="back-link" @click="mobileContextOpen = false; returnToDemandList()">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="mobileContextOpen = false; copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="mobileContextOpen = false; copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
           <div v-else><button class="back-link" @click="mobileContextOpen = false; returnToWorkspace()">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 {{ activeRuntimeLabel }}</strong><span>默认 YOLO，可切换只读或 Normal；可用能力以当前 Runtime 声明为准</span></div></div>
-          <details class="chat-toolbar-menu" :open="isCompactViewport"><summary>会话操作 <span aria-hidden="true">⌄</span></summary><div class="topbar-actions"><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><button v-if="selectedConversation && traeCache" :class="['runtime-base-badge', activeRuntimeType, 'runtime-cache-trigger']" type="button" :title="traeCacheBadgeTitle" @click="mobileContextOpen = false; openTraeCacheDialog()"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><small>SESSION · 缓存</small></button><span v-else-if="selectedConversation" :class="['runtime-base-badge', activeRuntimeType]"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><small>NATIVE SESSION</small></span><button v-if="selectedConversation && runtimeOptions.length > 1" class="btn runtime-migrate-trigger" type="button" :disabled="!canMigrateConversation(selectedConversation)" @click="mobileContextOpen = false; openRuntimeMigration()">切换 Runtime</button><button v-if="selectedDemand && runtimeCapabilities.aiCodeReports" :class="['btn', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" @click="mobileContextOpen = false; openAiCodeReport()"><span class="ai-report-trigger-dot" />代码上报</button><button v-if="selectedConversation" class="btn" type="button" @click="mobileContextOpen = false; openConversationFollowup()">定时跟进</button><button class="btn conversation-share-trigger" type="button" :disabled="!selectedConversation" @click="mobileContextOpen = false; openConversationShare()">↗ 分享</button><DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :flux-integration="fluxIntegration" :flux-skill-installing="installingSkill" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="mobileContextOpen = false; settleConversation()" @compact="mobileContextOpen = false; compactConversation()" @add-repository="openAddDemandRepository" @sync="mobileContextOpen = false; syncRepositoryBaseline($event)" @cleanup="mobileContextOpen = false; requestBaselineCleanup($event)" @execute-quick-action="mobileContextOpen = false; executeQuickAction($event)" @execute-flux-instruction="mobileContextOpen = false; executeFluxInstruction($event)" @install-flux-skill="mobileContextOpen = false; installFluxSkill()" @manage-flux-binding="openFluxBindingDialog" /><button v-if="selectedDemand && runtimeCapabilities.nativeSessionList" class="btn" @click="mobileContextOpen = false; openBindConversation()">绑定会话</button><span v-else-if="selectedDemand" class="runtime-unavailable-note">不支持绑定历史会话</span></div></details><button class="btn primary new-conversation-button" :disabled="creatingConversation" @click="mobileContextOpen = false; openCreateConversation()">＋ 新会话</button>
+          <div class="chat-toolbar-menu"><div class="topbar-actions">
+            <ChatToolbarPopover :key="`runtime-${selectedConversation?.id}`" class="chat-runtime-menu" label="连接状态与 Runtime" :inline="isCompactViewport">
+              <template #trigger><span :class="['chat-connection-dot', socketState]" aria-hidden="true" /><span class="chat-connection-label">{{ socketLabel }}</span><span class="chat-runtime-name">{{ runtimeBaseLabel(activeRuntimeType) }}</span><svg class="toolbar-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></template>
+              <template #default="{ close }">
+                <div class="toolbar-popover-heading">当前会话</div>
+                <div class="toolbar-runtime-detail"><strong>{{ runtimeBaseLabel(activeRuntimeType) }}</strong><span :class="['socket-pill', socketState]" :title="socketDetail">{{ socketLabel }}</span><small>{{ traeCache ? 'Native Session · 缓存已启用' : 'Native Session' }}</small></div>
+                <p class="toolbar-connection-detail">{{ socketDetail }}</p>
+                <button v-if="selectedConversation && runtimeOptions.length > 1" class="toolbar-menu-action runtime-migrate-trigger" type="button" :disabled="!canMigrateConversation(selectedConversation)" @click="close(); mobileContextOpen = false; openRuntimeMigration()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4" /></svg>切换 Runtime</button>
+                <button v-if="selectedConversation && traeCache" class="toolbar-menu-action runtime-cache-trigger" type="button" :title="traeCacheBadgeTitle" @click="close(); mobileContextOpen = false; openTraeCacheDialog()">查看会话缓存</button>
+              </template>
+            </ChatToolbarPopover>
+            <span class="chat-toolbar-divider" aria-hidden="true" />
+            <button v-if="selectedConversation" class="btn toolbar-quiet-action" type="button" @click="mobileContextOpen = false; openConversationFollowup()"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>定时跟进</button>
+            <DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :flux-integration="fluxIntegration" :flux-skill-installing="installingSkill" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="mobileContextOpen = false; settleConversation()" @compact="mobileContextOpen = false; compactConversation()" @add-repository="openAddDemandRepository" @sync="mobileContextOpen = false; syncRepositoryBaseline($event)" @cleanup="mobileContextOpen = false; requestBaselineCleanup($event)" @execute-quick-action="mobileContextOpen = false; executeQuickAction($event)" @execute-flux-instruction="mobileContextOpen = false; executeFluxInstruction($event)" @install-flux-skill="mobileContextOpen = false; installFluxSkill()" @manage-flux-binding="openFluxBindingDialog" />
+            <ChatToolbarPopover :key="`more-${selectedConversation?.id}`" :label="aiReportSummary?.state === 'degraded' ? '更多会话操作，代码上报需关注' : '更多会话操作'" :attention="Boolean(selectedDemand && runtimeCapabilities.aiCodeReports && aiReportSummary?.state === 'degraded')" :inline="isCompactViewport">
+              <template #trigger><svg class="toolbar-more-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg></template>
+              <template #default="{ close }">
+                <div class="toolbar-popover-heading">更多操作</div>
+                <button v-if="selectedDemand && runtimeCapabilities.aiCodeReports" :class="['toolbar-menu-action', 'ai-report-trigger', aiReportSummary?.state ?? 'unknown']" type="button" @click="close(); mobileContextOpen = false; openAiCodeReport()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3M12 3h9v9M21 3l-9 9" /></svg>代码上报<span v-if="aiReportSummary?.state === 'degraded'" class="toolbar-warning-label">需关注</span></button>
+                <button class="toolbar-menu-action conversation-share-trigger" type="button" :disabled="!selectedConversation" @click="close(); mobileContextOpen = false; openConversationShare()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V3m-4 4 4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" /></svg>分享会话</button>
+                <button v-if="selectedDemand && runtimeCapabilities.nativeSessionList" class="toolbar-menu-action" type="button" @click="close(); mobileContextOpen = false; openBindConversation()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 13 4-4m-6 7-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m4 0 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0" /></svg>绑定会话</button>
+                <span v-else-if="selectedDemand" class="runtime-unavailable-note">当前 Runtime 不支持绑定历史会话</span>
+              </template>
+            </ChatToolbarPopover>
+            <button class="btn primary new-conversation-button" :disabled="creatingConversation" @click="mobileContextOpen = false; openCreateConversation()">＋ 新会话</button>
+          </div></div>
         </header>
         </ResponsivePanel>
         <div class="chat-layout">
@@ -227,6 +253,8 @@ import WorkbenchIcon from './components/WorkbenchIcon.vue'
 import AddDemandRepositoryDialog from './components/AddDemandRepositoryDialog.vue'
 import BindThreadDialog from './components/BindThreadDialog.vue'
 import DemandToolbox from './components/DemandToolbox.vue'
+import ChatToolbarPopover from './components/ChatToolbarPopover.vue'
+import ParallelDevelopment from './components/ParallelDevelopment.vue'
 import RepositoryOverviewCard from './components/RepositoryOverviewCard.vue'
 import QuickActionSettings from './components/QuickActionSettings.vue'
 import SettingsOverview from './components/SettingsOverview.vue'
@@ -241,7 +269,9 @@ import AiCodeReportDialog from './components/AiCodeReportDialog.vue'
 import { filterDemandRepositories, repositoriesNotInDemand } from './demandRepositories'
 import { buildDocumentationMaintenancePrompt } from './documentationMaintenance'
 import { buildConversationRecoveryPrompt, isThreadMigrationRecommended, recoveryConversationTitle } from './conversationRecovery'
-import { createConversationEventSocket, initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
+import { initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
+import { workbenchConversationTransport } from './workbenchConversationTransport'
+import { conversationTextDrafts, conversationImageDrafts } from './conversationDrafts'
 import { splitDiffRows, trimDiffContext, type FilePreviewDiffLayout } from './filePreviewDiff'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
 import { initialModelId, modelDescription, reasoningOptionsForModel, reconcileReasoningEffort } from './composerModels'
@@ -303,15 +333,15 @@ import {
   type ThreadProject,
   type WorkbenchSettingsSection,
 } from './workbenchUi'
-type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat'
+type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat' | 'parallel'
 
 const loading = ref(true); const error = ref(''); const modalError = ref(''); const workspaces = ref<Workspace[]>([]); const workspace = ref<Workspace | null>(null); const demands = ref<Demand[]>([]); const repositories = ref<Repository[]>([]); const selectedDemand = ref<Demand | null>(null); const conversations = ref<Conversation[]>([]); const workspaceConversations = ref<Conversation[]>([]); const selectedConversation = ref<Conversation | null>(null)
 const { state: conversationState, connect: connectConversationState, reset: resetConversationState, submitUserMessage, retryFailedUserMessage, interrupt: interruptConversationState } = useConversationController()
 const draft = ref(''); const sending = ref(false); const permission = ref<ConversationPermissionMode>('workspace-write'); const selectedModel = ref(''); const selectedReasoning = ref('medium'); const selectedSubmitMode = ref<ComposerSubmitMode>('queue'); const selectedCollaborationModeName = ref('default'); const selectedSkillsForTurn = ref<string[]>([]); const composerImages = ref<ComposerImage[]>([]); const composerImageError = ref(''); const uploadingImages = ref(false); const runtimeModels = ref<ComposerOptions['models']>([]); const runtimeSkills = ref<ComposerOptions['skills']>([]); const runtimeCollaborationModes = ref<Array<{ name: string; mode: 'default' | 'plan'; label: string; model?: string; reasoningEffort?: string }>>([]); const runtimeCapabilities = ref<ComposerOptions['capabilities']>({ modelSelection: false, reasoning: false, structuredSkills: false, imageInput: false, nativeSessionList: false, planMode: false, steer: false, append: false, questions: false, aiCodeReports: false }); const socketConnection = ref<ConversationSocketSnapshot>(initialConversationSocketSnapshot()); const showWorkspacePicker = ref(false); const showCreateWorkspace = ref(false); const showCreateDemand = ref(false); const creating = ref(false); const creatingConversation = ref(false); const showCreateConversation = ref(false); const createConversationError = ref(''); const selectedCreateRuntime = ref<string>('codex'); const importingWorktrees = ref(false); const demandName = ref(''); const demandBranch = ref(''); const demandFluxUrl = ref(''); const selectedRepositoryIds = ref<string[]>([]); const demandRepositoryQuery = ref(''); const scrollArea = ref<HTMLElement | null>(null); const showBindConversation = ref(false); const bindingConversation = ref(false); const boundNativeId = ref(''); const boundConversationTitle = ref(''); const nativeThreads = ref<AvailableNativeThread[]>([]); const threadPickerLoading = ref(false); const bindModelsLoading = ref(false); const bindRuntimeModels = ref<ComposerOptions['models']>([]); const selectedBindRuntime = ref<string>('codex'); const selectedBindModel = ref(''); const selectedThreadProject = ref(''); const threadQuery = ref(''); const manualThreadEntry = ref(false); const conversationPendingDelete = ref<Conversation | null>(null); const deletingConversation = ref(false); const deleteConversationError = ref(''); const renamingConversationId = ref(''); const conversationRenameDraft = ref(''); const conversationRenameError = ref(''); const savingConversationRename = ref(false); const workspacePendingDelete = ref<Workspace | null>(null); const deletingWorkspace = ref(false); const deleteWorkspaceError = ref('')
 // Composer state belongs to a conversation. Keeping a single global draft made
 // a failed message from one session appear in a newly-created session.
-const draftByConversationId = new Map<string, string>()
-const composerImagesByConversationId = new Map<string, ComposerImage[]>()
+const draftByConversationId = conversationTextDrafts
+const composerImagesByConversationId = conversationImageDrafts
 // Responsive navigation is transient; desktop panel preferences remain independent.
 const mobileNavigationOpen = ref(false)
 const mobileSessionsOpen = ref(false)
@@ -730,6 +760,14 @@ function goTo(page: Exclude<Page, 'chat'>): void {
   if (page === 'knowledge') void loadKnowledge()
   if (page === 'skills') void loadSkills()
   if (page === 'settings') void loadQuickActions()
+}
+async function openParallelConversation(demandId: string, conversationId: string | null): Promise<void> {
+  const demand = demands.value.find(item => item.id === demandId)
+  if (demand) await openDemand(demand, 'push', conversationId)
+}
+async function openParallelFile(demandId: string, conversationId: string, file: { path: string; line: number }): Promise<void> {
+  await openParallelConversation(demandId, conversationId)
+  if (selectedConversation.value?.id === conversationId) await openConversationFile(file)
 }
 async function openSettingsSection(section: WorkbenchSettingsSection): Promise<void> {
   followupOriginConversationId.value = ''
@@ -1247,48 +1285,10 @@ async function restoreRoute(): Promise<void> {
 async function connect(conversation: Conversation): Promise<void> {
   visibleConversationEntryCount.value = DEFAULT_VISIBLE_MESSAGE_COUNT
   conversationScrollState.value = null
-  const workspaceId = workspace.value!.id
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const host = window.location.host || '127.0.0.1:3211'
-  await connectConversationState(conversation.nativeId, {
-    read: async () => (await api.conversationHistory(workspaceId, conversation.id)).events,
-    snapshot: async () => await api.conversationHistory(workspaceId, conversation.id),
-    submit: async (command) => {
-      const input = command.input as {
-        content: string
-        settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }
-        imageIds?: string[]
-      }
-      const accepted = await api.sendMessage(
-        workspaceId,
-        conversation.id,
-        command.clientCommandId,
-        input.content,
-        command.mode,
-        input.settings,
-        input.imageIds,
-      )
-      return { clientCommandId: accepted.commandId }
-    },
-    interrupt: async () => {
-      await api.interruptConversation(workspaceId, conversation.id)
-    },
-    subscribe: (_threadId, listener) => {
-      const realtime = createConversationEventSocket({
-        url: `${protocol}://${host}/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversation.id)}/events`,
-        onEvent(event) {
-          const productEvent = event as ConversationEvent
-          listener({ type: 'event', event: productEvent, ownerRevision: productEvent.ownerRevision } satisfies ConversationSubscriptionEvent)
-          if (conversation.runtimeType === 'trae') scheduleTraeCacheRefresh(conversation)
-        },
-        onConnection(event) { listener(event) },
-        onState(state) {
-          socketConnection.value = state
-        },
-      })
-      return () => realtime.close()
-    },
-  })
+  await connectConversationState(conversation.nativeId, workbenchConversationTransport(workspace.value!.id, conversation, {
+    onState(state) { socketConnection.value = state },
+    onEvent() { if (conversation.runtimeType === 'trae') scheduleTraeCacheRefresh(conversation) },
+  }))
 }
 async function openConversation(conversation: Conversation, history: HistoryMode = 'push'): Promise<void> { selectedConversation.value = conversation; updateRoute(selectedDemand.value, history, conversation.id); permission.value = conversation.permissionMode; selectedCollaborationModeName.value = 'default'; selectedSkillsForTurn.value = []; draft.value = draftByConversationId.get(conversation.id) ?? ''; composerImages.value = composerImagesByConversationId.get(conversation.id) ?? []; composerImageError.value = ''; conversationChannelBindings.value = []; channelBindingMessage.value = ''; traeCache.value = null; resetTraeCachePolling(); error.value = ''; await Promise.all([connect(conversation), loadConversationChannelBindings(conversation), loadComposerOptions(conversation), loadTraeCache(conversation)]); startTraeCachePolling(); await scrollToBottom(true) }
 function closeConversationFilePreview(): void {

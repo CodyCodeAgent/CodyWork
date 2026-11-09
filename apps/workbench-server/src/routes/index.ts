@@ -34,6 +34,7 @@ import type { SmartNotificationSettingsInput } from '../services/smartNotificati
 import { AiCodeReportService } from '../services/aiCodeReports.js'
 import { FollowupService } from '../services/followupService.js'
 import { AgentFollowupTools, FOLLOWUP_TOOL_NAMESPACE } from '../services/agentFollowups.js'
+import { getParallelView, saveParallelView } from '../services/parallelView.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -125,7 +126,7 @@ function json(req: IncomingMessage, res: ServerResponse, code: number, payload: 
     'Content-Type': 'application/json; charset=utf-8',
     // Workspace, Demand, and conversation state is user-mutated; never let a browser reuse stale API data.
     'Cache-Control': 'no-store, max-age=0',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     ...corsHeaders(req),
   })
@@ -462,6 +463,15 @@ function buildRoutes(ctx: AppContext) {
   add('GET', '/api/workspaces/:id/dashboard', (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
     return dashboardCache(ctx).refreshIfStale(row)
+  })
+
+  add('GET', '/api/workspaces/:id/parallel-view', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return getParallelView(ctx.db, workspace.id)
+  })
+  add('PUT', '/api/workspaces/:id/parallel-view', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    return saveParallelView(ctx.db, workspace.id, c.body)
   })
 
   add('GET', '/api/workspaces/:id/quick-actions', async (c) => {
@@ -1021,7 +1031,7 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
     const origin = req.headers.origin
     if (typeof origin === 'string' && !isAllowedOrigin(origin, req.headers.host)) return json(req, res, 403, { ok: false, error: 'origin not allowed' })
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', ...corsHeaders(req) })
+      res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', ...corsHeaders(req) })
       return res.end()
     }
     const url = new URL(req.url ?? '/', 'http://localhost')

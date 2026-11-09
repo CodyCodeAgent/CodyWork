@@ -13,6 +13,20 @@ import { CODY_WEB_CORE_VERSION } from '@codycodeagent/cody-web-core/runtime'
 import { createConversationState, reduceConversationEvents } from '@codycodeagent/cody-web-core/conversation'
 
 describe('generic runtime protocol', () => {
+  it('executes independent native sessions concurrently and admits their next turns after terminal events', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-parallel-runtime-'))
+    const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd: root })
+    const context = { workspacePath: root, demandPath: root, instructionBundle: { systemInstructions: '', sources: [], skills: [], sha256: '' }, effectivePolicy: { readableRoots: [root], writableRoots: [root], deniedRoots: [], shell: 'allowlist' as const, approval: 'workbench' as const, hash: '' } }
+    try {
+      const a = await runtime.createConversation({ context }), b = await runtime.createConversation({ context })
+      const results = await Promise.all([runtime.sendTurn({ conversation: a, prompt: 'SLOW_E2E first-a' }), runtime.sendTurn({ conversation: b, prompt: 'SLOW_E2E first-b' })])
+      expect(results.map(result => result.finalText)).toEqual(['CODEX_FIXTURE_OK', 'CODEX_FIXTURE_OK'])
+      expect(results[0]!.events.find(event => event.type === 'turn.started')?.turnId).not.toBe(results[1]!.events.find(event => event.type === 'turn.started')?.turnId)
+      await expect(runtime.sendTurn({ conversation: b, prompt: 'second-b' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
+      expect(runtime.diagnostics()?.startCount).toBe(1)
+    } finally { await runtime.close(); rmSync(root, { recursive: true, force: true }) }
+  })
   it('normalizes context roots without treating them as a CodyWork sandbox', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-runtime-'))
     mkdirSync(join(root, '.agents', 'skills', 'csr'), { recursive: true })

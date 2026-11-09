@@ -1,145 +1,157 @@
-/* CodyWork product system. Core retains all transcript and runtime behaviour. */
+/* CodyWork presentation. Mobile drawers share the same native Core conversation. */
 :root {
-  --bg: #f7f8fa; --card: #fff; --text: #242830; --muted: #69717e;
-  --muted-2: #7e8793; --line: #e5e8ec; --blue: #3666e8; --blue-soft: #edf2ff;
-  --sidebar: #f5f6f8; --sidebar-text: #414956;
-  --cw-radius: 10px; --cw-panel-shadow: 0 12px 36px #202a4014;
+  --bg: #f4f6fa; --card: #fff; --text: #202b40; --muted: #627087;
+  --muted-2: #748097; --line: #e1e6ef; --blue: #5b57db; --blue-soft: #efeffc;
+  --sidebar: #141d2e; --sidebar-text: #dce3ef;
+  --cw-radius: 10px; --cw-panel-shadow: 0 12px 36px #17233d18;
+  --cw-reading-width: 1120px;
 }
-.app-shell { height: 100dvh; background: var(--card); }
+.app-shell { height: 100dvh; background: var(--bg); }
 .mobile-workbench-bar, .mobile-context-button { display: none; }
-.sidebar { width: 224px; flex-basis: 224px; padding: 20px 12px 12px; border-right: 1px solid var(--line); background: var(--sidebar); }
-.brand { gap: 10px; padding: 0 10px 24px; }
-.brand strong { color: var(--text); font-size: 16px; letter-spacing: -.02em; }
-.brand small { color: var(--muted); font-size: 12px; }
-.brand-mark, .workspace-large-mark, .next-icon { background: #2e3747; color: #fff; box-shadow: none; letter-spacing: -.06em; }
-.brand-mark { width: 32px; height: 32px; border-radius: 9px; font-size: 12px; }
-.switcher { min-height: 60px; color: var(--text); background: #fff; border: 1px solid var(--line); border-radius: 10px; }
-.switcher:hover { border-color: #c7cdd7; background: #fff; }
-.switcher-copy strong { color: var(--text); font-size: 13px; }
-.switcher-copy small, .switcher-menu small { color: var(--muted); font-size: 11px; }
-.folder-mark { color: #586477; background: #edf0f5; border-radius: 8px; }
-.switcher-action { color: var(--muted); background: #f4f5f7; padding: 5px 7px; }
-.switcher-menu { color: var(--text); background: #fff; border-color: var(--line); box-shadow: var(--cw-panel-shadow); }
-.switcher-menu button { color: var(--text); }
-.switcher-menu button:hover, .switcher-menu button.selected { background: #f1f3f7; }
-.switcher-menu .menu-create { color: var(--blue); border-color: var(--line); }
-.switcher-menu .menu-all { color: var(--muted); }
-.sidebar-section-label { padding: 24px 10px 8px; color: var(--muted); font-size: 11px; letter-spacing: 0; font-weight: 500; }
-.sidebar-item { min-height: 40px; gap: 10px; padding: 8px 10px; color: #59616e; border-radius: 7px; font-size: 13px; }
-.sidebar-item span { color: inherit; }
-.sidebar-item:hover { background: #eaeef3; }
-.sidebar-item.active, .sidebar-item.active:hover { color: #274eac; background: #e7edf9; box-shadow: none; }
-.sidebar-item.active span { color: inherit; }
-.sidebar-item em { background: #e5e9f0; color: #5c6677; }
-.settings-section-label, .sidebar-note { border-color: var(--line); }
-.sidebar-note { color: var(--muted); font-size: 11px; }
-.sidebar-subnav { border-color: #d9dfe7; }
-.sidebar-subnav button { color: #68717f; }
-.sidebar-subnav button:hover { background: #eaedf3; color: var(--text); }
-.sidebar-subnav button.active { color: #274eac; background: #e7edf9; }
-/* Demand navigation shares the mist surface, not the historical dark module. */
-.codywork-vue .sidebar-demand-section { border: 1px solid var(--line); background: #f1f3f6; border-radius: 10px; }
-.codywork-vue .sidebar-demand-section .sidebar-section-label { color: #566171; background: transparent; }
-.codywork-vue .sidebar-demand-section .sidebar-section-label:hover { color: var(--text); background: #e9edf2; }
-.codywork-vue .sidebar-section-label span { font-size: 11px; letter-spacing: 0; font-weight: 550; }
-.codywork-vue .sidebar-section-label small { color: var(--muted); font-size: 10px; }
-.codywork-vue .sidebar-label small, .codywork-vue .sidebar-item.active .sidebar-label small { color: var(--muted); font-size: 11px; }
-.codywork-vue .sidebar-item.active::before { display: none; }
-.codywork-vue .sidebar-subnav::before, .codywork-vue .sidebar-demand-section .sidebar-subnav::before { background: #dce2e9; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item { color: #566171; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item:hover { color: var(--text); background: #e9edf2; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item.active { color: #274eac; background: #e5ecf9; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item.active::before { background: var(--blue); border-color: #f1f3f6; box-shadow: none; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item strong { font-size: 12px; font-weight: 550; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item small { color: var(--muted); font-size: 10px; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item.all-demands { color: #566171; background: transparent; }
-.codywork-vue .sidebar-demand-section .sidebar-subnav-item.all-demands:hover { background: #e9edf2; }
-.codywork-vue .sidebar-demand-section .sidebar-accordion-trigger em { color: #566171; background: #e3e8ef; }
-.codywork-vue .sidebar-demand-section .subnav-rail-icon, .codywork-vue .sidebar-accordion-trigger.expanded .sidebar-accordion-chevron { color: #69717e; }
-.codywork-vue .sidebar-demand-section .subnav-status { background: var(--blue); box-shadow: none; }
-.codywork-vue .demand-status-tag { color: #69717e; border-color: #dce2e9; background: #f5f6f8; font-size: 10px; }
-.codywork-vue .demand-status-tag.in_progress { color: #345ba8; border-color: #d2def5; background: #edf2fc; }
-.codywork-vue .demand-status-tag.completed { color: #34775a; border-color: #cbe4d7; background: #eff8f3; }
-.codywork-vue .demand-status-tag.blocked { color: #946a29; border-color: #e9d9bc; background: #fff8eb; }
-.codywork-vue .sidebar-new-demand { min-height: 36px; color: #566171; background: #fafbfc; border: 1px solid #dce2e9; font-size: 11px; }
-.codywork-vue .sidebar-new-demand:hover { color: var(--blue); background: #edf2ff; border-color: #cbd7ee; }
-.codywork-vue .sidebar-scroll, .codywork-vue .sidebar-subnav { scrollbar-color: #c6ccd5 transparent; }
-.codywork-vue .sidebar-scroll::-webkit-scrollbar-thumb, .codywork-vue .sidebar-subnav::-webkit-scrollbar-thumb { background-color: #c6ccd5; }
-.sidebar-collapse-footer button { color: var(--muted); border-color: var(--line); background: transparent; }
-.topbar { min-height: 72px; padding: 16px 28px; background: #fff; backdrop-filter: none; gap: 16px; }
-.topbar h1 { font-size: 21px; line-height: 1.3; letter-spacing: -.025em; font-weight: 650; }
-.eyebrow, .card-kicker { color: var(--muted); font-size: 11px; letter-spacing: 0; font-weight: 500; text-transform: none; }
-.workspace-body { max-width: 1320px; padding: 28px; margin: 0 auto; }
-.workspace-header-card { padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: none; }
-.workspace-header-copy h2 { font-size: 24px; letter-spacing: -.025em; }
-.metric-grid { gap: 12px; }
-.metric-card { padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: none; }
-.metric-card strong { font-variant-numeric: tabular-nums; }
-.info-card, .repository-overview-card, .settings-card, .knowledge-list-card, .knowledge-detail-card, .skills-list-card, .skill-detail-card, .demand-card, .create-card { border-color: var(--line); border-radius: 12px; box-shadow: none; }
-.btn { min-height: 36px; padding: 7px 12px; border-color: #dce1e7; border-radius: 8px; color: #46505e; font-size: 12px; font-weight: 550; box-shadow: none; }
-.btn.primary { color: #fff; background: var(--blue); border-color: var(--blue); box-shadow: none; }
-.btn.primary:hover:not(:disabled) { background: #2957cd; }
-.conversation-sidebar { width: 232px; flex-basis: 232px; background: #fbfcfd; color: var(--text); border-color: var(--line); }
-.conversation-row { border-radius: 8px; }
-.conversation-row:hover { background: #f1f3f6; }
-.conversation-row.active { color: #274eac; background: #edf2fa; }
-.conversation-demand { background: #f2f4f7; border-color: var(--line); }
-.chat-main, .chat-scroll, .chat-layout { min-width: 0; }
-.chat-layout { height: auto; }
-.chat-topbar { min-height: 72px; padding-block: 12px; justify-content: flex-start; gap: 10px; }
-.chat-topbar > :first-child { min-width: 0; flex: 1; }
-.chat-topbar > .new-conversation-button { flex-shrink: 0; }
-.chat-topbar h1 { font-size: 18px; }
-.chat-topbar .topbar-actions { gap: 6px; flex-wrap: wrap; }
-.chat-topbar .btn { min-height: 32px; padding: 6px 9px; }
-.chat-scroll { padding: 24px 28px; background: #fff; }
-.chat-scroll > *, .composer > * { max-width: 840px; margin-inline: auto; }
-.chat-empty { padding: 48px 24px; }
-.chat-empty h2 { font-size: 24px; letter-spacing: -.025em; font-weight: 600; }
-.chat-empty p { max-width: 440px; line-height: 1.8; color: var(--muted); }
-.composer { background: #fff; padding: 12px 28px max(16px, env(safe-area-inset-bottom)); border-top: 0; }
-.composer-hint, .composer-model-detail { color: var(--muted); font-size: 11px; }
-.create-page { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; width: 100%; min-height: 100%; max-width: 900px; margin: 0 auto; padding: clamp(28px, 6vw, 80px); background: #fff; }
-.create-hero { max-width: 600px; }
-.create-hero h1 { font-size: clamp(28px, 3.2vw, 42px); line-height: 1.25; font-weight: 650; letter-spacing: -.035em; }
-.create-hero p { font-size: 15px; line-height: 1.8; }
-.create-page > .btn { margin-top: 20px; }
-button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #3666e85c; outline-offset: 3px; }
-/* Embedded Core presentation: the transcript is the surface, not nested cards. */
-.codywork-vue .cody-conversation[data-variant="embedded"], .codywork-vue .cody-composer[data-variant="embedded"] { --cody-chat-bg: transparent; --cody-chat-panel: #fff; --cody-chat-surface: #f5f6f8; --cody-chat-line: #e5e8ec; --cody-chat-text: #242830; --cody-chat-muted: #69717e; --cody-chat-accent: #3666e8; --cody-chat-accent-strong: #2957cd; --cody-chat-shadow: none; }
-.codywork-vue .cody-conversation[data-variant="embedded"] { width: 100%; max-width: 840px; gap: 28px; padding: 8px 0 24px; }
-.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message { max-width: 100%; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
-.codywork-vue .cody-message-identity { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: #f1f3f6; color: #576171; font-size: 10px; }
-.codywork-vue .cody-message-identity[data-role="assistant"] { background: #303a49; color: #fff; border-color: #303a49; }
-.codywork-vue .cody-message-label { color: var(--muted); font-size: 11px; letter-spacing: 0; font-weight: 500; text-transform: none; }
-.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-body { max-width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: 15px; line-height: 1.75; }
-.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message[data-role="user"] .cody-message-body { padding: 12px 16px; border: 0; border-radius: 12px; background: #f2f4f7; }
-.codywork-vue .cody-tool-card, .codywork-vue .cody-reasoning-card, .codywork-vue .cody-plan-card { border-color: var(--line); border-radius: 10px; background: #fafbfc; box-shadow: none; }
-.codywork-vue .cody-copy-button { color: #77808d; font-size: 11px; }
-.codywork-vue .cody-worked-divider { color: var(--muted); letter-spacing: 0; text-transform: none; }
-.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-shell { border: 1px solid #dce1e7; border-radius: 14px; background: #fff; box-shadow: 0 2px 8px #202a4005; }
-.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-shell:focus-within { border-color: #95ace3; box-shadow: 0 0 0 3px #3666e80a; }
-.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-send { background: #303a49; color: #fff; border-radius: 10px; }
-.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control, .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-picker { background: #f7f8fa; border-color: var(--line); color: #536071; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.chat-toolbar-menu { position: relative; flex-shrink: 0; }
-.chat-toolbar-menu > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #536071; font-size: 12px; cursor: pointer; list-style: none; }
-.chat-toolbar-menu > summary::-webkit-details-marker { display: none; }
-.chat-toolbar-menu[open] > .topbar-actions { position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; display: flex; flex-direction: column; align-items: stretch; width: 260px; max-height: min(560px, 70dvh); overflow: auto; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--cw-panel-shadow); }
-.chat-toolbar-menu .topbar-actions > .btn { text-align: left; }
+
+/* Navigation is a separate, legible layer; density is not tied to phone sizing. */
+.sidebar { width: 264px; flex-basis: 264px; padding: 22px 14px 14px; border-right: 1px solid #25324a; background: var(--sidebar); }
+.brand { gap: 12px; padding: 0 10px 24px; }
+.brand strong { color: #f5f7ff; font-size: 20px; letter-spacing: -.03em; }
+.brand small { color: #aab7ce; font-size: 12px; }
+.brand-mark, .workspace-large-mark, .next-icon { background: var(--blue); color: #fff; letter-spacing: -.04em; }
+.brand-mark { width: 40px; height: 40px; border-radius: 12px; }
+.brand-mark > svg { width: 23px; height: 23px; }
+.switcher { min-height: 70px; color: #eef2fa; background: #202c42; border-color: #35425b; border-radius: 12px; }
+.switcher:hover { background: #27364f; border-color: #617296; }
+.switcher-copy strong { color: #f5f7ff; font-size: 14px; }
+.switcher-copy small, .switcher-menu small { color: #afbbce; font-size: 11px; }
+.folder-mark { color: #e7e7ff; background: #373f6d; border-color: #555b8a; }
+.switcher-action { color: #d0d8ff; background: #35456c; font-size: 11px; }
+.switcher-menu { color: #eef2fa; background: #202c42; border-color: #40506c; box-shadow: var(--cw-panel-shadow); }
+.switcher-menu button { color: #eef2fa; }
+.switcher-menu button:hover, .switcher-menu button.selected { background: #33415c; }
+.sidebar-section-label { padding: 24px 10px 8px; color: #aab7ce; }
+.codywork-vue .sidebar-section-label span { font-size: 11px; letter-spacing: .06em; font-weight: 650; }
+.codywork-vue .sidebar-section-label small { color: #aab7ce; font-size: 10px; }
+.sidebar-item { min-height: 48px; gap: 12px; padding: 9px 10px; color: #c4cee0; border-radius: 9px; font-size: 14px; }
 .sidebar-item > svg { flex-shrink: 0; color: inherit; }
-.brand-mark > svg { width: 19px; height: 19px; }
-/* Modal surfaces use the same palette, including the native top-layer drawer. */
+.sidebar-item:hover { color: #fff; background: #25324b; }
+.sidebar-item.active { color: #fff; background: #323962; }
+.codywork-vue .sidebar-label small, .codywork-vue .sidebar-item.active .sidebar-label small { color: #acb9ce; font-size: 11px; }
+.sidebar-item em { background: #364367; color: #e4e8ff; }
+.codywork-vue .sidebar-demand-section { border: 1px solid #34425b; background: #19253a; border-radius: 12px; }
+.codywork-vue .sidebar-demand-section .sidebar-section-label { color: #dce3ef; background: transparent; }
+.codywork-vue .sidebar-demand-section .sidebar-subnav-item { color: #c2cde0; }
+.codywork-vue .sidebar-demand-section .sidebar-subnav-item:hover { color: #fff; background: #273650; }
+.codywork-vue .sidebar-demand-section .sidebar-subnav-item.active { color: #fff; background: #343e69; }
+.codywork-vue .sidebar-demand-section .sidebar-subnav-item strong { font-size: 13px; font-weight: 550; }
+.codywork-vue .sidebar-demand-section .sidebar-subnav-item small { color: #adbad0; font-size: 11px; }
+.codywork-vue .sidebar-demand-section .sidebar-accordion-trigger em { color: #e6eafd; background: #354260; }
+.codywork-vue .sidebar-new-demand { min-height: 40px; color: #dce4f3; background: #24324b; border-color: #3f4d68; font-size: 12px; }
+.sidebar-subnav { overflow-x: hidden; }
+.sidebar-subnav-item > span:nth-child(2) { min-width: 0; flex: 1; }
+.sidebar-note { border-color: #34425b; }
+.sidebar-note strong, .sidebar-note small { color: #afbbce; font-size: 11px; }
+.sidebar-collapse-footer button { color: #bdc9dd; border-color: #34425b; background: transparent; }
+.sidebar-collapse-footer button:hover { color: #fff; background: #25324b; }
+
+.topbar { min-height: 88px; padding: 18px 28px; background: #fff; backdrop-filter: none; gap: 20px; }
+.topbar h1 { font-size: 24px; line-height: 1.3; letter-spacing: -.025em; font-weight: 700; }
+.eyebrow, .card-kicker { color: var(--muted); font-size: 11px; letter-spacing: .06em; font-weight: 650; }
+.workspace-body { max-width: 1440px; padding: 28px; margin: 0 auto; }
+.btn { min-height: 38px; padding: 8px 12px; border-color: #d7deeb; border-radius: 9px; color: #40506a; font-size: 12px; font-weight: 600; box-shadow: none; }
+.btn.primary { color: #fff; background: var(--blue); border-color: var(--blue); }
+.btn.primary:hover:not(:disabled) { background: #4945c5; }
+
+/* Desktop actions stay discoverable. Only the mobile shell becomes a drawer. */
+.chat-topbar { min-height: 112px; padding-block: 18px; justify-content: space-between; align-items: center; gap: 20px; }
+.chat-topbar > :first-child { min-width: 0; flex: 1 1 auto; }
+.chat-topbar h1 { font-size: 24px; }
+.chat-toolbar-menu { min-width: 0; flex: 0 0 auto; }
+.chat-topbar .chat-toolbar-menu > .topbar-actions { max-width: none; justify-content: flex-end; flex-wrap: nowrap; gap: 8px; }
+.chat-toolbar-divider { flex: 0 0 auto; height: 20px; width: 1px; margin-inline: 3px; background: var(--line); }
+.chat-topbar .toolbar-quiet-action, .chat-topbar .demand-toolbox-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 7px; background: transparent; border-color: transparent; color: var(--muted); white-space: nowrap; transition: color 150ms ease, background 150ms ease; }
+.chat-topbar .toolbar-quiet-action:hover, .chat-topbar .demand-toolbox-trigger:hover, .chat-topbar .demand-toolbox-trigger[aria-expanded='true'] { color: var(--blue); background: var(--blue-soft); }
+.chat-topbar svg { flex-shrink: 0; }
+.toolbar-quiet-action svg, .toolbar-menu-action svg, .toolbar-chevron, .toolbar-more-icon { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.toolbar-chevron { width: 13px; height: 13px; }
+.toolbar-more-icon { width: 20px; height: 20px; fill: currentColor; }
+.chat-connection-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: #ab6912; }
+.chat-connection-dot.connected { background: #26956e; }
+.chat-connection-dot.closed, .chat-connection-dot.error { background: #bf4e5d; }
+.chat-connection-label { font-size: 11px; }
+.chat-runtime-name { color: var(--text); font-size: 12px; font-weight: 650; }
+.toolbar-popover-heading { padding: 8px 10px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.toolbar-runtime-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; }
+.toolbar-runtime-detail strong { font-size: 14px; }
+.toolbar-runtime-detail small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
+.toolbar-connection-detail { margin: 4px 10px 12px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.toolbar-menu-action { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text); text-align: left; font-size: 13px; cursor: pointer; transition: background 150ms ease, color 150ms ease; }
+.toolbar-menu-action:hover:not(:disabled) { color: var(--blue); background: var(--blue-soft); }
+.toolbar-menu-action:disabled { opacity: .45; cursor: not-allowed; }
+.toolbar-warning-label { margin-left: auto; color: #935b10; font-size: 11px; }
+.chat-toolbar-menu .new-conversation-button { margin-left: 4px; white-space: nowrap; }
+.chat-topbar > .new-conversation-button { flex-shrink: 0; }
+.chat-topbar .demand-link-actions { max-width: 100%; }
+.chat-topbar .demand-path-link { min-width: 0; max-width: min(700px, 100%); flex: 0 1 auto; }
+.conversation-sidebar { width: 252px; flex-basis: 252px; background: #fff; color: var(--text); border-color: var(--line); }
+.conversation-head { padding: 8px 12px 18px; }
+.conversation-head strong { font-size: 18px; }
+.conversation-demand { background: #f5f6fb; border: 1px solid var(--line); border-radius: 10px; }
+.conversation-demand strong { font-size: 13px; }
+.conversation-demand small { font-size: 11px; color: var(--muted); }
+.conversation-row { min-height: 60px; border-radius: 10px; }
+.conversation-row:hover { background: #f5f6fb; }
+.conversation-row.active { color: #433fb0; background: var(--blue-soft); }
+.conversation-row strong { font-size: 13px; font-weight: 650; }
+.conversation-row small { font-size: 11px; color: var(--muted); }
+.chat-main, .chat-scroll, .chat-layout { min-width: 0; }
+.chat-layout { height: auto; min-height: 0; }
+.chat-scroll { padding: 30px 32px 40px; background: var(--bg); }
+.chat-scroll > *, .composer > * { max-width: var(--cw-reading-width); margin-inline: auto; }
+.chat-empty { padding: 48px 24px; }
+.chat-empty h2 { font-size: 28px; letter-spacing: -.025em; font-weight: 650; }
+.chat-empty p { max-width: 480px; line-height: 1.8; color: var(--muted); }
+.composer { background: #fff; padding: 14px 32px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.composer-hint, .composer-model-detail { color: var(--muted); font-size: 11px; }
+
+/* Use Core's presentation classes only; no duplicate conversation state. */
+.codywork-vue .cody-conversation[data-variant="embedded"], .codywork-vue .cody-composer[data-variant="embedded"] { --cody-chat-bg: transparent; --cody-chat-panel: var(--card); --cody-chat-surface: #f4f6fb; --cody-chat-line: var(--line); --cody-chat-text: var(--text); --cody-chat-muted: var(--muted); --cody-chat-accent: var(--blue); --cody-chat-accent-strong: #4945c5; }
+.codywork-vue .cody-conversation[data-variant="embedded"] { width: 100%; max-width: var(--cw-reading-width); gap: 24px; padding: 0 0 24px; }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message { max-width: 100%; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; }
+.codywork-vue .cody-message-identity { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: #536078; font-size: 11px; }
+.codywork-vue .cody-message-identity[data-role="assistant"] { background: var(--blue); color: #fff; border-color: var(--blue); }
+.codywork-vue .cody-message-label { color: #526079; font-size: 12px; font-weight: 650; letter-spacing: .04em; }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-body { max-width: 100%; padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 2px 6px #17233d04; font-size: 15px; line-height: 1.75; }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message[data-role="assistant"] .cody-message-body { width: 100%; min-width: 0; }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message[data-role="user"] .cody-message-body { border-color: #d9d8f6; background: #f1f1ff; }
+.codywork-vue .cody-tool-card, .codywork-vue .cody-reasoning-card, .codywork-vue .cody-plan-card { width: 100%; max-width: 100%; border-color: #dce3ee; border-radius: 10px; background: #fff; box-shadow: none; }
+.codywork-vue .cody-copy-button { color: var(--muted); font-size: 11px; }
+.codywork-vue .cody-worked-divider { color: var(--muted); letter-spacing: .04em; font-size: 11px; }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-shell { border: 1px solid #d2daea; border-radius: 14px; background: #fff; box-shadow: 0 3px 16px #17233d08; }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-shell:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-send { background: var(--blue); color: #fff; border-radius: 10px; }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control, .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-picker { background: #f7f8fc; border-color: var(--line); color: #40506a; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #7774e8; outline-offset: 3px; }
+.sidebar-item > svg { flex-shrink: 0; }
 .app-shell.codywork-vue .responsive-panel { color: var(--text); background: #fff; border-radius: 0 16px 16px 0; box-shadow: var(--cw-panel-shadow); }
-.app-shell.codywork-vue .responsive-panel::backdrop { background: #26314050; backdrop-filter: blur(2px); }
+.app-shell.codywork-vue .responsive-panel::backdrop { background: #17233d66; backdrop-filter: blur(2px); }
 .app-shell.codywork-vue .responsive-panel-heading { border-color: var(--line); }
-.app-shell.codywork-vue .responsive-panel-heading h2 { color: var(--text); font-size: 15px; }
-.app-shell.codywork-vue .responsive-panel-heading button { color: #69717e; background: #f5f6f8; border-color: var(--line); border-radius: 10px; }
+.app-shell.codywork-vue .responsive-panel-heading h2 { color: var(--text); font-size: 16px; }
+.app-shell.codywork-vue .responsive-panel-heading button { color: var(--text); background: var(--bg); border-color: var(--line); border-radius: 10px; }
 @media (min-width: 901px) and (max-width: 1200px) {
-  .sidebar { width: 208px; flex-basis: 208px; }
-  .conversation-sidebar { width: 208px; flex-basis: 208px; }
+  .sidebar { width: 232px; flex-basis: 232px; }
+  .conversation-sidebar { width: 224px; flex-basis: 224px; }
   .workspace-body, .chat-scroll { padding: 24px; }
+}
+@media (min-width: 901px) and (max-width: 1400px) {
+  .chat-topbar { flex-wrap: wrap; gap: 12px; }
+  .chat-topbar > :first-child { flex-basis: 100%; }
+  .chat-toolbar-menu { flex: 1 1 0; }
+  .chat-topbar .chat-toolbar-menu > .topbar-actions { justify-content: flex-start; }
+}
+@media (min-width: 901px) and (max-width: 1100px) {
+  .chat-connection-label { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-topbar .toolbar-quiet-action, .chat-topbar .demand-toolbox-trigger, .toolbar-menu-action { transition: none; }
 }
 @media (max-width: 900px) {
   .app-shell { flex-direction: column; overflow: hidden; }
@@ -170,7 +182,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .chat-scroll { padding: 20px 16px; overscroll-behavior-y: contain; }
   .chat-empty { padding: 32px 12px; }
   .chat-empty h2 { font-size: 23px; }
-  .codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-body { font-size: 16px; }
+  .codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-body { padding: 14px; font-size: 16px; }
   .codywork-vue .cody-conversation[data-variant="embedded"] .cody-message { grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
   .codywork-vue .cody-message-identity { width: 24px; height: 24px; border-radius: 7px; }
   .composer input, .composer textarea, .input, input, select, textarea { font-size: 16px; }
@@ -181,7 +193,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .directory-list button { grid-template-columns: 18px minmax(0, 1fr); }
   .directory-list code { grid-column: 2; }
   .create-page { padding: 28px 24px; }
-  .responsive-panel .sidebar { padding: 18px 16px 14px; border: 0; background: #fff; }
+  .responsive-panel .sidebar { padding: 18px 16px 14px; border: 0; background: var(--sidebar); }
   .responsive-panel .brand { justify-content: flex-start; padding: 0 10px 20px; }
   .responsive-panel .brand > span:last-child, .responsive-panel .switcher-copy, .responsive-panel .sidebar-label, .responsive-panel .sidebar-note > span:last-child, .responsive-panel .sidebar-item em, .responsive-panel .sidebar-label small, .responsive-panel .sidebar-section-label small { display: block; }
   .responsive-panel .sidebar-section-label { display: flex; }
@@ -196,9 +208,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .responsive-panel .chat-topbar { display: flex; flex-direction: column; min-height: 0; padding: 20px; gap: 20px; background: #fff; }
   .responsive-panel .chat-topbar > :first-child { flex: none; width: 100%; }
   .responsive-panel .chat-toolbar-menu { display: contents; }
-  .responsive-panel .chat-toolbar-menu > summary { display: none; }
-  .responsive-panel .chat-toolbar-menu[open] > .topbar-actions { position: static; width: 100%; max-height: none; padding: 0; overflow: visible; box-shadow: none; border: 0; background: transparent; }
+  .responsive-panel .chat-toolbar-menu > .topbar-actions { position: static; width: 100%; max-width: none; max-height: none; padding: 0; overflow: visible; box-shadow: none; border: 0; background: transparent; }
   .responsive-panel .chat-topbar .topbar-actions { width: 100%; flex-direction: column; align-items: stretch; }
+  .responsive-panel .chat-toolbar-divider { display: none; }
+  .responsive-panel .chat-topbar .toolbar-quiet-action, .responsive-panel .chat-topbar .demand-toolbox-trigger { width: 100%; justify-content: flex-start; }
+  .responsive-panel .chat-topbar .new-conversation-button { margin-left: 0; }
+  .responsive-panel .toolbar-menu-action { min-height: 44px; }
+  .responsive-panel .toolbar-popover-heading { padding-left: 0; }
   .responsive-panel .chat-topbar .btn { min-height: 44px; text-align: left; }
   .responsive-panel .chat-topbar .demand-link-actions { flex-direction: column; align-items: stretch; }
   .workspace-readonly-note { flex-wrap: wrap; }
