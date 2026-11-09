@@ -360,7 +360,7 @@ export interface AvailableNativeThread {
 }
 
 export interface ParallelView {
-  layout: 'columns' | 'grid'
+  layout: 'columns' | 'three-columns' | 'grid'
   panels: Array<{ demandId: string; conversationId: string | null }>
   revision: number
 }
