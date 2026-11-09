@@ -24,8 +24,16 @@
 .parallel-panel-head { flex-shrink: 0; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
 .parallel-panel-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .parallel-panel-title > strong { min-width: 0; flex: 1; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.parallel-demand-mark { display: grid; flex: 0 0 auto; place-items: center; width: 25px; height: 25px; color: var(--blue); background: var(--blue-soft); border-radius: 7px; }
-.parallel-demand-mark .workbench-icon { width: 14px; height: 14px; }
+.parallel-drag-handle { display: grid; flex: 0 0 auto; place-items: center; width: 28px; height: 32px; padding: 5px; color: var(--muted); background: transparent; border: 0; border-radius: 7px; cursor: grab; touch-action: none; user-select: none; }
+.parallel-drag-handle .workbench-icon { width: 18px; height: 18px; }
+.parallel-drag-handle:hover:not(:disabled), .parallel-drag-handle:focus-visible { color: var(--blue); background: var(--blue-soft); }
+.parallel-drag-handle:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.parallel-drag-handle:disabled { opacity: .35; cursor: default; }
+.parallel-demand-panel.is-dragging { opacity: .6; }
+.parallel-demand-panel.reorder-target { outline: 2px dashed var(--blue); outline-offset: -2px; }
+.is-reordering, .is-reordering .parallel-drag-handle { cursor: grabbing; }
+.parallel-drag-preview { position: fixed; top: 0; left: 0; z-index: 1000; display: flex; align-items: center; gap: 8px; max-width: 260px; padding: 12px 16px; color: var(--text); background: var(--card); border: 1px solid var(--blue); border-radius: 10px; box-shadow: 0 8px 28px #17233d28; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.parallel-panel-actions .toolbar-menu-action:disabled { opacity: .45; cursor: not-allowed; }
 .parallel-panel-actions { display: flex; align-items: center; gap: 2px; }
 .parallel-panel-actions .icon-button, .parallel-panel-actions .chat-toolbar-trigger { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 7px; color: var(--muted); border: 0; background: transparent; border-radius: 7px; }
 .parallel-panel-actions .icon-button:hover { color: var(--blue); background: var(--blue-soft); }
@@ -128,6 +136,7 @@
   .parallel-board .parallel-demand-panel.mobile-active { display: flex; }
   .parallel-add-panel { display: none; }
   .parallel-panel-head { padding: 11px 12px; }
+  .parallel-drag-handle { width: 44px; height: 44px; }
   .parallel-panel-actions .icon-button, .parallel-panel-actions .chat-toolbar-trigger { width: 38px; height: 38px; min-height: 38px; min-width: 38px; }
   .parallel-panel-session-row > select { min-height: 44px; font-size: 14px; max-width: calc(100% - 90px); }
   .parallel-new-session { width: 38px; height: 44px; }

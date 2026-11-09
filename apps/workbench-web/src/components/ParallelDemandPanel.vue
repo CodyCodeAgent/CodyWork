@@ -1,7 +1,7 @@
 <template>
   <article class="parallel-demand-panel" :data-demand-id="demand.id" :aria-label="`${demand.name}面板`">
     <header class="parallel-panel-head">
-      <div class="parallel-panel-title"><span class="parallel-demand-mark"><WorkbenchIcon name="branch" /></span><strong :title="demand.name">{{ demand.name }}</strong><div class="parallel-panel-actions"><button class="icon-button" type="button" :aria-label="`${expanded ? '退出放大' : '放大'}${demand.name}`" @click="emit('expand')"><WorkbenchIcon :name="expanded ? 'columns' : 'expand'" /></button><ChatToolbarPopover label="需求面板操作"><template #trigger><WorkbenchIcon name="more" /></template><template #default="{ close }"><button class="toolbar-menu-action" type="button" @click="close(); emit('open', selected?.id ?? null)">打开完整需求</button><button class="toolbar-menu-action" type="button" @click="close(); emit('remove')">从视图移除</button><p class="parallel-menu-note">只移除面板，会话继续执行。</p></template></ChatToolbarPopover></div></div>
+      <div class="parallel-panel-title"><button class="parallel-drag-handle" type="button" :disabled="!canMoveEarlier && !canMoveLater" :aria-label="`拖动调整${demand.name}的位置`" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown" title="拖动排序，或按 Alt + 方向键移动" @pointerdown="emit('reorder-start', $event)" @keydown="reorderKey" @dragstart.prevent><WorkbenchIcon name="grip" /></button><strong :title="demand.name">{{ demand.name }}</strong><div class="parallel-panel-actions"><button class="icon-button" type="button" :aria-label="`${expanded ? '退出放大' : '放大'}${demand.name}`" @click="emit('expand')"><WorkbenchIcon :name="expanded ? 'columns' : 'expand'" /></button><ChatToolbarPopover label="需求面板操作"><template #trigger><WorkbenchIcon name="more" /></template><template #default="{ close }"><button class="toolbar-menu-action" type="button" @click="close(); emit('open', selected?.id ?? null)">打开完整需求</button><button class="toolbar-menu-action" type="button" :disabled="!canMoveEarlier" @click="close(); emit('move', -1)">向前移动</button><button class="toolbar-menu-action" type="button" :disabled="!canMoveLater" @click="close(); emit('move', 1)">向后移动</button><button class="toolbar-menu-action" type="button" @click="close(); emit('remove')">从视图移除</button><p class="parallel-menu-note">只移除面板，会话继续执行。</p></template></ChatToolbarPopover></div></div>
       <div class="parallel-panel-session-row">
         <select :aria-label="`切换${demand.name}的会话`" :value="selected?.id ?? ''" @focus="refresh" @change="selectConversation(($event.target as HTMLSelectElement).value)"><option v-if="!selected" value="">{{ refreshing ? '读取会话中…' : '请选择会话' }}</option><option v-for="item in conversations" :key="item.id" :value="item.id">{{ item.title }} · {{ conversationStatusLabel(statuses[item.id] ?? item.status) }}</option></select>
         <button class="parallel-new-session" type="button" :aria-label="`在${demand.name}新建会话`" title="新建会话" @click="openCreate"><WorkbenchIcon name="plus" /></button>
@@ -25,8 +25,14 @@ import DemandConversationSession from './DemandConversationSession.vue'
 import WorkbenchIcon from './WorkbenchIcon.vue'
 import ChatToolbarPopover from './ChatToolbarPopover.vue'
 
-const props = defineProps<{ workspaceId: string; demand: Demand; conversationId: string | null; active: boolean; expanded: boolean; runtimes: RuntimeDescriptor[] }>()
-const emit = defineEmits<{ select: [id: string]; expand: []; remove: []; open: [id: string | null]; 'open-file': [conversationId: string, input: { path: string; line: number }]; summary: [value: { running: number; waiting: number }] }>()
+const props = defineProps<{ workspaceId: string; demand: Demand; conversationId: string | null; active: boolean; expanded: boolean; runtimes: RuntimeDescriptor[]; canMoveEarlier?: boolean; canMoveLater?: boolean }>()
+const emit = defineEmits<{ select: [id: string]; expand: []; remove: []; open: [id: string | null]; 'open-file': [conversationId: string, input: { path: string; line: number }]; summary: [value: { running: number; waiting: number }]; 'reorder-start': [event: PointerEvent]; move: [direction: -1 | 1] }>()
+function reorderKey(event: KeyboardEvent) {
+  if (!event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+  event.preventDefault()
+  const direction = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1
+  if (direction < 0 ? props.canMoveEarlier : props.canMoveLater) emit('move', direction)
+}
 const conversations = ref<Conversation[]>([]), statuses = ref<Record<string, Conversation['status']>>({}), visited = ref<string[]>([])
 const refreshing = ref(false), loadError = ref('')
 const selected = computed(() => conversations.value.find(item => item.id === props.conversationId) ?? conversations.value[0])

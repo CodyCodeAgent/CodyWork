@@ -19,6 +19,16 @@ beforeEach(() => {
 afterEach(() => wrapper?.unmount())
 async function start() { wrapper = mount(ParallelDemandPanel, { props: { workspaceId: 'w1', demand, conversationId: 'a', active: true, expanded: false, runtimes: [{ id: 'codex', label: 'Codex' }] }, global: { stubs: { DemandConversationSession: Session } } }); await flushPromises() }
 describe('real demand session panel', () => {
+  it('offers bounded keyboard reordering without changing the selected session or draft', async () => {
+    await start()
+    await wrapper.setProps({ canMoveEarlier: false, canMoveLater: true })
+    await wrapper.get('input[aria-label="草稿a"]').setValue('keep-current-session')
+    await wrapper.get('.parallel-drag-handle').trigger('keydown', { key: 'ArrowRight', altKey: true })
+    await wrapper.get('.parallel-drag-handle').trigger('keydown', { key: 'ArrowLeft', altKey: true })
+    expect(wrapper.emitted('move')).toEqual([[1]])
+    expect((wrapper.get('input[aria-label="草稿a"]').element as HTMLInputElement).value).toBe('keep-current-session')
+    expect(wrapper.emitted('select')).toBeUndefined()
+  })
   it('lists only sessions from this demand and retains each visited session instance when switching', async () => {
     await start()
     expect(wrapper.findAll('.parallel-panel-session-row select option').map(item => item.text())).toEqual(['a · 就绪', 'b · 就绪'])
