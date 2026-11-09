@@ -359,6 +359,12 @@ export interface AvailableNativeThread {
   bound: boolean
 }
 
+export interface ParallelView {
+  layout: 'columns' | 'grid'
+  panels: Array<{ demandId: string; conversationId: string | null }>
+  revision: number
+}
+
 export interface ComposerOptions {
   provider: { type: string; label: string }
   capabilities: {
@@ -692,6 +698,8 @@ export const api = {
     request<AiReportManualResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/ai-report/retry`),
   addRepositoryToDemand: (workspaceId: string, demandId: string, repositoryId: string) =>
     request<Demand>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/repositories`, { repositoryId }),
+  getParallelView: (workspaceId: string) => request<ParallelView>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/parallel-view`),
+  saveParallelView: (workspaceId: string, view: ParallelView) => request<ParallelView>('PUT', `/api/workspaces/${encodeURIComponent(workspaceId)}/parallel-view`, view),
   listConversations: (workspaceId: string, demandId: string) =>
     request<Conversation[]>('GET', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`),
   listWorkspaceConversations: (workspaceId: string) =>

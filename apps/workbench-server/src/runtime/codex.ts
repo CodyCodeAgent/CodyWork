@@ -60,6 +60,7 @@ type ProductSession = {
   mode: RuntimePermissionMode
   model: string
   reasoningEffort: ReasoningEffort | ''
+  nativeHistoryPending: boolean
 }
 
 function isReasoningEffort(value: string): value is ReasoningEffort {
@@ -171,7 +172,9 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     const id = request.conversationId ?? `conversation-${randomUUID()}`
     const mode = this.modeFromContext(request.context)
     const binding = await manager.create(id, executionContext(request.context, mode, this.runtimeOwnerCwd(), Boolean(this.options.productToolHandler)))
-    return this.attach(id, binding, request.context, mode)
+    const handle = this.attach(id, binding, request.context, mode)
+    this.sessions.get(id)!.nativeHistoryPending = true
+    return handle
   }
 
   async resumeConversation(request: CreateConversationRequest & { nativeId: string }): Promise<ConversationHandle> {
@@ -212,7 +215,20 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     }
     if (!session) throw new Error('会话尚未连接 Runtime')
     if (session.binding.threadId !== request.nativeId) throw new Error('会话绑定与请求的原生 Thread 不一致')
-    const snapshot = await manager.readSnapshot(session.handle.id)
+    let snapshot
+    try {
+      snapshot = await manager.readSnapshot(session.handle.id)
+    } catch (error) {
+      // Current App Server versions cannot list turns on a newly created,
+      // not-yet-materialized thread. Only a thread created by this owner and
+      // never submitted is provably empty. Never conceal failures for resumed
+      // threads, started turns (including uncertain admission), or other RPCs.
+      if (session.nativeHistoryPending && error instanceof Error && error.message === 'list_turns is not supported yet') {
+        return { events: [], watermark: 0 }
+      }
+      throw error
+    }
+    if (snapshot.events.length) session.nativeHistoryPending = false
     return {
       events: snapshot.events.map(event => toRuntimeEvent(event, request.conversationId)),
       watermark: snapshot.watermark,
@@ -357,6 +373,8 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       ...(request.settings?.collaborationMode ? { collaborationMode: { mode: request.settings.collaborationMode, settings: { model: session.model || null, reasoning_effort: session.reasoningEffort || null, developer_instructions: null } } } : {}),
     }
     if (request.clientCommandId) this.commandPermissionModes.set(request.clientCommandId, turnMode)
+    // Invalidate before admission: a failure can still leave a native turn.
+    session.nativeHistoryPending = false
     const submission = this.requireManager().submit(
       session.handle.id,
       turn,
@@ -495,6 +513,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       this.unsubscribeManager = this.manager.subscribe(event => {
         const conversationId = this.sessionIdByThreadId.get(event.threadId)
         if (!conversationId) return
+        if (event.turnId) {
+          const session = this.sessions.get(conversationId)
+          if (session) session.nativeHistoryPending = false
+        }
         if (event.type === 'command.bound' && event.itemId && event.turnId) {
           const mode = this.commandPermissionModes.get(event.itemId)
           if (mode) this.turnPermissionModes.set(this.turnKey(event.threadId, event.turnId), mode)
@@ -515,7 +537,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
 
   private attach(id: string, binding: ThreadBinding, context: RuntimeContext, mode: RuntimePermissionMode): ConversationHandle {
     const handle = { id, nativeId: binding.threadId, createdAt: nowIso() }
-    this.sessions.set(id, { handle, binding, context, mode, model: this.options.model ?? '', reasoningEffort: '' })
+    this.sessions.set(id, { handle, binding, context, mode, model: this.options.model ?? '', reasoningEffort: '', nativeHistoryPending: false })
     this.sessionIdByThreadId.set(binding.threadId, id)
     return handle
   }

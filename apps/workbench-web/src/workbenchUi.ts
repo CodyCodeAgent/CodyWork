@@ -2,7 +2,7 @@ import type { AvailableNativeThread, Conversation, DashboardSnapshot, Demand, Fe
 import type { ConversationState } from '@codycodeagent/cody-web-core/conversation'
 
 export type HistoryMode = 'push' | 'replace' | 'none'
-export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings'
+export type WorkbenchStaticPage = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'parallel'
 export type WorkbenchSettingsSection = 'overview' | 'runtime' | 'quick-actions' | 'feishu' | 'smart-notifications' | 'followups'
 export interface WorkbenchRoute { workspaceId: string | null; demandId: string | null; conversationId: string | null; filePath: string | null; fileLine: number | null; page: WorkbenchStaticPage; settingsSection: WorkbenchSettingsSection }
 export interface ThreadProject { cwd: string; name: string; count: number; relatedToDemand: boolean }
@@ -143,7 +143,7 @@ export function dashboardNeedsRefresh(cache: DashboardSnapshot['cache'] | undefi
 export function parseWorkbenchRoute(search: string): WorkbenchRoute {
   const params = new URLSearchParams(search)
   const view = params.get('view')
-  const page: WorkbenchStaticPage = view === 'demands' || view === 'knowledge' || view === 'skills' || view === 'settings' ? view : 'dashboard'
+  const page: WorkbenchStaticPage = view === 'demands' || view === 'knowledge' || view === 'skills' || view === 'settings' || view === 'parallel' ? view : 'dashboard'
   const section = params.get('settings')
   const settingsSection: WorkbenchSettingsSection = section === 'runtime' || section === 'quick-actions' || section === 'feishu' || section === 'smart-notifications' || section === 'followups' ? section : 'overview'
   const fileLine = Number(params.get('line'))

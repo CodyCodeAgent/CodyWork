@@ -13,6 +13,20 @@ import { CODY_WEB_CORE_VERSION } from '@codycodeagent/cody-web-core/runtime'
 import { createConversationState, reduceConversationEvents } from '@codycodeagent/cody-web-core/conversation'
 
 describe('generic runtime protocol', () => {
+  it('executes independent native sessions concurrently and admits their next turns after terminal events', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-parallel-runtime-'))
+    const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd: root })
+    const context = { workspacePath: root, demandPath: root, instructionBundle: { systemInstructions: '', sources: [], skills: [], sha256: '' }, effectivePolicy: { readableRoots: [root], writableRoots: [root], deniedRoots: [], shell: 'allowlist' as const, approval: 'workbench' as const, hash: '' } }
+    try {
+      const a = await runtime.createConversation({ context }), b = await runtime.createConversation({ context })
+      const results = await Promise.all([runtime.sendTurn({ conversation: a, prompt: 'SLOW_E2E first-a' }), runtime.sendTurn({ conversation: b, prompt: 'SLOW_E2E first-b' })])
+      expect(results.map(result => result.finalText)).toEqual(['CODEX_FIXTURE_OK', 'CODEX_FIXTURE_OK'])
+      expect(results[0]!.events.find(event => event.type === 'turn.started')?.turnId).not.toBe(results[1]!.events.find(event => event.type === 'turn.started')?.turnId)
+      await expect(runtime.sendTurn({ conversation: b, prompt: 'second-b' })).resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
+      expect(runtime.diagnostics()?.startCount).toBe(1)
+    } finally { await runtime.close(); rmSync(root, { recursive: true, force: true }) }
+  })
   it('normalizes context roots without treating them as a CodyWork sandbox', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-runtime-'))
     mkdirSync(join(root, '.agents', 'skills', 'csr'), { recursive: true })
@@ -105,6 +119,39 @@ describe('generic runtime protocol', () => {
     expect(result.finalText).toContain('hello')
     expect(result.events.map(event => event.type)).toEqual(['user.completed', 'turn.started', 'tool.started', 'assistant.delta', 'assistant.completed', 'tool.completed', 'turn.completed'])
     await runtime.close()
+  })
+
+  it.each(['empty', 'generic', 'submitted', 'resumed'] as const)('keeps empty history fallback narrowly scoped: %s', async (scenario) => {
+    const root = mkdtempSync(join(tmpdir(), 'cody-empty-history-'))
+    const fixture = fileURLToPath(new URL('./fixtures/codex-runtime.mjs', import.meta.url))
+    const context = {
+      workspacePath: root,
+      instructionBundle: { systemInstructions: 'Synthetic history test', sources: [], skills: [], sha256: 'test' },
+      effectivePolicy: { readableRoots: [root], writableRoots: [root], deniedRoots: [], shell: 'allowlist' as const, approval: 'workbench' as const, hash: 'test' },
+    }
+    const message = scenario === 'generic' ? 'permission denied' : 'list_turns is not supported yet'
+    const runtime = new CodyWorkCodexRuntime({ command: `${process.execPath} ${fixture}`, appServerCwd: root,
+      env: { ...process.env, [scenario === 'empty' ? 'CODY_FIXTURE_EMPTY_HISTORY_ERROR' : 'CODY_FIXTURE_HISTORY_ERROR']: message } })
+    try {
+      if (scenario === 'resumed') {
+        await expect(runtime.resumeConversation({ conversationId: 'resumed', nativeId: 'native-fixture-thread', context })).rejects.toThrow(message)
+        return
+      }
+      const conversation = await runtime.createConversation({ context })
+      const request = { conversationId: conversation.id, nativeId: conversation.nativeId, context }
+      if (scenario === 'generic') { await expect(runtime.readConversationSnapshot(request)).rejects.toThrow(message); return }
+      if (scenario === 'empty') {
+        await expect(runtime.readConversationSnapshot(request)).resolves.toEqual({ events: [], watermark: 0 })
+        await expect(runtime.readConversationSnapshot(request)).resolves.toEqual({ events: [], watermark: 0 })
+      }
+      await runtime.sendTurn({ conversation, prompt: 'hello' })
+      if (scenario === 'submitted') await expect(runtime.readConversationSnapshot(request)).rejects.toThrow(message)
+      else {
+        const snapshot = await runtime.readConversationSnapshot(request)
+        expect(snapshot.events.some(event => event.type === 'assistant.completed')).toBe(true)
+        expect(snapshot.events.some(event => event.data.text === 'CODEX_FIXTURE_OK')).toBe(true)
+      }
+    } finally { await runtime.close(); rmSync(root, { recursive: true, force: true }) }
   })
 
   it('drives a Codex App Server session, turn-scoped collaboration and runtime approvals', async () => {

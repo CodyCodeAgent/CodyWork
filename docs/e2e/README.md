@@ -30,6 +30,7 @@
 | 改动范围 | 至少追加 |
 | --- | --- |
 | Workspace、Repository、Git | `E2E-002`、`E2E-003`、`E2E-005` |
+| 并行开发、需求内会话切换、布局保存 | `E2E-027`；并行执行与恢复追加 `E2E-007` 至 `E2E-014` |
 | Demand、Worktree、导航 | `E2E-003` 至 `E2E-006` |
 | Composer、消息、Core reducer | `E2E-007` 至 `E2E-010`、`E2E-012` |
 | Runtime、WebSocket、错误恢复 | `E2E-010` 至 `E2E-012` |

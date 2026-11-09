@@ -149,6 +149,13 @@ export class WorkbenchDb {
         created_at TEXT NOT NULL,
         last_opened_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS workspace_parallel_views (
+        workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+        layout TEXT NOT NULL CHECK(layout IN ('columns', 'grid')),
+        panels_json TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS repositories (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
