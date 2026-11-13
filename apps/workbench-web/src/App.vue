@@ -146,7 +146,7 @@
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div v-if="composerCollapsed" class="composer-restore-row"><button class="composer-restore" type="button" aria-label="展开消息输入区" aria-expanded="false" title="展开输入区" @click="setComposerCollapsed(false)"><span>展开输入区</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg></button></div>
             <div v-else :class="['composer', { 'composer--without-reasoning': composerReasoningOptions.length === 0, 'composer--settings-open': mobileComposerSettingsOpen }]">
-              <div class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div><button class="chat-panel-collapse" type="button" aria-label="收起消息输入区" aria-expanded="true" title="收起输入区" @click="setComposerCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></button></div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt"><template #controls><button type="button" class="mobile-composer-settings-toggle" :aria-expanded="mobileComposerSettingsOpen" @click="mobileComposerSettingsOpen = !mobileComposerSettingsOpen">{{ mobileComposerSettingsOpen ? '收起设置' : '设置' }} · {{ composerPermissionOptions.find(option => option.value === permission)?.label || permission }}</button><button type="button" class="mobile-composer-collapse" aria-label="收起消息输入区" @click="setComposerCollapsed(true)">⌄</button></template></CodyComposer>
+              <div class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div><button class="chat-panel-collapse" type="button" aria-label="收起消息输入区" aria-expanded="true" title="收起输入区" @click="setComposerCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></button></div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt"><template #controls><ConversationFastToggle v-if="selectedConversation && activeRuntimeType === 'codex' && selectedModelSupportsFast" :conversation-id="selectedConversation.id" /><button type="button" class="mobile-composer-settings-toggle" :aria-expanded="mobileComposerSettingsOpen" @click="mobileComposerSettingsOpen = !mobileComposerSettingsOpen">{{ mobileComposerSettingsOpen ? '收起设置' : '设置' }} · {{ composerPermissionOptions.find(option => option.value === permission)?.label || permission }}</button><button type="button" class="mobile-composer-collapse" aria-label="收起消息输入区" @click="setComposerCollapsed(true)">⌄</button></template></CodyComposer>
               <div v-if="selectedModelDetails" class="composer-model-detail" :title="selectedModelDetails" role="status">当前模型 · {{ selectedModelDetails }}</div>
             </div>
           </section>
@@ -272,6 +272,8 @@ import { buildConversationRecoveryPrompt, isThreadMigrationRecommended, recovery
 import { initialConversationSocketSnapshot, type ConversationSocketSnapshot } from './conversationSocket'
 import { workbenchConversationTransport } from './workbenchConversationTransport'
 import { conversationTextDrafts, conversationImageDrafts } from './conversationDrafts'
+import { conversationServiceTier } from './conversationFastMode'
+import ConversationFastToggle from './components/ConversationFastToggle.vue'
 import { splitDiffRows, trimDiffContext, type FilePreviewDiffLayout } from './filePreviewDiff'
 import { readPanelCollapsed, writePanelCollapsed } from './panelState'
 import { initialModelId, modelDescription, reasoningOptionsForModel, reconcileReasoningEffort } from './composerModels'
@@ -539,6 +541,7 @@ const threadProjects = computed<ThreadProject[]>(() => groupThreadProjects(nativ
 const filteredNativeThreads = computed(() => filterNativeThreads(nativeThreads.value, selectedThreadProject.value, threadQuery.value))
 const canBindNativeThread = computed(() => manualThreadEntry.value ? Boolean(boundNativeId.value.trim()) : filteredNativeThreads.value.some(thread => thread.nativeId === boundNativeId.value && !thread.bound))
 const composerModels = computed<CodyComposerOption[]>(() => runtimeModels.value.map(model => ({ value: model.id, label: model.label, description: modelDescription(model) })))
+const selectedModelSupportsFast = computed(() => runtimeModels.value.find(model => model.id === selectedModel.value)?.metadata?.supportsFastMode === true)
 const selectedModelDetails = computed(() => {
   const model = runtimeModels.value.find(candidate => candidate.id === selectedModel.value)
   return model ? modelDescription(model) : ''
@@ -1874,6 +1877,7 @@ async function submitConversationMessage(
           ...(images.length ? { imageIds: images.map(image => image.id) } : {}),
           ...(submitMode === 'append' ? {} : { settings: {
             ...(selectedModel.value ? { model: selectedModel.value } : {}),
+            ...(activeRuntimeType.value === 'codex' ? { serviceTier: conversationServiceTier(selectedConversation.value.id, selectedModelSupportsFast.value) } : {}),
             ...(runtimeCapabilities.value.reasoning && selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
             collaborationMode: selectedCollaborationModeKind.value,
             ...(turnSkills.length ? { skills: turnSkills } : {}),
@@ -1939,7 +1943,8 @@ async function sendMessage(): Promise<void> {
   }
 }
 async function retryFailedMessage(message: CodyMessage): Promise<void> {
-  if (sending.value || message.outbox?.status !== 'failed') return
+  const conversation = selectedConversation.value
+  if (!conversation || sending.value || message.outbox?.status !== 'failed') return
   if (isThreadMigrationRecommended(message.outbox.lastError)) {
     await recoverFailedMessageInNewConversation(message)
     return
@@ -1957,6 +1962,7 @@ async function retryFailedMessage(message: CodyMessage): Promise<void> {
         ...(imageIds.length ? { imageIds } : {}),
         settings: {
           ...(selectedModel.value ? { model: selectedModel.value } : {}),
+          ...(conversation.runtimeType === 'codex' ? { serviceTier: conversationServiceTier(conversation.id, selectedModelSupportsFast.value) } : {}),
           ...(runtimeCapabilities.value.reasoning && selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
           collaborationMode: selectedCollaborationModeKind.value,
           ...(turnSkills.length ? { skills: turnSkills } : {}),
@@ -2028,6 +2034,7 @@ async function recoverFailedMessageInNewConversation(message: CodyMessage): Prom
           ...(migratedImages.length ? { imageIds: migratedImages.map(image => image.id) } : {}),
           settings: {
             ...(selectedModel.value ? { model: selectedModel.value } : {}),
+            ...(created.runtimeType === 'codex' ? { serviceTier: conversationServiceTier(created.id, selectedModelSupportsFast.value) } : {}),
             ...(runtimeCapabilities.value.reasoning && selectedReasoning.value ? { reasoningEffort: selectedReasoning.value } : {}),
             collaborationMode: selectedCollaborationModeKind.value,
             ...(turnSkills.length ? { skills: turnSkills } : {}),

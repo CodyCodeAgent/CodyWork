@@ -24,6 +24,8 @@ export type ConversationExecutionProfile = {
 
 export type ConversationCommandSettings = {
   model?: string
+  /** 当前会话的浏览器档位选择。null 表示标准档。 */
+  serviceTier?: 'fast' | null
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   collaborationMode?: 'default' | 'plan'
   skills?: string[]

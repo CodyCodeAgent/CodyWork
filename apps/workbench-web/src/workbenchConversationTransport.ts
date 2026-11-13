@@ -1,5 +1,5 @@
 import type { ConversationTransport } from '@codycodeagent/cody-web-core/client'
-import { api, type Conversation, type ConversationEvent } from './api'
+import { api, type BrowserTurnSettings, type Conversation, type ConversationEvent } from './api'
 import { createConversationEventSocket, type ConversationSocketSnapshot } from './conversationSocket'
 
 /** Same product gateway and native snapshot contract in single and parallel views. */
@@ -12,7 +12,7 @@ export function workbenchConversationTransport(workspaceId: string, conversation
     read: async () => (await api.conversationHistory(workspaceId, conversation.id)).events,
     snapshot: () => api.conversationHistory(workspaceId, conversation.id),
     submit: async command => {
-      const input = command.input as { content: string; settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }; imageIds?: string[] }
+      const input = command.input as { content: string; settings?: BrowserTurnSettings; imageIds?: string[] }
       const accepted = await api.sendMessage(workspaceId, conversation.id, command.clientCommandId, input.content, command.mode, input.settings, input.imageIds)
       return { clientCommandId: accepted.commandId }
     },

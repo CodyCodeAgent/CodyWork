@@ -127,7 +127,8 @@
 .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-shell { border: 1px solid #d2daea; border-radius: 14px; background: #fff; box-shadow: 0 3px 16px #17233d08; }
 .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-shell:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
 .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-send { background: var(--blue); color: #fff; border-radius: 10px; }
-.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control, .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-picker { background: #f7f8fc; border-color: var(--line); color: #40506a; }
+.codywork-vue .cody-composer[data-variant="embedded"] { --cw-composer-control-bg: #f7f8fc; --cw-composer-control-text: #40506a; }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control, .codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-picker { background: var(--cw-composer-control-bg); border-color: var(--line); color: var(--cw-composer-control-text); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #7774e8; outline-offset: 3px; }
 .sidebar-item > svg { flex-shrink: 0; }

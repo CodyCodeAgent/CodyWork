@@ -125,6 +125,8 @@ function toRuntimeEvent(event: CodexEvent, conversationId: string): RuntimeEvent
 /** Thin CodyWork product adapter over the shared Codex runtime/session core. */
 export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   private host: AppServerHost | null = null
+  private serviceTierConfig: Promise<void> | null = null
+  private defaultServiceTier: string | null = null
   private catalog: CodexSessionCatalog | null = null
   private manager: CodexSessionManager | null = null
   private readonly sessions = new Map<string, ProductSession>()
@@ -278,6 +280,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
           isDefault: model.isDefault,
           defaultReasoningEffort,
           supportedReasoningEfforts,
+          ...(model.supportsFastMode ? { metadata: { supportsFastMode: true } } : {}),
         }]
       }) : []
     const composerSkills = skills.status === 'fulfilled' ? skills.value.filter(skill => skill.enabled) : []
@@ -365,6 +368,8 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     if (request.settings?.model?.trim()) session.model = request.settings.model.trim()
     if (request.settings?.reasoningEffort) session.reasoningEffort = request.settings.reasoningEffort
     const turn: TurnInput = {
+      // App Server 会沿用线程上一轮的档位。无浏览器覆盖的来源使用启动配置，避免继承浏览器的 Fast。
+      serviceTier: request.settings?.serviceTier === undefined ? this.defaultServiceTier : request.settings.serviceTier,
       input: buildTurnUserInput({ text: request.prompt, skills: request.settings?.skills, localImages: request.localImages }),
       ...(session.model ? { model: session.model } : {}),
       ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}),
@@ -483,6 +488,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
   async close(): Promise<void> {
     this.unsubscribeManager?.(); this.unsubscribeManager = null
     await this.manager?.dispose(); await this.host?.dispose()
+    this.serviceTierConfig = null; this.defaultServiceTier = null
     this.manager = null; this.catalog = null; this.host = null; this.sessions.clear(); this.sessionIdByThreadId.clear(); this.listeners.clear()
     this.commandPermissionModes.clear(); this.turnPermissionModes.clear()
   }
@@ -532,6 +538,10 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
     // manager allocated across a failed handshake so the next request can retry
     // the shared host's de-duplicated initialization promise.
     await this.requireHost().ensureInitialized()
+    this.serviceTierConfig ??= this.requireCatalog().readConfig().then(({ config }) => {
+      this.defaultServiceTier = config.service_tier ?? null
+    }).catch(() => { /* 旧版 App Server 无法回读配置时使用标准档。 */ })
+    await this.serviceTierConfig
     return this.manager
   }
 

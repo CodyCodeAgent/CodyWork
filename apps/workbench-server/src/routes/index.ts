@@ -898,6 +898,7 @@ function buildRoutes(ctx: AppContext) {
       ...(typeof c.body.model === 'string' && c.body.model.trim() ? { model: c.body.model.trim().slice(0, 160) } : {}),
       ...(typeof c.body.reasoningEffort === 'string' && reasoningEfforts.has(c.body.reasoningEffort) ? { reasoningEffort: c.body.reasoningEffort as 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' } : {}),
       collaborationMode,
+      ...(c.body.serviceTier === 'fast' || c.body.serviceTier === null ? { serviceTier: c.body.serviceTier as 'fast' | null } : {}),
       ...(Array.isArray(c.body.skills) ? { skills: c.body.skills.filter((item: unknown) => typeof item === 'string').slice(0, 20) as string[] } : {}),
     }
     const clientCommandId = typeof c.body.clientCommandId === 'string' ? c.body.clientCommandId : undefined
