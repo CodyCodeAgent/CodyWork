@@ -33,6 +33,11 @@ pnpm start -- --host 0.0.0.0 --port 3001
 The built server is the single production process. It serves the API,
 WebSocket endpoint, and the Vue SPA from `apps/workbench-web/dist`.
 
+For Codex models that advertise Fast mode, the conversation composer shows a
+⚡ toggle. The browser remembers the choice for that conversation. It applies
+to new Turns, including queued messages, and does not change an in-flight Turn
+when sending a steer. Fast mode may consume more of your Codex allowance.
+
 ### Trae network configuration
 
 `scripts/codywork-service.sh` keeps both `no_proxy` and `NO_PROXY` aligned

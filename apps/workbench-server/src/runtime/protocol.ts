@@ -120,6 +120,8 @@ export interface SendTurnRequest {
   settings?: {
     model?: string
     reasoningEffort?: ReasoningEffort
+    /** 本轮 Codex 服务档位。null 清除线程上一次的覆盖。 */
+    serviceTier?: 'fast' | null
     /** Turn-scoped collaboration mode. It is never mirrored into CodyWork storage. */
     collaborationMode?: RuntimeCollaborationMode
     /** Provider-native structured skill inputs; never concatenate these into user text. */
@@ -133,6 +135,8 @@ export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | '
 /** Provider-reported, non-sensitive model status used to help a user select a
  * model. All fields are optional because ACP does not standardize them. */
 export interface RuntimeModelMetadata {
+  /** Codex 模型目录声明支持 Fast。 */
+  supportsFastMode?: boolean
   contextWindow?: number
   maxContextWindow?: number
   supportsMaxMode?: boolean

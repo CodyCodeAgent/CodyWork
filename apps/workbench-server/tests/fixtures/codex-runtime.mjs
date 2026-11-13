@@ -260,6 +260,7 @@ rl.on('line', line => {
   } } })
   }
   else if (message.method === 'thread/name/set') write({ id: message.id, result: {} })
+  else if (message.method === 'config/read') write({ id: message.id, result: { config: { service_tier: null }, origins: {}, layers: null } })
   else if (message.method === 'model/list') write({ id: message.id, result: { data: [{
     id: 'gpt-5.6-sol',
     model: 'gpt-5.6-sol',

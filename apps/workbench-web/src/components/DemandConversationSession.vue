@@ -12,7 +12,7 @@
     <div class="parallel-session-composer" :class="{ 'settings-open': settingsOpen }">
       <div class="parallel-composer-note"><span :class="['parallel-connection', socket.status]">{{ socket.status === 'connected' ? '已连接' : socket.status === 'reconnecting' ? '重连中' : socket.status === 'disconnected' ? '连接已断开' : '连接中' }}</span><span>{{ conversation.runtimeType }} · {{ conversation.title }}</span><button v-if="!ready && !loading" type="button" @click="reloadOptions">重试加载</button></div>
       <CodyComposer variant="embedded" :draft="draft" :disabled="sending || !ready || permissionSaving" :is-running="running" :models="models" :selected-model="model" :reasoning-options="reasoningOptions" :selected-reasoning="reasoning" :permission-options="permissions" :selected-permission="permission" :submit-modes="submitModes" :selected-submit-mode="submitMode" :collaboration-modes="collaborationModes" :selected-collaboration-mode="collaboration" :skills="skills" :selected-skills="selectedSkills" :images="images" :image-upload-enabled="options?.capabilities.imageInput ?? false" :is-uploading-images="uploading" :image-error="imageError" placeholder="给当前需求的这个会话发送消息…（Control + Enter 发送）" @update:draft="updateDraft" @update:model="selectModel" @update:reasoning="reasoning = $event" @update:permission="selectPermission" @update:submit-mode="submitMode = $event as ComposerSubmitMode" @update:collaboration-mode="collaboration = $event" @update:selected-skills="selectedSkills = $event" @attach-images="uploadImages" @remove-image="removeImage" @send="send" @stop="interrupt">
-        <template #controls><button class="parallel-settings-toggle" type="button" :aria-expanded="settingsOpen" @click="settingsOpen = !settingsOpen">{{ settingsOpen ? '收起设置' : `设置 · ${permissions.find(item => item.value === permission)?.label}` }}</button></template>
+        <template #controls><ConversationFastToggle v-if="conversation.runtimeType === 'codex' && supportsFast" :conversation-id="conversation.id" /><button class="parallel-settings-toggle" type="button" :aria-expanded="settingsOpen" @click="settingsOpen = !settingsOpen">{{ settingsOpen ? '收起设置' : `设置 · ${permissions.find(item => item.value === permission)?.label}` }}</button></template>
       </CodyComposer>
     </div>
   </section>
@@ -28,6 +28,8 @@ import { conversationStatusFromState, conversationStatusLabel } from '../workben
 import { initialConversationSocketSnapshot } from '../conversationSocket'
 import { workbenchConversationTransport } from '../workbenchConversationTransport'
 import { conversationImageDrafts, conversationTextDrafts } from '../conversationDrafts'
+import { conversationServiceTier } from '../conversationFastMode'
+import ConversationFastToggle from './ConversationFastToggle.vue'
 import WorkbenchIcon from './WorkbenchIcon.vue'
 
 const props = defineProps<{ workspaceId: string; demandId: string; conversation: Conversation; active: boolean }>()
@@ -48,6 +50,7 @@ const entries = computed(() => allEntries.value.slice(-visibleCount.value))
 const status = computed(() => conversationStatusFromState(props.conversation.status, state.value.threadId === props.conversation.nativeId ? state.value : null))
 const running = computed(() => status.value === 'running' || status.value === 'awaiting_approval')
 const models = computed(() => options.value?.capabilities.modelSelection ? options.value.models.map(item => ({ value: item.id, label: item.label, description: modelDescription(item) })) : [])
+const supportsFast = computed(() => options.value?.models.find(item => item.id === model.value)?.metadata?.supportsFastMode === true)
 const reasoningOptions = computed(() => options.value?.capabilities.reasoning ? reasoningOptionsForModel(options.value.models, model.value) : [])
 const permissions = [{ value: 'read-only', label: '只读' }, { value: 'workspace-write', label: 'Normal' }, { value: 'yolo', label: 'YOLO' }]
 const submitModes = computed(() => [{ value: 'queue', label: '排队' }, ...(options.value?.capabilities.steer ? [{ value: 'steer', label: '引导' }] : []), ...(options.value?.capabilities.append ? [{ value: 'append', label: '追加' }] : [])])
@@ -101,6 +104,7 @@ async function selectPermission(value: string) {
 function settings(skillIds: string[]) {
   return {
     ...(options.value?.capabilities.modelSelection && model.value ? { model: model.value } : {}),
+    ...(props.conversation.runtimeType === 'codex' ? { serviceTier: conversationServiceTier(props.conversation.id, supportsFast.value) } : {}),
     ...(options.value?.capabilities.reasoning && reasoning.value ? { reasoningEffort: reasoning.value } : {}),
     collaborationMode: options.value?.capabilities.planMode && collaboration.value === 'plan' ? 'plan' as const : 'default' as const,
     ...(skillIds.length ? { skills: skillIds } : {}),

@@ -384,6 +384,8 @@ export interface ComposerOptions {
     label: string
     description: string
     metadata?: {
+      /** Codex 模型目录声明支持 Fast。 */
+      supportsFastMode?: boolean
       contextWindow?: number
       maxContextWindow?: number
       supportsMaxMode?: boolean
@@ -615,6 +617,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 const followupRoot = (workspaceId: string) => `/api/workspaces/${encodeURIComponent(workspaceId)}/followups`
+/** 浏览器发送消息时随命令携带的会话设置。 */
+export interface BrowserTurnSettings {
+  model?: string
+  reasoningEffort?: string
+  /** 当前会话的 Codex 档位，null 表示标准档。 */
+  serviceTier?: 'fast' | null
+  collaborationMode?: 'default' | 'plan'
+  skills?: string[]
+}
+
 export const api = {
   listNotifications: (id: string, unread = false, before?: number) => request<{ items: WorkbenchNotification[]; unreadCount: number; nextCursor: number | null }>('GET', `/api/workspaces/${id}/notifications?unread=${unread ? '1' : '0'}${before ? `&before=${before}` : ''}`),
   readNotifications: (id: string, notificationId?: string, read = true) => request('POST', `/api/workspaces/${id}/notifications/read`, notificationId ? { id: notificationId, read } : {}),
@@ -734,7 +746,7 @@ export const api = {
     request<ConversationShareResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/share/feishu`, input),
   uploadConversationImage: (workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }) =>
     request<ConversationImageUpload>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/images`, input),
-  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' | 'append' = 'queue', settings?: { model?: string; reasoningEffort?: string; collaborationMode?: 'default' | 'plan'; skills?: string[] }, imageIds: string[] = []) =>
+  sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' | 'append' = 'queue', settings?: BrowserTurnSettings, imageIds: string[] = []) =>
     request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}), ...(imageIds.length ? { images: imageIds } : {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),

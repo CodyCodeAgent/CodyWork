@@ -11,3 +11,6 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - '@agentclientprotocol/sdk@1.5.1'
+
+patchedDependencies:
+  '@codycodeagent/cody-web-core@0.43.1': patches/@codycodeagent__cody-web-core@0.43.1.patch

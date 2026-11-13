@@ -1,0 +1,52 @@
+diff --git a/packages/core/dist/session/catalog.d.ts b/packages/core/dist/session/catalog.d.ts
+index bb8675dedd53713eeca60728b0f0e2d3e0afa152..401e27249fd08d32c9c8dea4ce4e779410c2b681 100644
+--- a/packages/core/dist/session/catalog.d.ts
++++ b/packages/core/dist/session/catalog.d.ts
+@@ -32,6 +32,8 @@ export interface CodexModelOption {
+     isDefault: boolean;
+     defaultReasoningEffort: ReasoningEffort;
+     supportedReasoningEfforts: ReasoningEffort[];
++    /** 由原生模型目录声明的 Fast 能力。 */
++    supportsFastMode: boolean;
+ }
+ export interface CodexCollaborationModeOption {
+     name: string;
+diff --git a/packages/core/dist/session/catalog.js b/packages/core/dist/session/catalog.js
+index 5adfad32be4af0fbf17acdc5c340cf467438e2eb..63d29a1dc0708c3f444905d98f40e6a855f08c88 100644
+--- a/packages/core/dist/session/catalog.js
++++ b/packages/core/dist/session/catalog.js
+@@ -135,6 +135,9 @@ export class CodexSessionCatalog {
+                 isDefault: model.isDefault,
+                 defaultReasoningEffort: model.defaultReasoningEffort,
+                 supportedReasoningEfforts: model.supportedReasoningEfforts.map(option => option.reasoningEffort),
++                supportsFastMode: Array.isArray(model.serviceTiers) && model.serviceTiers.length
++                    ? model.serviceTiers.some(tier => tier.id === 'fast' || tier.id === 'priority')
++                    : (model.additionalSpeedTiers ?? []).some(tier => tier === 'fast' || tier === 'priority'),
+             })));
+             cursor = result.nextCursor;
+         } while (cursor);
+diff --git a/packages/core/dist/session/index.js b/packages/core/dist/session/index.js
+index bdcf0688a25847b93e5cf2a1d2b61d7641f51ace..900621bd8951e3ac01cf1559dac76dae447ec13f 100644
+--- a/packages/core/dist/session/index.js
++++ b/packages/core/dist/session/index.js
+@@ -345,6 +345,7 @@ export class CodexSessionManager {
+                         ...(session.context.turn ?? {}),
+                         input: input.input,
+                         ...(input.model !== undefined ? { model: input.model } : {}),
++                        ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
+                         ...(input.effort !== undefined ? { effort: input.effort } : {}),
+                         ...(input.collaborationMode !== undefined ? { collaborationMode: input.collaborationMode } : {}),
+                         ...(input.approvalPolicy !== undefined ? { approvalPolicy: input.approvalPolicy } : {}),
+diff --git a/packages/core/dist/session/turn-input.d.ts b/packages/core/dist/session/turn-input.d.ts
+index 7eda599db188d88e1b1b0c6884c57db89d7cca70..ca3e55044375a572d3fe43f760aafe67c7c77ec7 100644
+--- a/packages/core/dist/session/turn-input.d.ts
++++ b/packages/core/dist/session/turn-input.d.ts
+@@ -9,6 +9,8 @@ export type ExecutionContext = {
+ export type TurnInput = {
+     input: UserInput[];
+     model?: TurnStartParams['model'];
++    /** 原生 Turn 档位。null 用于清除上一轮的覆盖。 */
++    serviceTier?: TurnStartParams['serviceTier'];
+     effort?: TurnStartParams['effort'];
+     collaborationMode?: TurnStartParams['collaborationMode'];
+     approvalPolicy?: TurnStartParams['approvalPolicy'];

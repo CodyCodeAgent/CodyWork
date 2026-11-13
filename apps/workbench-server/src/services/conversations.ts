@@ -75,6 +75,7 @@ type ConversationSendSettings = ConversationCommandSettings
 
 type RuntimeTurnSettings = {
   model?: string
+  serviceTier?: 'fast' | null
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   collaborationMode?: 'default' | 'plan'
   skills?: Array<{ name: string; path: string }>
@@ -610,6 +611,8 @@ export class ConversationService implements ConversationCommandGateway {
     if (useFollowupSkill) selectedSkills.push({ name: FOLLOWUP_SKILL_NAME, path: FOLLOWUP_SKILL_PATH })
     const runtimeSettings: RuntimeTurnSettings = {
       ...(command.settings?.model ? { model: command.settings.model } : {}),
+      ...(row.runtime_type === 'codex' && command.origin.kind === 'browser' && command.settings?.serviceTier !== undefined
+        ? { serviceTier: command.settings.serviceTier } : {}),
       ...(command.settings?.reasoningEffort ? { reasoningEffort: command.settings.reasoningEffort } : {}),
       ...(command.settings?.collaborationMode ? { collaborationMode: command.settings.collaborationMode } : {}),
       ...(selectedSkills.length ? { skills: selectedSkills } : {}),
