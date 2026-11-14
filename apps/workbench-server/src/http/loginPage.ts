@@ -4,20 +4,20 @@ import { join } from 'node:path'
 /** Presentation only: authentication, redirect and session contracts stay in the HTTP routes. */
 export function createLoginPage(staticRoot?: string): (error?: string) => string {
   let palette = ''
+  let prepaint = ''
   if (staticRoot) {
     try { palette = readFileSync(join(staticRoot, 'theme-tokens.css'), 'utf8') }
     catch { /* API-only/test installations still get a readable default login. */ }
+  }
+  if (staticRoot) {
+    try { prepaint = readFileSync(join(staticRoot, 'skin-prepaint.js'), 'utf8') } catch { /* CSS defaults. */ }
   }
   return (error = '') => `<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>CodyWork 登录</title>
 <script>
-try {
-  const theme = localStorage.getItem('codywork.theme');
-  document.documentElement.dataset.theme = ['professional','midnight','forest'].includes(theme) ? theme : 'professional';
-  document.documentElement.style.colorScheme = theme === 'midnight' ? 'dark' : 'light';
-} catch { document.documentElement.dataset.theme = 'professional'; }
+${prepaint}
 </script>
 <style>
 ${palette}
