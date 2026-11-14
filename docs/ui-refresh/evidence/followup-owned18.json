@@ -1,0 +1,20 @@
+[
+  {
+    "id": "66d9906d-d995-4681-801b-74a4ce22bd83",
+    "name": "UI18 · 每次通知",
+    "notificationPolicy": "every",
+    "backgroundConversationId": "conversation_mwg7czr7_xygcqg"
+  },
+  {
+    "id": "0a9555f4-f2df-40c8-997d-a34a2f02c0e1",
+    "name": "UI18 · 变化通知",
+    "notificationPolicy": "change",
+    "backgroundConversationId": "conversation_mwg7ddp9_y2t6cv"
+  },
+  {
+    "id": "1f5d8f1e-2f1b-4429-896a-b7fadd6519d6",
+    "name": "UI18 · 结束通知",
+    "notificationPolicy": "terminal",
+    "backgroundConversationId": "conversation_mwg7de1r_dgqa7s"
+  }
+]

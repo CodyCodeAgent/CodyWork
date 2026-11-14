@@ -51,11 +51,14 @@ describe('FollowupSettings', () => {
     vi.mocked(api.followupRuns).mockResolvedValue({ items: [{ id: 'r1', status: 'completed', startedAt: '2026-10-18T00:00:00Z', deliveryStatus }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
     expect(button(wrapper, '重试通知（不重新检查）')).toBeUndefined()
+    if (deliveryStatus === 'not_requested') expect(wrapper.get('.run').text()).toContain('通知：本轮无需通知')
+    if (deliveryStatus === 'delivered') expect(wrapper.get('.run').text()).toContain('通知：已送达')
   })
   it('retries an interrupted notification on needs_attention with the latest revision', async () => {
     const wrapper = await setup([{ ...task, status: 'needs_attention', revision: 8, lastRun: { id: 'r1', phase: 'interrupted', result: { status: 'pending' }, outboxId: null } }])
     vi.mocked(api.followupRuns).mockResolvedValue({ items: [{ id: 'r1', status: 'pending', phase: 'interrupted', result: { status: 'pending' }, startedAt: '2026-10-18T00:00:00Z', deliveryStatus: 'needs_attention' }] })
     await wrapper.get('.task-row').trigger('click'); await flushPromises()
+    expect(wrapper.get('.run').text()).toContain('通知：待人工处理')
     await retry(wrapper)
     expect(api.resendFollowupResult).toHaveBeenCalledExactlyOnceWith('w1', 't1', 8, 'a1', 'fixture@example.test')
   })
@@ -73,7 +76,7 @@ describe('FollowupSettings', () => {
     vi.mocked(api.listFollowups).mockResolvedValue({ items: [{ ...task, status: 'completed', revision: 5, lastRun: { id: 'r1', phase: 'finished' } }] })
     resolve({}); await flushPromises()
     expect(wrapper.text()).toContain('v5')
-    expect(wrapper.get('.run').text()).toContain('投递：pending')
+    expect(wrapper.get('.run').text()).toContain('通知：等待投递')
     expect(button(wrapper, '重试通知（不重新检查）')).toBeUndefined()
   })
   it('never offers retry for an interrupted execution or an older failed delivery', async () => {

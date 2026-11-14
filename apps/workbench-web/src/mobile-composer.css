@@ -3,21 +3,21 @@
 @media (max-width: 900px) {
   .composer { flex-shrink: 0; padding: 8px 12px max(10px, env(safe-area-inset-bottom)); }
   .composer .composer-head { display: none; }
-  .composer .cody-composer[data-variant="embedded"] .cody-composer-shell { padding: 8px 10px; border-radius: 16px; box-shadow: none; }
+  .composer .cody-composer[data-variant="embedded"] .cody-composer-shell { padding: 8px 10px; border-radius: var(--radius-panel); box-shadow: none; }
   .composer .cody-composer[data-variant="embedded"] textarea { min-height: 48px; max-height: 24dvh; padding: 5px 2px 8px; font-size: 16px; line-height: 1.5; resize: vertical; }
   .composer .cody-composer[data-variant="embedded"] .cody-composer-controls { min-height: 44px; padding-top: 4px; gap: 8px; border-top: 0; }
   .composer .cody-composer-settings { gap: 6px; }
   .composer .cody-composer-image-picker, .composer .cody-composer-send, .composer .cody-composer-stop { min-width: 44px; min-height: 44px; }
-  .composer .mobile-composer-settings-toggle { display: inline-flex; order: -1; align-items: center; gap: 6px; min-height: 44px; max-width: 100%; padding: 8px 10px; color: #536071; background: #f7f8fa; border: 1px solid #e5e8ec; border-radius: 9px; font-size: 12px; cursor: pointer; }
-  .composer .mobile-composer-settings-toggle[aria-expanded="true"] { color: #274eac; background: #edf2ff; border-color: #ccd9f5; }
-  .composer .mobile-composer-collapse { display: grid; place-items: center; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: transparent; color: #69717e; font-size: 18px; }
+  .composer .mobile-composer-settings-toggle { display: inline-flex; order: -1; align-items: center; gap: 6px; min-height: 44px; max-width: 100%; padding: 8px 10px; color: var(--ink-secondary); background: var(--surface-subtle); border: 1px solid var(--border-default); border-radius: var(--radius-control); font-size: 12px; cursor: pointer; }
+  .composer .mobile-composer-settings-toggle[aria-expanded="true"] { color: var(--accent); background: var(--surface-panel); border-color: var(--border-default); }
+  .composer .mobile-composer-collapse { display: grid; place-items: center; min-width: 44px; min-height: 44px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink-secondary); font-size: 18px; }
   /* Never conceal settings unless their disclosure button actually exists. */
   .composer:has(.mobile-composer-settings-toggle):not(.composer--settings-open) .cody-composer-compact-control,
   .composer:has(.mobile-composer-settings-toggle):not(.composer--settings-open) .cody-composer-policy,
   .composer:has(.mobile-composer-settings-toggle):not(.composer--settings-open) .composer-model-detail { display: none; }
   .composer.composer--settings-open .cody-composer-settings { align-items: stretch; }
   .composer.composer--settings-open .cody-composer-compact-control { min-height: 44px; }
-  .composer.composer--settings-open .cody-composer-compact-control select { min-height: 44px; max-width: 100%; font-size: 16px; }
+  .composer.composer--settings-open .cody-composer-compact-control select { min-height: 44px; max-width: 100%; font-size: 16px; font-family: var(--font-body); }
   .composer.composer--settings-open .cody-composer-policy { margin-top: 8px; line-height: 1.5; }
   .composer.composer--settings-open .composer-model-detail { white-space: normal; max-height: 48px; overflow: auto; }
 }

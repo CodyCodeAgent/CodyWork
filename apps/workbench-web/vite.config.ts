@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 
 const apiTarget = process.env.CODYWORK_DEV_API_TARGET ?? 'http://127.0.0.1:3210'
@@ -13,7 +14,13 @@ const buildRevision = (() => {
 })()
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), {
+    name: 'codywork-login-theme',
+    generateBundle() {
+      // The server embeds the same palette in its pre-auth page; no public asset or auth exception is needed.
+      this.emitFile({ type: 'asset', fileName: 'theme-tokens.css', source: readFileSync(new URL('./src/theme-tokens.css', import.meta.url), 'utf8') })
+    },
+  }],
   build: {
     rollupOptions: {
       output: {

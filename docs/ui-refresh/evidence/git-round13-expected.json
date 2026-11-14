@@ -1,0 +1,10 @@
+{
+  "atlas-api": {
+    "old": "0398e73e20dcf60c8927cb33f3e09a5dfbcff2d1",
+    "remote": "760ca220e13fbb97e836daa20349920387b7b177"
+  },
+  "atlas-console": {
+    "old": "e8a701aefc2565ab335bb4a7563fecd257eb1428",
+    "remote": "9fa1331f7f06e5381d45366323ae51ab14b7c540"
+  }
+}

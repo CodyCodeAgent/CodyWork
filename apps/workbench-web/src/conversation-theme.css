@@ -1,0 +1,70 @@
+/* Host palette bridge for Core's embedded view. No conversation state is duplicated. */
+.codywork-vue .cody-conversation[data-variant="embedded"],
+.codywork-vue .cody-composer[data-variant="embedded"] {
+  --cody-chat-bg:transparent;
+  --cody-chat-panel:var(--surface-panel);
+  --cody-chat-surface:var(--surface-subtle);
+  --cody-chat-line:var(--border-default);
+  --cody-chat-text:var(--ink-primary);
+  --cody-chat-muted:var(--ink-secondary);
+  --cody-chat-accent:var(--accent);
+  --cody-chat-accent-strong:var(--accent-hover);
+  --cody-chat-success:var(--success);
+  --cody-chat-code:var(--code-bg);
+  --cody-chat-shadow:var(--shadow-panel);
+}
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message[data-role="user"] .cody-message-body { background:var(--accent-subtle); border-color:var(--accent-border); }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-identity[data-role="user"] { background:var(--surface-subtle); color:var(--ink-secondary); border-color:var(--border-default); }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-identity[data-role="system"] { background:var(--warning-bg); color:var(--warning); border-color:var(--warning-border); }
+.codywork-vue .cody-markdown pre, .codywork-vue .cody-tool-card pre, .codywork-vue .cody-reasoning-card pre { color:var(--code-text); font-family:var(--font-mono); }
+.codywork-vue .markdown-code-expand button { color:var(--code-text); background:var(--code-bg); }
+.codywork-vue .cody-message-outbox.failed, .codywork-vue .markdown-diagram-error { color:var(--danger); }
+.codywork-vue .markdown-diagram-toolbar { flex-wrap:wrap; padding-block:6px; }
+.codywork-vue .markdown-diagram-toolbar > span:first-child { flex-shrink:0; white-space:nowrap; }
+.codywork-vue .markdown-diagram-actions { min-width:0; }
+.codywork-vue .markdown-tool-button { white-space:nowrap; }
+.codywork-vue .markdown-diagram-stage svg { max-width:100%; }
+.codywork-vue .cody-tool-card[data-tone="running"], .codywork-vue .cody-tool-card[data-tone="working"] { border-color:var(--accent-border); }
+.codywork-vue .cody-tool-card[data-tone="success"] { border-color:var(--success-border); }
+.codywork-vue .cody-tool-card[data-tone="danger"], .codywork-vue .cody-failure-card { border-color:var(--danger-border); }
+.codywork-vue .cody-failure-card { color:var(--danger); background:var(--danger-bg); }
+.codywork-vue .cody-request-actions button { color:var(--on-accent); }
+.codywork-vue .cody-request-actions button[data-tone="danger"] { color:var(--danger); border-color:var(--danger-border); background:var(--danger-bg); }
+.codywork-vue .cody-conversation-activity[data-tone="retrying"], .codywork-vue .cody-approval-risk-level[data-level="medium"] { border-color:var(--warning-border); color:var(--warning); background:var(--warning-bg); }
+.codywork-vue .cody-conversation-activity[data-tone="waiting"] { border-color:var(--accent-border); color:var(--accent); background:var(--accent-subtle); }
+.codywork-vue .cody-conversation-activity[data-tone="disconnected"], .codywork-vue .cody-approval-risk-level[data-level="high"] { border-color:var(--danger-border); color:var(--danger); background:var(--danger-bg); }
+.codywork-vue .cody-composer[data-variant="embedded"] textarea::placeholder { color:var(--ink-tertiary); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-controls { border-color:var(--border-default); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control,
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-picker { color:var(--ink-secondary); background:var(--surface-subtle); border-color:var(--border-default); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control:hover,
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-picker:hover { color:var(--accent); border-color:var(--accent-border); background:var(--accent-subtle); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-compact-control option { color:var(--ink-primary); background:var(--surface-panel); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-chip { border-color:var(--accent-border); color:var(--accent); background:var(--accent-subtle); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-skill-menu { border-color:var(--border-default); background:var(--surface-raised); box-shadow:var(--shadow-popover); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-stop { color:var(--danger); background:var(--danger-bg); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-policy,
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-status { color:var(--ink-secondary); }
+.codywork-vue .cody-composer[data-variant="embedded"] .cody-composer-image-error { color:var(--danger); }
+/* Image lightboxes keep their black photographic backdrop and white close icon.
+   Mermaid owns a white diagram canvas in every theme so labels stay export-safe. */
+.codywork-vue .cody-image-preview-dialog {
+  box-sizing:border-box;
+  grid-template-columns:minmax(0,1fr);
+  padding:56px 24px;
+}
+.codywork-vue .cody-image-preview-dialog img {
+  min-width:0;
+  max-width:min(86vw,100%);
+  max-height:calc(100dvh - 112px);
+}
+.codywork-vue .cody-image-preview-dialog button {
+  width:44px;
+  height:44px;
+  top:12px;
+  right:12px;
+}
+@media(max-width:600px) {
+  .codywork-vue .cody-image-preview-dialog { padding-inline:16px; }
+  .codywork-vue .cody-image-preview-dialog img { max-width:100%; }
+}

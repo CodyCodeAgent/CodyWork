@@ -1,0 +1,60 @@
+@import './theme-tokens.css';
+
+body { font-family:var(--font-body); }
+button, input, textarea, select { font:inherit; }
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible,[tabindex]:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+::selection { background:var(--accent-subtle); color:var(--ink-primary); }
+.theme-preferences { margin-bottom:32px; }
+.theme-preferences-heading { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:16px; }
+.theme-preferences h2 { font-size:20px; margin:4px 0 0; letter-spacing:-.02em; }
+.theme-preferences p { color:var(--ink-secondary); margin:0; font-size:12px; }
+.theme-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.theme-option { min-width:0; padding:12px; text-align:left; border:1px solid var(--border-default); border-radius:var(--radius-panel); background:var(--surface-panel); color:var(--ink-primary); }
+.theme-option:hover { border-color:var(--border-strong); }
+.theme-option[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.theme-option-title { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:650; margin:12px 0 5px; }
+.theme-option-title > span { font-size:11px; color:var(--accent); }
+.theme-option small { display:block; color:var(--ink-secondary); font-size:12px; line-height:1.6; }
+.theme-preview { display:flex; gap:8px; height:64px; border-radius:4px; padding:8px; background:#f3f6fa; border:1px solid #d8e2ed; }
+.theme-preview > i { width:24%; background:#dce6f4; border-radius:2px; }
+.theme-preview > span { flex:1; display:grid; gap:5px; }
+.theme-preview b { background:#fff; border-radius:2px; border-left:3px solid #245bb4; }
+[data-preview=midnight] .theme-preview { background:#0c1422; border-color:#30415b; }
+[data-preview=midnight] .theme-preview > i { background:#21324b; }
+[data-preview=midnight] .theme-preview b { background:#203149; border-color:#6cdbdc; }
+[data-preview=forest] .theme-preview { background:#f2f0e7; border-color:#d9ddcc; }
+[data-preview=forest] .theme-preview > i { background:#d8e0ce; }
+[data-preview=forest] .theme-preview b { background:#fffdf6; border-color:#31654d; }
+@media(max-width:640px) { .theme-options { grid-template-columns:1fr; } .theme-preferences-heading { display:block; } .theme-preferences p { margin-top:8px; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } }
+
+/* Shared surface language: compact desktop, generous touch controls at mobile breakpoints. */
+.codywork-vue .sidebar { background:var(--nav-bg); border-color:var(--border-default); }
+.codywork-vue .sidebar-item.active { color:var(--accent); background:var(--accent-subtle); }
+.codywork-vue .sidebar-subnav-item.active { color:var(--accent); }
+.codywork-vue .sidebar-subnav-empty { color:var(--nav-muted); font-size:12px; }
+.codywork-vue .brand-mark { box-shadow:none; }
+.codywork-vue .folder-mark { color:var(--accent); }
+.codywork-vue .topbar { background:var(--surface-panel); backdrop-filter:none; }
+.codywork-vue .workspace-header-card { border-left:3px solid var(--accent); box-shadow:var(--shadow-panel); }
+.codywork-vue .metric-grid { margin-top:20px; gap:12px; }
+.codywork-vue .metric-card strong { font-size:32px; font-variant-numeric:tabular-nums; letter-spacing:-.04em; }
+.codywork-vue .btn { box-shadow:none; border-radius:var(--radius-control); }
+.codywork-vue .btn:hover:not(:disabled) { background:var(--surface-subtle); border-color:var(--border-strong); }
+.codywork-vue .btn.primary:hover:not(:disabled) { background:var(--accent-hover); border-color:var(--accent-hover); }
+.codywork-vue .btn.danger:hover:not(:disabled) { color:var(--danger); border-color:var(--danger); background:var(--danger-bg); }
+.codywork-vue .input { border-radius:var(--radius-control); }
+.codywork-vue .toast { background:var(--ink-primary); color:var(--surface-panel); }
+.codywork-vue .ready-pill.pending-pill { color:var(--warning); background:var(--warning-bg); }
+.codywork-vue .cache-status.refreshing,.codywork-vue .cache-status.stale { color:var(--warning); background:var(--warning-bg); }
+.codywork-vue .settings-intro { background:var(--accent-subtle); color:var(--ink-primary); border-color:var(--accent-border); }
+.codywork-vue .settings-intro p { color:var(--ink-secondary); }
+.codywork-vue .settings-intro .card-kicker { color:var(--accent); }
+.codywork-vue .chat-bubble.user { color:var(--on-accent); background:var(--accent); }
+
+input[type="checkbox"],input[type="radio"] { accent-color:var(--accent); }
+.sidebar-subnav-item > .demand-status-tag { flex-shrink:0; }
+
+/* Selection is visible in every palette, beyond the text color alone. */
+.codywork-vue .conversation-row.active { background:var(--accent-subtle); box-shadow:inset 3px 0 var(--accent); }
+.codywork-vue .repo-option.selected { background:var(--accent-subtle); }
