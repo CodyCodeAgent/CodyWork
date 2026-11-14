@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="modal-backdrop" @click.self="close">
-    <section class="modal-card conversation-share-dialog" role="dialog" aria-modal="true" aria-labelledby="conversation-share-title">
+    <section class="modal-card conversation-share-dialog" role="dialog" aria-modal="true" aria-labelledby="conversation-share-title" v-modal-focus="close">
       <div class="modal-head">
         <div><div class="eyebrow">SHARE CONVERSATION</div><h2 id="conversation-share-title">导出为飞书文档</h2></div>
         <button class="icon-button" type="button" aria-label="关闭分享会话弹窗" :disabled="sharing" @click="close">×</button>
@@ -49,6 +49,7 @@
 </template>
 
 <script setup lang="ts">
+import { vModalFocus } from '../modalFocus'
 import { computed } from 'vue'
 import type { ConversationShareResult, FeishuChannelAccount } from '../api'
 
@@ -79,17 +80,17 @@ function close(): void {
 
 <style scoped>
 .conversation-share-dialog { width: min(600px, 100%); }
-.share-description { margin: 10px 0 16px; color: #66748c; font-size: 13px; line-height: 1.7; }
-.share-scope { display: grid; grid-template-columns: 72px 1fr; gap: 7px 12px; padding: 14px; color: #536078; background: #f6f7fb; border: 1px solid #e6e9f1; border-radius: 11px; font-size: 12px; line-height: 1.55; }
-.share-scope span { color: #8a94a7; }
-.share-scope strong { color: #3f4b61; font-weight: 650; }
-.share-permission-note { margin: 10px 0 0; color: #7b879d; font-size: 11px; line-height: 1.65; }
-.share-success { display: flex; gap: 12px; align-items: center; margin: 18px 0; padding: 16px; color: #226b4a; background: #eefaf4; border: 1px solid #cfeedd; border-radius: 12px; }
-.share-success > span { display: grid; width: 30px; height: 30px; place-items: center; color: #fff; background: #36a66f; border-radius: 50%; font-weight: 800; }
+.share-description { margin: 10px 0 16px; color: var(--ink-secondary); font-size: 13px; line-height: 1.7; }
+.share-scope { display: grid; grid-template-columns: 72px 1fr; gap: 7px 12px; padding: 14px; color: var(--ink-secondary); background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: var(--radius-panel); font-size: 12px; line-height: 1.55; }
+.share-scope span { color: var(--ink-tertiary); }
+.share-scope strong { color: var(--ink-secondary); font-weight: 650; }
+.share-permission-note { margin: 10px 0 0; color: var(--ink-tertiary); font-size: 11px; line-height: 1.65; }
+.share-success { display: flex; gap: 12px; align-items: center; margin: 18px 0; padding: 16px; color: var(--success); background: var(--surface-subtle); border: 1px solid var(--success-border); border-radius: var(--radius-panel); }
+.share-success > span { display: grid; width: 30px; height: 30px; place-items: center; color: var(--on-accent); background: var(--success); border-radius: 50%; font-weight: 800; }
 .share-success strong, .share-success p, .share-document-result strong, .share-document-result small { display: block; }
-.share-success p { margin: 4px 0 0; color: #60836f; font-size: 12px; }
-.share-document-result { padding: 15px; background: #f6f7fb; border: 1px solid #e3e7ef; border-radius: 11px; }
-.share-document-result strong { color: #344056; }
-.share-document-result small { margin-top: 5px; color: #8993a5; }
+.share-success p { margin: 4px 0 0; color: var(--ink-secondary); font-size: 12px; }
+.share-document-result { padding: 15px; background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: var(--radius-panel); }
+.share-document-result strong { color: var(--ink-secondary); }
+.share-document-result small { margin-top: 5px; color: var(--ink-tertiary); }
 .modal-actions a { text-decoration: none; }
 </style>

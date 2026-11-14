@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
+    <script>
+      try {
+        const theme = localStorage.getItem('codywork.theme');
+        document.documentElement.dataset.theme = ['professional','midnight','forest'].includes(theme) ? theme : 'professional';
+        document.documentElement.style.colorScheme = theme === 'midnight' ? 'dark' : 'light';
+      } catch { document.documentElement.dataset.theme = 'professional'; }
+    </script>
     <title>CodyWork</title>
   </head>
   <body>

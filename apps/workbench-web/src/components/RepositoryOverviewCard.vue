@@ -33,7 +33,7 @@
         </div>
       </div>
     </div>
-    <p v-else class="muted">先添加一个 Git 仓库或目录，再创建 Demand。</p>
+    <p v-else class="repository-empty">先添加一个 Git 仓库或目录，再创建 Demand。</p>
 
     <div class="repository-card-foot">
       <span>{{ bulkMessage || '仅安全快进主分支，不覆盖本地改动或修改 Demand Worktree' }}</span>

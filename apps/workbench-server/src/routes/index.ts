@@ -21,6 +21,7 @@ import { getWorkspaceFilePreview } from '../services/workspaceFilePreview.js'
 import { listBrowsableDirectories } from '../services/directories.js'
 import { DashboardCache } from '../services/dashboardCache.js'
 import { createStaticAssetHandler } from '../http/staticAssets.js'
+import { createLoginPage } from '../http/loginPage.js'
 import { WorkspaceRegistry } from '../services/workspaceRegistry.js'
 import { WorkspaceSetupCoordinator } from '../services/workspaceSetup.js'
 import { SkillInstallCoordinator } from '../services/skillInstall.js'
@@ -156,10 +157,6 @@ function passwordsMatch(actual: string, expected: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-function loginPage(error = ''): string {
-  const notice = error ? '<p class="error">密码不正确，请重试。</p>' : ''
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CodyWork 登录</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7fb;color:#1f2937;font:16px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(360px,calc(100vw - 48px));padding:32px;border:1px solid #dbe2f0;border-radius:18px;background:#fff;box-shadow:0 18px 50px #1e293b18}h1{margin:0 0 8px;font-size:26px}p{color:#64748b;line-height:1.55}.error{color:#b91c1c}label{display:grid;gap:8px;font-weight:600}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit}button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:10px;background:#5b5bf7;color:#fff;font:600 16px inherit;cursor:pointer}</style><main class="card"><h1>CodyWork</h1><p>请输入访问密码以继续。</p>${notice}<form method="post" action="/api/auth/login"><label>访问密码<input name="password" type="password" autofocus required autocomplete="current-password"></label><button type="submit">登录</button></form></main></html>`
-}
 
 function parseLoginPassword(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1004,6 +1001,7 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
   if (!password && !isLoopbackBindHost(options.host)) {
     throw new Error('CODYWORK_PASSWORD is required when CodyWork listens on a non-loopback host')
   }
+  const loginPage = createLoginPage(options.staticRoot)
   const routes = buildRoutes(ctx)
   const serveStaticAsset = options.staticRoot ? createStaticAssetHandler(options.staticRoot) : null
   const sessions = password ? new AuthSessions(ctx.db, password) : null

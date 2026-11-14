@@ -1,7 +1,7 @@
 <template>
   <section class="recipient-fields">
     <label v-if="!alwaysEnabled" class="check"><input type="checkbox" :checked="enabled" :disabled="disabled" @change="emit('update:enabled', ($event.target as HTMLInputElement).checked)" />同时发送飞书通知</label>
-    <p class="hint">结果始终保存在站内通知中心。飞书为可选渠道，这里填写邮箱，不是发送邮件。</p>
+    <p class="hint">符合通知规则的结果会保存到站内通知中心。飞书为可选渠道，这里填写邮箱，不是发送邮件。</p>
     <template v-if="enabled || alwaysEnabled">
       <div class="fields"><label>发送机器人<select :value="accountId" :disabled="disabled || loading" required @change="emit('update:accountId', ($event.target as HTMLSelectElement).value)"><option value="">请选择机器人</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.botName || account.name }}</option></select></label>
         <label>接收人企业邮箱<input type="email" :value="email" :disabled="disabled" autocomplete="email" placeholder="name@company.com" required @input="emit('update:email', ($event.target as HTMLInputElement).value)" /></label></div>
@@ -35,5 +35,5 @@ async function validate() {
 onBeforeUnmount(() => { version++; loadVersion++ })
 </script>
 <style scoped>
-.recipient-fields{margin:16px 0;color:var(--text)}.check{display:flex;align-items:center;gap:8px;min-height:44px}.check input{width:auto}.hint{font-size:12px;line-height:1.6;color:var(--muted)}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:6px}input,select,button{font:inherit;min-height:44px;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--card);color:var(--text);min-width:0}button{margin-top:12px;cursor:pointer}button:disabled{opacity:.55;cursor:default}:is(input,select,button):focus-visible{outline:3px solid var(--blue);outline-offset:2px}[role=alert]{color:var(--text);border-left:3px solid var(--blue);padding:8px}@media(max-width:700px){.fields{grid-template-columns:1fr}}
+.recipient-fields{margin:16px 0;color:var(--text)}.check{display:flex;align-items:center;gap:8px;min-height:44px}.check input{width:auto}.hint{font-size:12px;line-height:1.6;color:var(--muted)}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:6px}input,select,button{font:inherit;min-height:44px;border:1px solid var(--line);border-radius: var(--radius-control);padding:10px;background:var(--card);color:var(--text);min-width:0}button{margin-top:12px;cursor:pointer}button:disabled{opacity:.55;cursor:default}:is(input,select,button):focus-visible{outline:3px solid var(--blue);outline-offset:2px}[role=alert]{color:var(--text);border-left:3px solid var(--blue);padding:8px}@media(max-width:700px){.fields{grid-template-columns:1fr}}
 </style>

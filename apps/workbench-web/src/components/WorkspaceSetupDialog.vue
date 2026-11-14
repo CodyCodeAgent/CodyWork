@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="modal-backdrop">
-    <section class="modal-card workspace-setup-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-setup-title">
+    <section class="modal-card workspace-setup-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-setup-title" v-modal-focus="close">
       <div class="modal-head">
         <div><div class="eyebrow">NEW WORKSPACE</div><h2 id="workspace-setup-title">创建 Workspace</h2></div>
         <button class="icon-button" :disabled="creating" aria-label="关闭创建 Workspace 弹窗" @click="close">×</button>
@@ -11,17 +11,17 @@
           <button :class="{ active: mode === 'folder' }" @click="mode = 'folder'">本地目录</button>
           <button :class="{ active: mode === 'git' }" @click="mode = 'git'">Git clone</button>
         </div>
-        <label>显示名称</label>
-        <input v-model="name" class="input" placeholder="可选" />
+        <label for="workspace-name">显示名称</label>
+        <input id="workspace-name" v-model="name" class="input" placeholder="可选" />
         <template v-if="mode === 'folder'">
-          <label>目录路径</label>
-          <div class="path-field"><input v-model="path" class="input" placeholder="/data00/home/you/projects/app" /><button class="btn compact" @click="openDirectoryPicker">选择目录</button></div>
+          <label for="workspace-folder-path">目录路径</label>
+          <div class="path-field"><input id="workspace-folder-path" v-model="path" class="input" placeholder="/data00/home/you/projects/app" /><button class="btn compact" @click="openDirectoryPicker">选择目录</button></div>
         </template>
         <template v-else>
-          <label>Git URL</label>
-          <input v-model="gitUrl" class="input" placeholder="git@github.com:org/repo.git" />
-          <label>目标目录</label>
-          <div class="path-field"><input v-model="path" class="input" placeholder="/data00/home/you/projects/repo" /><button class="btn compact" @click="openDirectoryPicker">选择目录</button></div>
+          <label for="workspace-git-url">Git URL</label>
+          <input id="workspace-git-url" v-model="gitUrl" class="input" placeholder="git@github.com:org/repo.git" />
+          <label for="workspace-clone-path">目标目录</label>
+          <div class="path-field"><input id="workspace-clone-path" v-model="path" class="input" placeholder="/data00/home/you/projects/repo" /><button class="btn compact" @click="openDirectoryPicker">选择目录</button></div>
         </template>
         <p class="field-help">浏览 CodyWork 服务所在机器的允许目录。</p>
         <label class="setup-choice">
@@ -49,7 +49,7 @@
   </div>
 
   <div v-if="directoryPickerVisible" class="modal-backdrop directory-picker-backdrop">
-    <section class="modal-card directory-picker" role="dialog" aria-modal="true" aria-labelledby="directory-picker-title">
+    <section class="modal-card directory-picker" role="dialog" aria-modal="true" aria-labelledby="directory-picker-title" v-modal-focus="() => { directoryPickerVisible = false }">
       <div class="modal-head"><div><div class="eyebrow">SERVER DIRECTORY</div><h2 id="directory-picker-title">选择目录</h2></div><button class="icon-button" aria-label="关闭目录选择器" @click="directoryPickerVisible = false">×</button></div>
       <p class="directory-help">仅显示 CodyWork 服务所在机器允许访问的目录。选中目录后仍会检查它是否是可用 Workspace。</p>
       <div v-if="directoryListing" class="directory-browser">
@@ -65,6 +65,7 @@
 </template>
 
 <script setup lang="ts">
+import { vModalFocus } from '../modalFocus'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api, type DirectoryListing, type Workspace, type WorkspaceSetupJob, type WorkspaceSource } from '../api'
 

@@ -31,7 +31,7 @@ const enabled = computed(() => isConversationFast(props.conversationId))
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--cw-composer-control-bg);
   color: var(--cw-composer-control-text);
   cursor: pointer;

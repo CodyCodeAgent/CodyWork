@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ResponsivePanel from './ResponsivePanel.vue'
+import { defineComponent, nextTick, ref } from 'vue'
+import { vModalFocus } from '../modalFocus'
 
 let mobile = false
 let change: ((event: MediaQueryListEvent) => void) | undefined
@@ -26,6 +28,25 @@ async function render(open = false) {
 }
 
 describe('ResponsivePanel', () => {
+  it('hands focus to a sibling modal and restores the visible drawer trigger after dismissal', async () => {
+    mobile = true
+    wrapper = mount(defineComponent({
+      components: { ResponsivePanel }, directives: { modalFocus: vModalFocus },
+      setup() { return { drawer: ref(false), modal: ref(false) } },
+      template: `<button id="drawer-trigger" @click="drawer = true">Actions</button>
+        <ResponsivePanel v-model:open="drawer" title="Actions"><button id="share" @click="drawer = false; modal = true">Share</button></ResponsivePanel>
+        <section v-if="modal" id="share-modal" v-modal-focus="() => { modal = false }" role="dialog">Share dialog</section>`,
+    }), { attachTo: document.body })
+    ;(wrapper.get('#drawer-trigger').element as HTMLElement).focus()
+    await wrapper.get('#drawer-trigger').trigger('click'); await flushPromises()
+    ;(wrapper.get('#share').element as HTMLElement).focus()
+    await wrapper.get('#share').trigger('click'); await flushPromises()
+    expect(wrapper.get('dialog').attributes('open')).toBeUndefined()
+    expect(document.activeElement?.id).toBe('share-modal')
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick(); await nextTick()
+    expect(document.activeElement?.id).toBe('drawer-trigger')
+  })
   it('renders the desktop slot without a layout wrapper or modal', async () => {
     const panel = await render()
     expect(panel.find('dialog').exists()).toBe(false)

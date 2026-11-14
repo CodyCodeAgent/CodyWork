@@ -51,6 +51,8 @@ function onBackdropClick(event: MouseEvent) {
   if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) requestClose()
 }
 async function syncDialog() {
+  // Release the native top layer before a sibling modal mounts and captures its opener.
+  if (!props.open || !mobile.value) { closeDialog(); return }
   await nextTick()
   if (disposed) return
   if (mobile.value && props.open && dialog.value && !dialog.value.open) {
@@ -67,7 +69,7 @@ function onMediaChange(event: MediaQueryListEvent) {
   mobile.value = event.matches
 }
 onMounted(() => { media?.addEventListener('change', onMediaChange); void syncDialog() })
-watch([() => props.open, mobile], syncDialog, { flush: 'post' })
+watch([() => props.open, mobile], syncDialog, { flush: 'sync' })
 onBeforeUnmount(() => { disposed = true; media?.removeEventListener('change', onMediaChange); closeDialog() })
 </script>
 
@@ -83,14 +85,14 @@ onBeforeUnmount(() => { disposed = true; media?.removeEventListener('change', on
   margin: 0;
   padding: 0;
   overflow: hidden;
-  color: #d7dbe5;
-  background: #101217;
+  color: var(--nav-text);
+  background: var(--surface-subtle);
   border: 0;
   border-radius: 0 20px 20px 0;
-  box-shadow: 16px 0 64px #08101f44;
+  box-shadow: var(--shadow-popover);
 }
 .responsive-panel[open] { display: flex; flex-direction: column; }
-.responsive-panel::backdrop { background: #07102080; backdrop-filter: blur(3px); }
+.responsive-panel::backdrop { background: var(--overlay); backdrop-filter: blur(3px); }
 .responsive-panel-heading {
   display: flex;
   flex: 0 0 auto;
@@ -98,10 +100,10 @@ onBeforeUnmount(() => { disposed = true; media?.removeEventListener('change', on
   justify-content: space-between;
   gap: 12px;
   padding: max(12px, env(safe-area-inset-top)) 16px 12px max(20px, env(safe-area-inset-left));
-  border-bottom: 1px solid #ffffff14;
+  border-bottom: 1px solid var(--border-default);
 }
-.responsive-panel-heading h2 { margin: 0; color: #f5f6fb; font-size: 14px; font-weight: 600; }
-.responsive-panel-heading button { display: grid; place-items: center; width: 44px; height: 44px; padding: 11px; color: #cbd5e1; background: #ffffff0a; border: 1px solid #ffffff1a; border-radius: 12px; }
+.responsive-panel-heading h2 { margin: 0; color: var(--nav-text); font-size: 14px; font-weight: 600; }
+.responsive-panel-heading button { display: grid; place-items: center; width: 44px; height: 44px; padding: 11px; color: var(--nav-text); background: var(--surface-subtle); border: 1px solid var(--border-default); border-radius: var(--radius-panel); }
 .responsive-panel-heading svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .responsive-panel-content { min-height: 0; flex: 1; display: flex; overflow: hidden; padding-bottom: env(safe-area-inset-bottom); }
 .responsive-panel-content :deep(> aside) { position: static; display: flex; width: 100%; height: 100%; max-height: none; min-width: 0; flex: 1 1 auto; }
