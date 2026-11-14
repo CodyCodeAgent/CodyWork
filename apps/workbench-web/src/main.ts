@@ -7,6 +7,8 @@ import './mobile-composer.css'
 import './parallel.css'
 import './themes.css'
 import './conversation-theme.css'
+import './skin-recipes.css'
+import './skin-studio.css'
 
 const disposeTheme = initializeTheme()
 createApp(App).mount('#root')
