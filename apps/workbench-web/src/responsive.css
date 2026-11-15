@@ -230,3 +230,24 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .chat-scroll .chat-empty h2 { margin: 8px 0 4px; font-size: 22px; }
   .chat-scroll .chat-empty p { line-height: 1.6; }
 }
+
+/* Collapsing page metadata never unmounts the active conversation or its toolbar. */
+.chat-header-toggle { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 8px; background: transparent; }
+.chat-header-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@media (min-width: 901px) {
+  .chat-topbar.chat-topbar--collapsed { min-height: 64px; padding-block: 10px; flex-wrap: nowrap; gap: 12px; }
+  .chat-topbar--collapsed > :first-child { flex: 1 1 0; min-width: 0; }
+  .chat-topbar--collapsed .back-link,
+  .chat-topbar--collapsed .eyebrow,
+  .chat-topbar--collapsed .demand-link-actions,
+  .chat-topbar--collapsed .workspace-readonly-note { display: none; }
+  .chat-topbar--collapsed h1 { margin: 0; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-topbar--collapsed .chat-toolbar-menu { flex: 0 0 auto; }
+}
+@media (min-width: 901px) and (max-width: 1400px) {
+  .chat-topbar--collapsed .chat-connection-label,
+  .chat-topbar--collapsed .toolbar-quiet-action > span,
+  .chat-topbar--collapsed .demand-toolbox-trigger > span,
+  .chat-topbar--collapsed .chat-toolbar-divider { display: none; }
+  .chat-topbar--collapsed .chat-toolbar-menu > .topbar-actions { gap: 4px; }
+}
