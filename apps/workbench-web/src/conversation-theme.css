@@ -68,3 +68,26 @@
   .codywork-vue .cody-image-preview-dialog { padding-inline:16px; }
   .codywork-vue .cody-image-preview-dialog img { max-width:100%; }
 }
+
+/* Reserve the exact avatar width in every layout, including custom skin images. */
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message {
+  --message-avatar-size:36px;
+  grid-template-columns:var(--message-avatar-size) minmax(0,1fr);
+  column-gap:12px;
+  align-items:start;
+}
+.codywork-vue .parallel-transcript .cody-conversation[data-variant="embedded"] .cody-message { --message-avatar-size:32px; grid-template-columns:var(--message-avatar-size) minmax(0,1fr); column-gap:12px; }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-identity { width:var(--message-avatar-size); height:var(--message-avatar-size); box-sizing:border-box; }
+.codywork-vue .cody-conversation[data-variant="embedded"] .cody-message-label { margin-bottom:0; }
+@media (max-width:680px) {
+  .codywork-vue .cody-conversation[data-variant="embedded"] .cody-message { --message-avatar-size:28px; column-gap:10px; }
+}
+
+.codywork-vue .composer.composer--compact { padding-top:8px; padding-bottom:8px; }
+.codywork-vue .parallel-session-composer.composer--compact { padding:8px; }
+.codywork-vue .cody-composer[data-variant="embedded"][data-compact="true"] { padding:0; border:0; background:transparent; box-shadow:none; }
+.codywork-vue .cody-composer[data-variant="embedded"][data-compact="true"] .cody-composer-shell { padding:6px 8px; }
+.codywork-vue .cody-composer[data-variant="embedded"][data-compact="true"] textarea { min-height:40px; max-height:160px; padding:9px 6px; border:0; resize:none; }
+.codywork-vue .cody-composer[data-variant="embedded"][data-compact="true"] .cody-composer-controls { padding:0; border:0; }
+.codywork-vue .cody-composer[data-variant="embedded"][data-compact="true"] .cody-composer-settings { display:none; }
+.codywork-vue .cody-composer-layout-toggle { color:var(--ink-secondary); border-color:var(--border-default); background:var(--surface-panel); }

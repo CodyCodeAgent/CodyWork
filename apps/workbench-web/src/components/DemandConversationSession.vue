@@ -9,9 +9,9 @@
       </CodyConversation>
     </div>
     <button v-if="!atBottom" class="parallel-scroll-latest" aria-label="回到当前会话最新消息" @click="toBottom(true)">↓</button>
-    <div class="parallel-session-composer" :class="{ 'settings-open': settingsOpen }">
-      <div class="parallel-composer-note"><span :class="['parallel-connection', socket.status]">{{ socket.status === 'connected' ? '已连接' : socket.status === 'reconnecting' ? '重连中' : socket.status === 'disconnected' ? '连接已断开' : '连接中' }}</span><span>{{ conversation.runtimeType }} · {{ conversation.title }}</span><button v-if="!ready && !loading" type="button" @click="reloadOptions">重试加载</button></div>
-      <CodyComposer variant="embedded" :draft="draft" :disabled="sending || !ready || permissionSaving" :is-running="running" :models="models" :selected-model="model" :reasoning-options="reasoningOptions" :selected-reasoning="reasoning" :permission-options="permissions" :selected-permission="permission" :submit-modes="submitModes" :selected-submit-mode="submitMode" :collaboration-modes="collaborationModes" :selected-collaboration-mode="collaboration" :skills="skills" :selected-skills="selectedSkills" :attachments="images" :file-upload-enabled="true" :image-upload-enabled="options?.capabilities.imageInput ?? false" :is-uploading-images="uploading" :image-error="imageError" placeholder="给当前需求的这个会话发送消息…（Control + Enter 发送）" @update:draft="updateDraft" @update:model="selectModel" @update:reasoning="reasoning = $event" @update:permission="selectPermission" @update:submit-mode="submitMode = $event as ComposerSubmitMode" @update:collaboration-mode="collaboration = $event" @update:selected-skills="selectedSkills = $event" @attach-files="uploadImages" @remove-attachment="removeImage" @send="send" @stop="interrupt">
+    <div class="parallel-session-composer" :class="{ 'settings-open': settingsOpen && !composerCompact, 'composer--compact': composerCompact }">
+      <div v-if="!composerCompact || !ready || socket.status !== 'connected'" class="parallel-composer-note"><span :class="['parallel-connection', socket.status]">{{ socket.status === 'connected' ? '已连接' : socket.status === 'reconnecting' ? '重连中' : socket.status === 'disconnected' ? '连接已断开' : '连接中' }}</span><span>{{ conversation.runtimeType }} · {{ conversation.title }}</span><button v-if="!ready && !loading" type="button" @click="reloadOptions">重试加载</button></div>
+      <CodyComposer variant="embedded" collapsible :compact="composerCompact" @update:compact="setComposerCompact" :draft="draft" :disabled="sending || !ready || permissionSaving" :is-running="running" :models="models" :selected-model="model" :reasoning-options="reasoningOptions" :selected-reasoning="reasoning" :permission-options="permissions" :selected-permission="permission" :submit-modes="submitModes" :selected-submit-mode="submitMode" :collaboration-modes="collaborationModes" :selected-collaboration-mode="collaboration" :skills="skills" :selected-skills="selectedSkills" :attachments="images" :file-upload-enabled="true" :image-upload-enabled="options?.capabilities.imageInput ?? false" :is-uploading-images="uploading" :image-error="imageError" :placeholder="composerCompact ? '输入消息…' : '给当前需求的这个会话发送消息…（Control + Enter 发送）'" @update:draft="updateDraft" @update:model="selectModel" @update:reasoning="reasoning = $event" @update:permission="selectPermission" @update:submit-mode="submitMode = $event as ComposerSubmitMode" @update:collaboration-mode="collaboration = $event" @update:selected-skills="selectedSkills = $event" @attach-files="uploadImages" @remove-attachment="removeImage" @send="send" @stop="interrupt">
         <template #controls><ConversationFastToggle v-if="conversation.runtimeType === 'codex' && supportsFast" :conversation-id="conversation.id" /><button class="parallel-settings-toggle" type="button" :aria-expanded="settingsOpen" @click="settingsOpen = !settingsOpen">{{ settingsOpen ? '收起设置' : `设置 · ${permissions.find(item => item.value === permission)?.label}` }}</button></template>
       </CodyComposer>
     </div>
@@ -19,6 +19,7 @@
 </template>
 
 <script setup lang="ts">
+import { useComposerLayout } from '../composerLayout'
 import { materializeAttachmentText, parseAttachmentText, isImageAttachment } from '@codycodeagent/cody-web-core/composer'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CodyComposer, CodyConversation, conversationEntriesFromState, useConversationController, type CodyMessage } from '@codycodeagent/cody-web-core/vue'
@@ -33,6 +34,7 @@ import { conversationServiceTier } from '../conversationFastMode'
 import ConversationFastToggle from './ConversationFastToggle.vue'
 import WorkbenchIcon from './WorkbenchIcon.vue'
 
+const { compact: composerCompact, setCompact: setComposerCompact } = useComposerLayout()
 const props = defineProps<{ workspaceId: string; demandId: string; conversation: Conversation; active: boolean }>()
 const emit = defineEmits<{ status: [status: Conversation['status']]; 'open-file': [input: { path: string; line: number }] }>()
 const controller = useConversationController()
