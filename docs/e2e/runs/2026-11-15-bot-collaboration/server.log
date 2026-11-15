@@ -1,0 +1,4 @@
+(node:12170) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[codywork] server listening on http://127.0.0.1:43473
+ISOLATED_COLLABORATION_READY /tmp/cody-compact-e2e-GWHgjS

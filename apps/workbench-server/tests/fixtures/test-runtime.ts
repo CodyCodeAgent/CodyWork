@@ -105,6 +105,11 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
     })
   }
 
+  protected assistantReply(request: SendTurnRequest): string {
+    const context = this.contexts.get(request.conversation.id)
+    return `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}`
+  }
+
   submitTurn(request: SendTurnRequest): SubmitTurnResult {
     if (!this.conversations.has(request.conversation.id)) throw new Error('conversation does not belong to this adapter')
     const clientCommandId = request.clientCommandId ?? `command-${randomUUID()}`
@@ -127,8 +132,7 @@ export class TestRuntimeAdapter implements CodyWorkRuntime {
       emit('user.completed', { text: request.prompt, ...(request.localImages?.length ? { images: request.localImages.map(image => image.path) } : {}) }, { itemId: clientCommandId })
       emit('turn.started', { prompt: request.prompt })
       emit('tool.started', { tool: { kind: 'command', title: 'Policy check', status: 'running', summary: 'csr.policy.check', details: [] } })
-      const context = this.contexts.get(request.conversation.id)
-      const assistantText = `Test runtime received: ${request.prompt}\n\nCSR roots: ${context?.effectivePolicy.writableRoots.join(', ') || 'read-only'}`
+      const assistantText = this.assistantReply(request)
       emit('assistant.delta', { text: assistantText })
       emit('assistant.completed', { text: assistantText })
       emit('tool.completed', { tool: { kind: 'command', title: 'Policy check', status: 'completed', summary: 'csr.policy.check', details: [] } })

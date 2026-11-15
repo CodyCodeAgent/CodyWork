@@ -59,6 +59,8 @@
           <details><summary>已绑定对话（{{ bindings.length }}）</summary><div class="bindings"><div v-for="binding in bindings" :key="binding.id"><span><strong>{{ binding.conversationTitle }}</strong><small>{{ binding.targetType === 'codywork-workspace' ? 'Workspace 会话' : 'Demand Worktree' }} · {{ binding.channelScope }} · {{ binding.channelConversationId }}</small></span><code :title="`原生 Thread：${binding.threadId}`">{{ binding.threadId }}</code></div><p v-if="!bindings.length">尚无绑定。首次给机器人发消息后会出现选择卡片。</p></div></details>
         </section>
 
+        <BotCollaborationSettings v-if="selectedId && !isCreating" :key="selectedId" :account-id="selectedId" :bindings="bindings" />
+
         <section class="setup-guide"><div class="kicker">FEISHU SETUP</div><h3>开放平台准备</h3><ol><li>点击“一次性申请全部权限”，将固定完整权限加入应用。</li><li>为应用启用机器人能力；事件订阅选择“使用长连接接收事件”，订阅 <code>im.message.receive_v1</code>。</li><li>卡片回调启用长连接，供绑定、审批和问题回答使用。</li><li>发布应用版本并完成租户管理员授权；未发布的权限不会生效。</li><li>回到本页刷新诊断，确认显示“权限完整”，再启用长连接。</li></ol></section>
       </main>
     </div>
@@ -66,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import BotCollaborationSettings from './BotCollaborationSettings.vue'
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { api, type FeishuChannelAccount, type FeishuChannelBinding, type FeishuChannelDiagnostics, type FeishuPermissionStatus, type FeishuPermissionTemplate } from '../api'
 

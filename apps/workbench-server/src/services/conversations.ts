@@ -631,6 +631,7 @@ export class ConversationService implements ConversationCommandGateway {
     this.repository.touch(conversationId)
     let submission: SubmitTurnResult
     try { submission = runtime.submitTurn({
+      ...(command.beforeSubmit || command.signal ? { beforeStart: () => { command.signal?.throwIfAborted(); command.beforeSubmit?.() } } : {}),
       conversation: this.handleFor(row),
       prompt: text,
       ...(localImages.length ? { localImages } : {}),

@@ -21,6 +21,7 @@ export const CODYWORK_FEISHU_REQUIRED_SCOPES: readonly FeishuRequiredScope[] = [
   { name: 'im:message:readonly', label: '读取消息' },
   { name: 'im:message:send_as_bot', label: '以机器人身份发送消息' },
   { name: 'im:message:update', label: '更新执行卡片' },
+  { name: 'im:message.group_at_msg.include_bot:readonly', label: '接收其他机器人 @ 本机器人的协作消息' },
   { name: 'im:message.group_at_msg:readonly', label: '接收群聊中 @ 机器人的消息' },
   { name: 'im:message.p2p_msg:readonly', label: '接收私聊消息' },
   { name: 'im:resource', label: '收发图片与文件' },

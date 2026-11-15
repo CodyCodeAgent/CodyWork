@@ -1,3 +1,4 @@
+import { ChannelCollaborationService } from './channelCollaboration.js'
 import type { WorkbenchDb } from '../db/index.js'
 import { ConversationService } from './conversations.js'
 import { ChannelAccountManager, type ChannelProviderFactory } from './channelAccountManager.js'
@@ -66,6 +67,7 @@ export class CodyWorkChannelService {
   private readonly bindings: ChannelBindingService
   private readonly settings: ChannelSessionSettingsService
   private readonly notifications: SmartNotificationService
+  readonly collaboration: ChannelCollaborationService
   readonly notificationCenter: NotificationCenter
 
   constructor(
@@ -89,8 +91,12 @@ export class CodyWorkChannelService {
     this.repositories = new ChannelRepositories(new ChannelStore(database))
     this.settings = new ChannelSessionSettingsService(database, this.repositories, conversations, workspaces)
     this.accounts = new ChannelAccountManager(this.repositories, {
-      onMessage: message => this.router.onMessage(message),
-      onAction: (accountId, action) => this.router.onAction(accountId, action),
+      beforeDelivery: item => this.collaboration.assertDelivery(item),
+      onMessage: async message => {
+        try { if (!await this.collaboration.handle(message)) await this.router.onMessage(message) }
+        catch (error) { this.accounts.fail(message.accountId, 'channel.collaboration.receive', error) }
+      },
+      onAction: (accountId, action) => action.value.action === 'collaboration.status' ? Promise.resolve({ toast: { type: 'info', content: '请在 CodyWork 机器人设置中查看讨论记录' } }) : this.router.onAction(accountId, action),
       recoverBindings: accountId => this.projection.recoverBindings(accountId),
       recoverInbox: accountId => this.commands.recoverInbox(accountId),
       reconcileDeliveredPresentations: accountId => this.projection.reconcileDeliveredPresentations(accountId),
@@ -132,6 +138,7 @@ export class CodyWorkChannelService {
       {
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
         queue: (accountId, input) => this.accounts.queue(accountId, input),
+        collaborationComplete: (ref, text, error) => this.collaboration.complete(ref, text, error),
         fail: (accountId, action, error) => this.accounts.fail(accountId, action, error),
         isAccountActive: accountId => this.accounts.has(accountId),
         finishReceiptReaction: (accountId, messageId, reactionId, outcome) => this.accounts.finishReceiptReaction(accountId, messageId, reactionId, outcome),
@@ -151,8 +158,15 @@ export class CodyWorkChannelService {
         addReceiptReaction: (accountId, messageId) => this.accounts.addReceiptReaction(accountId, messageId),
         openUrl: binding => this.openUrl(binding),
         persistAttachment: this.options.persistConversationAttachment,
+        assertCollaborationActive: ref => this.collaboration.assertActive(ref),
       },
     )
+    this.collaboration = new ChannelCollaborationService(database, this.repositories, {
+      provider: accountId => this.accounts.provider(accountId),
+      queue: (accountId, input) => this.accounts.queueDurable(accountId, input),
+      submit: (inboxId, binding) => this.commands.submitInbox(inboxId, binding),
+      interrupt: messageId => this.projection.interruptOwnTurn(messageId),
+    }, () => this.now())
     this.bindings = new ChannelBindingService(
       this.database,
       this.repositories,
@@ -190,9 +204,11 @@ export class CodyWorkChannelService {
   async start(): Promise<void> {
     void this.notificationCenter.recover().catch(error => console.error('[notifications] recovery failed:', error instanceof Error ? error.message : 'unknown error'))
     await this.accounts.start()
+    this.collaboration.start()
   }
 
   async close(): Promise<void> {
+    await this.collaboration.close()
     this.notifications.close()
     await this.notificationCenter.close()
     await this.accounts.close()

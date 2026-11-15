@@ -434,6 +434,7 @@ export class CodyWorkTraeRuntime implements CodyWorkRuntime {
       if (request.settings?.model?.trim()) await this.setModel(session, request.settings.model.trim())
       const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [{ type: 'text', text: this.promptWithInstructions(session.context, request.prompt) }]
       for (const image of request.localImages ?? []) blocks.push({ type: 'image', data: readFileSync(image.path).toString('base64'), mimeType: image.path.endsWith('.png') ? 'image/png' : 'image/jpeg' })
+      request.beforeStart?.()
       this.emit(session, runtimeEvent(session, 'turn.started', {}, turnId))
       this.emit(session, runtimeEvent(session, 'turn.activity', { label: '正在准备 Trae 请求…', details: ['已建立 ACP 会话', '正在提交提示词'] }, turnId))
       this.emit(session, runtimeEvent(session, 'user.completed', { text: request.prompt }, turnId, turnId))

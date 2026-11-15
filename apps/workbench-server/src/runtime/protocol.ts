@@ -103,6 +103,8 @@ export interface ListNativeThreadsRequest {
 }
 
 export interface SendTurnRequest {
+  /** Server-only lease check executed after queue wait, immediately before native start. */
+  beforeStart?: () => void
   conversation: ConversationHandle
   prompt: string
   /** Server-resolved local image paths. The browser never supplies these. */

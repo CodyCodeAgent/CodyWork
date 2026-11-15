@@ -102,7 +102,7 @@ describe('CodyWork channel components', () => {
       getBinding: (id: string) => id === source.id ? source : other,
     }
     const requests = { publish: vi.fn(async () => undefined), expireTurn: vi.fn(), resolve: vi.fn() }
-    const projection = new ChannelProjectionService({} as never, new ChannelRepositories(store as never), { events: new ConversationEventHub() } as never, {} as never, requests as never, { fail: vi.fn() } as never) as any
+    const projection = new ChannelProjectionService({ db: { prepare: () => ({ get: () => undefined }) } } as never, new ChannelRepositories(store as never), { events: new ConversationEventHub() } as never, {} as never, requests as never, { fail: vi.fn() } as never) as any
     projection.bindings.set('conversation-1', new Set([source.id, other.id]))
     projection.scheduleRender = vi.fn()
 

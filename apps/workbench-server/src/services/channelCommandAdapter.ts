@@ -1,3 +1,4 @@
+import type { CollaborationRunRef } from './channelCollaboration.js'
 import { materializeAttachmentText, type ComposerAttachment } from '@codycodeagent/cody-web-core/composer'
 import { resolve } from 'node:path'
 import { channelCommandId, type ChannelInboundMessage, type ChannelQuotedMessage } from '@codycodeagent/cody-web-core/channel'
@@ -13,6 +14,7 @@ import type { ChannelRepositoryPorts } from './channelRepositories.js'
 import type { ChannelSessionSettingsService } from './channelSessionSettings.js'
 
 type CodyWorkInboundMessage = ChannelInboundMessage & {
+  collaboration?: CollaborationRunRef
   sourceMessageId?: string
   replyMessageId?: string
 }
@@ -44,6 +46,7 @@ export function channelPrompt(
 }
 
 type ChannelCommandAdapterHooks = {
+  assertCollaborationActive?(ref: CollaborationRunRef): void
   provider(accountId: string): ReturnType<ChannelAccountManager['provider']>
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
   addReceiptReaction(accountId: string, messageId: string): Promise<string>
@@ -77,6 +80,8 @@ export class ChannelCommandAdapter {
     const paths: string[] = []
     const quotedPaths: string[] = []
     const channelMessage = inbox.message as CodyWorkInboundMessage
+    const collaboration = channelMessage.collaboration
+    if (collaboration) this.hooks.assertCollaborationActive?.(collaboration)
     const sourceMessageId = channelMessage.sourceMessageId || inbox.message.messageId
     const replyMessageId = channelMessage.replyMessageId || inbox.message.messageId
     const quotedMessage: ChannelQuotedMessage | undefined = inbox.message.quotedMessage
@@ -104,17 +109,18 @@ export class ChannelCommandAdapter {
     const { models: _models, ...executionContext } = resolvedSettings
     const commandId = channelCommandId(inbox.message)
     const turnLinkId = this.repositories.projections.createTurnLink({ inboxId, bindingId: binding.id, clientCommandId: commandId })
-    const receiptReactionId = await this.hooks.addReceiptReaction(inbox.message.accountId, sourceMessageId)
+    const receiptReactionId = collaboration ? '' : await this.hooks.addReceiptReaction(inbox.message.accountId, sourceMessageId)
     const presentation = this.repositories.projections.createPresentation({
       accountId: inbox.message.accountId,
       bindingId: binding.id,
       turnLinkId,
       purpose: 'turn',
-      state: { prompt, executionContext, sourceMessageId, receiptReactionId, receiptReactionFinished: false },
+      state: { prompt, executionContext, sourceMessageId, receiptReactionId, receiptReactionFinished: Boolean(collaboration), ...(collaboration ? { collaboration } : {}) },
     })
     this.repositories.inbox.update(inboxId, 'submitting', { bindingId: binding.id, clientCommandId: commandId })
     try {
       await this.projection.observe(binding)
+      if (!collaboration) {
       const initial = projectionCard({
         threadId: binding.threadId, turnId: '', status: 'queued', assistantText: '', assistantImages: [], error: '', terminal: false, revision: 0,
       }, prompt, this.hooks.openUrl(binding), executionContext, { bindingId: binding.id, runtimePicker: true })
@@ -126,7 +132,9 @@ export class ChannelCommandAdapter {
         status: sent.status,
         state: { prompt, executionContext, sourceMessageId, receiptReactionId, receiptReactionFinished: false, outboxId: sent.id },
       })
+      }
       await this.gateway.submitCommand({
+        ...(collaboration ? { beforeSubmit: () => this.hooks.assertCollaborationActive?.(collaboration) } : {}),
         id: commandId,
         workspaceId: binding.workspaceId,
         conversationId: binding.conversationId,
@@ -136,7 +144,7 @@ export class ChannelCommandAdapter {
         },
         prompt,
         submitMode: 'queue',
-        executionProfile: { permissionMode: binding.permissionMode },
+        executionProfile: { permissionMode: collaboration ? 'read-only' : binding.permissionMode },
         ...(executionContext.model ? { settings: {
           model: executionContext.model,
           ...(executionContext.reasoningEffort ? { reasoningEffort: executionContext.reasoningEffort } : {}),
@@ -153,7 +161,9 @@ export class ChannelCommandAdapter {
       const message = error instanceof Error ? error.message : String(error)
       this.repositories.inbox.update(inboxId, 'failed', { lastError: message })
       this.repositories.projections.updateTurnLink(commandId, { status: 'failed' })
-      await this.projection.renderCommandFailure(turnLinkId, message)
+      const failure = this.projection.renderCommandFailure(turnLinkId, message)
+      if (collaboration) void failure.catch(error => console.error('[collaboration] failure projection:', error))
+      else await failure
       throw error
     }
   }

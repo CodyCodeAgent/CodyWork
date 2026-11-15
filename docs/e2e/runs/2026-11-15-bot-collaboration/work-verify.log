@@ -1,0 +1,216 @@
+$ pnpm run typecheck && pnpm run test && pnpm run test:web && pnpm run build
+$ pnpm --filter @codywork/server exec tsc -p tsconfig.json --noEmit && pnpm --filter @codywork/web exec vue-tsc --noEmit
+$ pnpm --filter @codywork/server exec vitest run --testTimeout=20000 && bash scripts/codywork-service-network.test.sh
+
+ RUN  v4.1.11 /Users/bytedance/GC/GitHub/cody-workbench/apps/workbench-server
+
+(node:15139) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15142) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15146) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15141) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15147) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15145) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15138) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15137) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15143) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:15140) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Switched to a new branch 'main'
+(node:15947) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16026) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16030) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16082) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16137) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16138) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16202) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16344) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16383) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Cloning into bare repository '/var/folders/k5/mqr_22fj30dcp2yd9z27m4hr0000gn/T/workspace-clone-retry-IsYPHg/source.git'...
+done.
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+(node:16610) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16832) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Switched to a new branch 'main'
+(node:16541) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16916) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16892) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17402) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17494) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: is subject to change. To configure the initial branch name to use in all
+hint: of your new repositories, which will suppress this warning, call:
+hint: 
+hint: 	git config --global init.defaultBranch <name>
+hint: 
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint: 
+hint: 	git branch -m <name>
+Switched to a new branch 'main'
+
+ Test Files  36 passed (36)
+      Tests  271 passed (271)
+   Start at  16:13:34
+   Duration  81.25s (transform 2.77s, setup 0ms, import 7.59s, tests 156.80s, environment 2ms)
+
+$ pnpm --filter @codywork/web test
+$ vitest run
+
+ RUN  v4.1.11 /Users/bytedance/GC/GitHub/cody-workbench/apps/workbench-web
+
+(node:34943) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:34942) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  43 passed (43)
+      Tests  199 passed (199)
+   Start at  16:14:56
+   Duration  5.55s (transform 7.75s, setup 0ms, import 12.58s, tests 1.83s, environment 33.15s)
+
+$ pnpm run verify:core-version && pnpm --filter @codywork/web build && pnpm --filter @codywork/server build
+$ node scripts/verify-core-version.mjs
+@codycodeagent/cody-web-core runtime verified: 0.45.0
+$ vite build
+vite v6.4.3 building for production...
+transforming...
+✓ 2311 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                      0.62 kB │ gzip:   0.36 kB
+dist/theme-tokens.css                                                3.93 kB │ gzip:   1.37 kB
+dist/assets/index-6Rv1ziqA-c90cf3dc9e31.css                        287.47 kB │ gzip:  44.62 kB
+dist/assets/channel-Ca_Ulxsf-c90cf3dc9e31.js                         0.13 kB │ gzip:   0.14 kB
+dist/assets/init-Gi6I4Gst-c90cf3dc9e31.js                            0.15 kB │ gzip:   0.13 kB
+dist/assets/chunk-2Q5K7J3B-DZZR43cH-c90cf3dc9e31.js                  0.21 kB │ gzip:   0.17 kB
+dist/assets/chunk-XXDRQBXY-gp2Fg2q8-c90cf3dc9e31.js                  0.24 kB │ gzip:   0.22 kB
+dist/assets/chunk-JWPE2WC7-BotukcrH-c90cf3dc9e31.js                  0.31 kB │ gzip:   0.22 kB
+dist/assets/chunk-5VM5RSS4-djtdgBsR-c90cf3dc9e31.js                  0.38 kB │ gzip:   0.28 kB
+dist/assets/stateDiagram-v2-MP3YSRHH-67s17gmR-c90cf3dc9e31.js        0.51 kB │ gzip:   0.32 kB
+dist/assets/chunk-POPQ4Y6H-BRXeovqV-c90cf3dc9e31.js                  0.55 kB │ gzip:   0.39 kB
+dist/assets/classDiagram-ZZMXUADV-DStbUWpy-c90cf3dc9e31.js           0.56 kB │ gzip:   0.33 kB
+dist/assets/classDiagram-v2-VYDZK3BY-DStbUWpy-c90cf3dc9e31.js        0.56 kB │ gzip:   0.33 kB
+dist/assets/json-DdsocbVI-c90cf3dc9e31.js                            0.60 kB │ gzip:   0.42 kB
+dist/assets/infoDiagram-27XIBGKW-geOnWk4p-c90cf3dc9e31.js            0.63 kB │ gzip:   0.42 kB
+dist/assets/swimlanesDiagram-VR7AAH4N-BpzkWr-3-c90cf3dc9e31.js       0.65 kB │ gzip:   0.38 kB
+dist/assets/sizeCapture-INFHLROL-BJ30TI5l-c90cf3dc9e31.js            1.02 kB │ gzip:   0.57 kB
+dist/assets/ordinal-C93KlZIL-c90cf3dc9e31.js                         1.20 kB │ gzip:   0.59 kB
+dist/assets/go-4VmnRw3R-c90cf3dc9e31.js                              1.45 kB │ gzip:   0.70 kB
+dist/assets/railroadDiagram-O6MQD6OU-By8RxlXn-c90cf3dc9e31.js        1.67 kB │ gzip:   0.77 kB
+dist/assets/abnfDiagram-VCTEODGH-BxIUklS3-c90cf3dc9e31.js            1.87 kB │ gzip:   0.91 kB
+dist/assets/chunk-F27PBJKO-NfPlVyeP-c90cf3dc9e31.js                  1.90 kB │ gzip:   0.84 kB
+dist/assets/pegDiagram-XKGWAZYB-VdezzLOv-c90cf3dc9e31.js             2.02 kB │ gzip:   0.94 kB
+dist/assets/ebnfDiagram-PWID7BFC-eEmgpi9M-c90cf3dc9e31.js            2.07 kB │ gzip:   0.90 kB
+dist/assets/rust-DsMvwcVK-c90cf3dc9e31.js                            2.94 kB │ gzip:   1.43 kB
+dist/assets/bash-I8pq0VWm-c90cf3dc9e31.js                            3.16 kB │ gzip:   1.57 kB
+dist/assets/arc-BcB3gEs_-c90cf3dc9e31.js                             3.45 kB │ gzip:   1.47 kB
+dist/assets/python-CXf-_D6G-c90cf3dc9e31.js                          3.53 kB │ gzip:   1.49 kB
+dist/assets/diagram-Z3DM3KII-D7onLTET-c90cf3dc9e31.js                4.30 kB │ gzip:   1.85 kB
+dist/assets/defaultLocale-DX6XiGOO-c90cf3dc9e31.js                   4.69 kB │ gzip:   2.17 kB
+dist/assets/linear-B7f3MJTi-c90cf3dc9e31.js                          5.70 kB │ gzip:   2.33 kB
+dist/assets/diagram-UQ7AKVKN-BYOirBmr-c90cf3dc9e31.js                6.28 kB │ gzip:   2.68 kB
+dist/assets/pieDiagram-E7YTZNPT-RLcSDNI5-c90cf3dc9e31.js             6.44 kB │ gzip:   2.67 kB
+dist/assets/sql-BC88IN-V-c90cf3dc9e31.js                             6.49 kB │ gzip:   2.41 kB
+dist/assets/javascript-DUNaicwC-c90cf3dc9e31.js                      6.50 kB │ gzip:   2.61 kB
+dist/assets/typescript-5pldp2kO-c90cf3dc9e31.js                      7.78 kB │ gzip:   3.06 kB
+dist/assets/diagram-S7CK7UJ4-DYBte2c9-c90cf3dc9e31.js                8.42 kB │ gzip:   3.73 kB
+dist/assets/cynefinDiagram-5FMLGOSQ-B7vtl5iK-c90cf3dc9e31.js        10.15 kB │ gzip:   3.62 kB
+dist/assets/stateDiagram-D77RDMKH-7Cq8fl21-c90cf3dc9e31.js          10.45 kB │ gzip:   3.64 kB
+dist/assets/diagram-VSXAHHWV-DrE4kuAY-c90cf3dc9e31.js               10.87 kB │ gzip:   4.19 kB
+dist/assets/dagre-GXQ25YYZ-CYzpkip8-c90cf3dc9e31.js                 11.17 kB │ gzip:   4.20 kB
+dist/assets/chunk-SVP7TREG-DiY-AupG-c90cf3dc9e31.js                 15.77 kB │ gzip:   4.43 kB
+dist/assets/diagram-VX7I27RA-CAL5ID5r-c90cf3dc9e31.js               16.18 kB │ gzip:   5.74 kB
+dist/assets/ishikawaDiagram-5VMMS53U-KxXPlLab-c90cf3dc9e31.js       17.59 kB │ gzip:   6.64 kB
+dist/assets/kanban-definition-UXKFOSKX-D2iaUi4J-c90cf3dc9e31.js     20.74 kB │ gzip:   7.24 kB
+dist/assets/core-DIzrpHOG-c90cf3dc9e31.js                           20.98 kB │ gzip:   8.42 kB
+dist/assets/mindmap-definition-YA3MSWOX-DXC5wAqu-c90cf3dc9e31.js    23.41 kB │ gzip:   7.83 kB
+dist/assets/sankeyDiagram-P5KCCOFB-BAdd-ubj-c90cf3dc9e31.js         23.44 kB │ gzip:   8.55 kB
+dist/assets/journeyDiagram-3NMN7TZE-DDenVfH5-c90cf3dc9e31.js        23.64 kB │ gzip:   8.31 kB
+dist/assets/wardleyDiagram-VM6X3IG4-CzcAN-R5-c90cf3dc9e31.js        26.15 kB │ gzip:   6.91 kB
+dist/assets/gitGraphDiagram-WWUBYQGX-DtqoISAL-c90cf3dc9e31.js       30.00 kB │ gzip:   8.86 kB
+dist/assets/erDiagram-RLTQ6QDP-mZlS5HtD-c90cf3dc9e31.js             30.99 kB │ gzip:  10.53 kB
+dist/assets/requirementDiagram-BXWQKSXE-CgJM8ujL-c90cf3dc9e31.js    31.26 kB │ gzip:   9.70 kB
+dist/assets/timeline-definition-24CTP7MA-Ckjwd7bm-c90cf3dc9e31.js   31.38 kB │ gzip:  10.38 kB
+dist/assets/quadrantDiagram-AXDQQJYC-B0lindYm-c90cf3dc9e31.js       34.56 kB │ gzip:  10.03 kB
+dist/assets/layout-B7ZbiOen-c90cf3dc9e31.js                         35.45 kB │ gzip:  12.73 kB
+dist/assets/chunk-IMKFNOWR-c6qE25Pd-c90cf3dc9e31.js                 38.68 kB │ gzip:  12.56 kB
+dist/assets/vennDiagram-4TSXK5OY-Datos_oL-c90cf3dc9e31.js           42.40 kB │ gzip:  15.68 kB
+dist/assets/blockDiagram-I7D4REHJ-DjqUcFIK-c90cf3dc9e31.js          43.21 kB │ gzip:  13.78 kB
+dist/assets/xychartDiagram-S5SC5T6Z-D8iHc4DK-c90cf3dc9e31.js        44.59 kB │ gzip:  12.52 kB
+dist/assets/chunk-TICWLB2K-DFMFQEO_-c90cf3dc9e31.js                 49.41 kB │ gzip:  15.62 kB
+dist/assets/flowDiagram-HODETNUW-B_qj-y98-c90cf3dc9e31.js           62.74 kB │ gzip:  19.79 kB
+dist/assets/c4Diagram-7LVT6UL2-12UJErCg-c90cf3dc9e31.js             65.60 kB │ gzip:  18.66 kB
+dist/assets/ganttDiagram-EL5Y4UJY-ChDyNMRI-c90cf3dc9e31.js          69.76 kB │ gzip:  23.33 kB
+dist/assets/cose-bilkent-JH36ORCC-D2fKc9wA-c90cf3dc9e31.js          81.76 kB │ gzip:  22.40 kB
+dist/assets/swimlanes-42K2YHIH-CKelsVY5-c90cf3dc9e31.js            117.14 kB │ gzip:  42.50 kB
+dist/assets/sequenceDiagram-WJ2MYXX4-D-MNIG_1-c90cf3dc9e31.js      117.50 kB │ gzip:  31.03 kB
+dist/assets/architectureDiagram-5GKGNRK7-Cx4DRiaB-c90cf3dc9e31.js  152.08 kB │ gzip:  42.92 kB
+dist/assets/katex-C5jXJg4s-c90cf3dc9e31.js                         261.33 kB │ gzip:  77.25 kB
+dist/assets/cytoscape.esm-Ix0LnXOy-c90cf3dc9e31.js                 443.83 kB │ gzip: 141.78 kB
+dist/assets/qqSkinAssets-b77cjntV-c90cf3dc9e31.js                  495.69 kB │ gzip: 373.05 kB
+dist/assets/index-DfbK3jUH-c90cf3dc9e31.js                         661.48 kB │ gzip: 228.90 kB
+dist/assets/mermaid.core-0NnWdZmy-c90cf3dc9e31.js                  667.78 kB │ gzip: 160.02 kB
+dist/assets/cynefin-OW5HDTMX-lL5aa56c-c90cf3dc9e31.js              690.87 kB │ gzip: 154.60 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 6.38s
+$ tsc -p tsconfig.json

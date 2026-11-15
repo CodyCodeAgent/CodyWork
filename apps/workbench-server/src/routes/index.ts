@@ -353,6 +353,17 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/channels/feishu/accounts', () => channelService(ctx).listAccounts())
 
+  add('GET', '/api/channels/feishu/accounts/:accountId/collaboration', c => {
+    const service = channelService(ctx).collaboration
+    const id = requiredParam(c, 'accountId')
+    return { configs: service.configs(id), sessions: service.sessions(id) }
+  })
+  add('PUT', '/api/channels/feishu/accounts/:accountId/collaboration', c => channelService(ctx).collaboration.saveConfig(requiredParam(c, 'accountId'), c.body as import('../services/channelCollaboration.js').CollaborationConfig))
+  add('POST', '/api/channels/feishu/accounts/:accountId/collaboration/:sessionId/stop', async c => {
+    await channelService(ctx).collaboration.stop(requiredParam(c, 'accountId'), requiredParam(c, 'sessionId'))
+    return { stopped: true }
+  })
+
   add('GET', '/api/channels/feishu/permission-template', () => channelService(ctx).permissionTemplate())
 
   add('POST', '/api/channels/feishu/accounts', async (c) => channelService(ctx).saveAccount(null, channelAccountInput(c.body)))
