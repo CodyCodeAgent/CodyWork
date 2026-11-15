@@ -745,9 +745,9 @@ export const api = {
   shareConversationToFeishu: (workspaceId: string, conversationId: string, input: { accountId: string; title?: string }) =>
     request<ConversationShareResult>('POST', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/share/feishu`, input),
   uploadConversationImage: (workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }) =>
-    request<ConversationImageUpload>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/images`, input),
+    request<ConversationImageUpload>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/attachments`, input),
   sendMessage: (workspaceId: string, conversationId: string, clientCommandId: string, content: string, mode: 'queue' | 'steer' | 'append' = 'queue', settings?: BrowserTurnSettings, imageIds: string[] = []) =>
-    request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}), ...(imageIds.length ? { images: imageIds } : {}) }),
+    request<{ accepted: true; commandId: string }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/messages`, { clientCommandId, content, mode, ...(settings ?? {}), ...(imageIds.length ? { attachments: imageIds } : {}) }),
   interruptConversation: (workspaceId: string, conversationId: string) =>
     request<{ supported: boolean }>('POST', `/api/workspaces/${workspaceId}/conversations/${conversationId}/interrupt`),
   compactConversation: (workspaceId: string, conversationId: string) =>

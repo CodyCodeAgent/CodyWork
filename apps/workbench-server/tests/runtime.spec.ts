@@ -381,10 +381,12 @@ describe('generic runtime protocol', () => {
     await expect(runtime.sendTurn({ conversation, prompt: 'DISCONNECT EXPECT_YOLO' })).rejects.toThrow('exited')
     expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })
     await expect(runtime.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId }))
-      .rejects.toThrow('will not be restarted automatically')
-    await expect(runtime.sendTurn({ conversation, prompt: 'still unavailable' }))
-      .rejects.toThrow('unavailable')
-    expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'unavailable', startCount: 1 })
+      .resolves.toMatchObject({ id: conversation.id, nativeId: conversation.nativeId })
+    // Core recovers the process on the next explicit operation, without replaying
+    // the failed DISCONNECT turn. A new user turn reuses that recovered process.
+    await expect(runtime.sendTurn({ conversation, prompt: 'after recovery' }))
+      .resolves.toMatchObject({ finalText: 'CODEX_FIXTURE_OK' })
+    expect(runtime.diagnostics()).toMatchObject({ lifecycle: 'running', startCount: 2 })
     await runtime.close()
 
     // A new owning service lifecycle may start one fresh App Server process.

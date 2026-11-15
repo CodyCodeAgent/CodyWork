@@ -1,3 +1,4 @@
+import { materializeAttachmentText, type ComposerAttachment } from '@codycodeagent/cody-web-core/composer'
 import { resolve } from 'node:path'
 import { channelCommandId, type ChannelInboundMessage, type ChannelQuotedMessage } from '@codycodeagent/cody-web-core/channel'
 import type { WorkbenchDb } from '../db/index.js'
@@ -47,11 +48,11 @@ type ChannelCommandAdapterHooks = {
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
   addReceiptReaction(accountId: string, messageId: string): Promise<string>
   openUrl(binding: Pick<CodyWorkChannelBinding, 'workspaceId' | 'demandId' | 'conversationId'>): string
-  persistImage?: (
+  persistAttachment?: (
     workspaceId: string,
     conversationId: string,
     input: { path: string; name?: string; mimeType?: string },
-  ) => Promise<{ path: string }> | { path: string }
+  ) => Promise<ComposerAttachment & { path: string }> | (ComposerAttachment & { path: string })
 }
 
 /** Converts a durable channel Inbox row into the shared command gateway. */
@@ -72,6 +73,7 @@ export class ChannelCommandAdapter {
     const provider = this.hooks.provider(inbox.message.accountId)
     if (!provider) throw new Error('飞书机器人当前未连接')
     const localImages: Array<{ path: string }> = []
+    const files: ComposerAttachment[] = []
     const paths: string[] = []
     const quotedPaths: string[] = []
     const channelMessage = inbox.message as CodyWorkInboundMessage
@@ -83,28 +85,21 @@ export class ChannelCommandAdapter {
       const demand = binding.targetType === 'codywork-demand' ? listDemands(this.database, workspace).find(item => item.id === binding.demandId) : null
       if (binding.targetType === 'codywork-demand' && !demand) throw new Error('绑定的需求不存在')
       const attachmentRoot = (messageId: string) => resolve(demand?.path ?? workspace.path, 'docs', '.channel-attachments', messageId)
-      for (const attachment of inbox.message.attachments) {
-        const downloaded = await provider.downloadAttachment(sourceMessageId, attachment, attachmentRoot(sourceMessageId))
-        if (attachment.type === 'image') {
-          const stored = this.hooks.persistImage
-            ? await this.hooks.persistImage(binding.workspaceId, binding.conversationId, { path: downloaded.path, name: attachment.name, mimeType: attachment.mimeType })
-            : downloaded
-          localImages.push({ path: stored.path })
+      const collect = async (messageId: string, attachments: ChannelInboundMessage['attachments']) => {
+        for (const attachment of attachments) {
+          const downloaded = await provider.downloadAttachment(messageId, attachment, attachmentRoot(messageId), 20 * 1024 * 1024)
+          const stored = this.hooks.persistAttachment
+            ? await this.hooks.persistAttachment(binding.workspaceId, binding.conversationId, { path: downloaded.path, name: attachment.name, mimeType: attachment.mimeType })
+            : { ...downloaded, id: attachment.id, name: attachment.name || attachment.id, mimeType: attachment.mimeType || 'application/octet-stream', size: downloaded.sizeBytes }
+          if (attachment.type === 'image') localImages.push({ path: stored.path })
+          else files.push(stored)
         }
-        else paths.push(downloaded.path)
       }
-      if (quotedMessage) for (const attachment of quotedMessage.attachments) {
-        const downloaded = await provider.downloadAttachment(quotedMessage.messageId, attachment, attachmentRoot(quotedMessage.messageId))
-        if (attachment.type === 'image') {
-          const stored = this.hooks.persistImage
-            ? await this.hooks.persistImage(binding.workspaceId, binding.conversationId, { path: downloaded.path, name: attachment.name, mimeType: attachment.mimeType })
-            : downloaded
-          localImages.push({ path: stored.path })
-        }
-        else quotedPaths.push(downloaded.path)
-      }
+      if (inbox.message.attachments.length + (quotedMessage?.attachments.length ?? 0) > 8) throw new Error('每条消息最多附加 8 个文件')
+      await collect(sourceMessageId, inbox.message.attachments)
+      if (quotedMessage) await collect(quotedMessage.messageId, quotedMessage.attachments)
     }
-    const prompt = channelPrompt(inbox.message, paths, quotedPaths)
+    const prompt = materializeAttachmentText(channelPrompt(inbox.message, paths, quotedPaths), files)
     const resolvedSettings = await this.settings.resolve(binding)
     const { models: _models, ...executionContext } = resolvedSettings
     const commandId = channelCommandId(inbox.message)

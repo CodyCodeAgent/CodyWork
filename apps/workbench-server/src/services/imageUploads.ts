@@ -1,3 +1,5 @@
+import { LocalAttachmentStorage, decodeAttachmentDataUrl, type StoredAttachment } from '@codycodeagent/cody-web-core/attachments'
+import { type ComposerAttachment } from '@codycodeagent/cody-web-core/composer'
 import { randomUUID } from 'node:crypto'
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
@@ -69,6 +71,47 @@ export class ConversationImageUploads {
   constructor(private readonly db: WorkbenchDb, storageRoot?: string) {
     this.root = storageRoot ?? join(dirname(db.path === ':memory:' ? join(process.cwd(), '.runtime', 'workspace.db') : db.path), 'uploads')
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
+  }
+
+  /** General files share scoped metadata with legacy image uploads. */
+  uploadFile(workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }): UploadedConversationImage {
+    const decoded = decodeAttachmentDataUrl(input.dataUrl)
+    this.checkQuota(workspaceId, conversationId, decoded.bytes.length)
+    const storage = new LocalAttachmentStorage(this.root)
+    return this.recordFile(workspaceId, conversationId, storage.put({ name: input.name, ...decoded }))
+  }
+
+  importAttachment(workspaceId: string, conversationId: string, input: { path: string; name?: string; mimeType?: string }): UploadedConversationImage {
+    // Inbox retries reuse the same file in this conversation, never another scope.
+    const existing = this.db.db.prepare('SELECT * FROM conversation_images WHERE workspace_id = ? AND conversation_id = ? AND file_path = ?').get(workspaceId, conversationId, input.path) as StoredConversationImage | undefined
+    if (existing) return this.publicImage(existing)
+    this.checkQuota(workspaceId, conversationId, statSync(input.path).size)
+    let mimeType = input.mimeType
+    if (!mimeType) { try { mimeType = mimeTypeForLocalImage(input.name || input.path) } catch { mimeType = 'application/octet-stream' } }
+    return this.recordFile(workspaceId, conversationId, new LocalAttachmentStorage(this.root).importFile({ ...input, mimeType }))
+  }
+
+  private checkQuota(workspaceId: string, conversationId: string, size: number): void {
+    const usage = this.db.db.prepare('SELECT COALESCE(SUM(byte_length), 0) AS bytes FROM conversation_images WHERE workspace_id = ? AND conversation_id = ?').get(workspaceId, conversationId) as { bytes: number }
+    if (usage.bytes + size > 512 * 1024 * 1024) throw new Error('当前会话附件存储已达到 512MB 上限')
+  }
+
+  private recordFile(workspaceId: string, conversationId: string, file: StoredAttachment): UploadedConversationImage {
+    const row: StoredConversationImage = { id: file.id, workspace_id: workspaceId, conversation_id: conversationId, name: file.name, mime_type: file.mimeType, byte_length: file.size, file_path: file.path, created_at: nowIso() }
+    try {
+      this.db.db.prepare('INSERT INTO conversation_images (id, workspace_id, conversation_id, name, mime_type, byte_length, file_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(row.id, workspaceId, conversationId, row.name, row.mime_type, row.byte_length, row.file_path, row.created_at)
+    } catch (error) { rmSync(file.path, { force: true }); throw error }
+    return this.publicImage(row)
+  }
+
+  resolveAttachments(workspaceId: string, conversationId: string, ids: readonly string[]): ComposerAttachment[] {
+    if (ids.length > 8) throw new Error('每条消息最多附加 8 个文件')
+    return [...new Set(ids)].map(id => {
+      const row = this.find(workspaceId, conversationId, id)
+      if (!row || !existsSync(row.file_path)) throw new Error('附件不存在或不属于当前会话')
+      return { ...this.publicImage(row), path: row.file_path }
+    })
   }
 
   upload(workspaceId: string, conversationId: string, input: { name: string; dataUrl: string }): UploadedConversationImage {
@@ -145,7 +188,7 @@ export class ConversationImageUploads {
   }
 
   private url(workspaceId: string, conversationId: string, imageId: string): string {
-    return `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/images/${encodeURIComponent(imageId)}`
+    return `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/${imageId.startsWith('file_') ? 'attachments' : 'images'}/${encodeURIComponent(imageId)}`
   }
 
   private publicImage(row: StoredConversationImage): UploadedConversationImage {

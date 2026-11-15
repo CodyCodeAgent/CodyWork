@@ -146,7 +146,7 @@
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div v-if="composerCollapsed" class="composer-restore-row"><button class="composer-restore" type="button" aria-label="展开消息输入区" aria-expanded="false" title="展开输入区" @click="setComposerCollapsed(false)"><span>展开输入区</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg></button></div>
             <div v-else :class="['composer', { 'composer--without-reasoning': composerReasoningOptions.length === 0, 'composer--settings-open': mobileComposerSettingsOpen }]">
-              <div class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div><button class="chat-panel-collapse" type="button" aria-label="收起消息输入区" aria-expanded="true" title="收起输入区" @click="setComposerCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></button></div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :images="composerImages" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-images="uploadImages" @remove-image="removeComposerImage" @send="sendMessage" @stop="interrupt"><template #controls><ConversationFastToggle v-if="selectedConversation && activeRuntimeType === 'codex' && selectedModelSupportsFast" :conversation-id="selectedConversation.id" /><button type="button" class="mobile-composer-settings-toggle" :aria-expanded="mobileComposerSettingsOpen" @click="mobileComposerSettingsOpen = !mobileComposerSettingsOpen">{{ mobileComposerSettingsOpen ? '收起设置' : '设置' }} · {{ composerPermissionOptions.find(option => option.value === permission)?.label || permission }}</button><button type="button" class="mobile-composer-collapse" aria-label="收起消息输入区" @click="setComposerCollapsed(true)">⌄</button></template></CodyComposer>
+              <div class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div><button class="chat-panel-collapse" type="button" aria-label="收起消息输入区" aria-expanded="true" title="收起输入区" @click="setComposerCollapsed(true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></button></div><CodyComposer variant="embedded" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :attachments="composerImages" :file-upload-enabled="true" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-files="uploadImages" @remove-attachment="removeComposerImage" @send="sendMessage" @stop="interrupt"><template #controls><ConversationFastToggle v-if="selectedConversation && activeRuntimeType === 'codex' && selectedModelSupportsFast" :conversation-id="selectedConversation.id" /><button type="button" class="mobile-composer-settings-toggle" :aria-expanded="mobileComposerSettingsOpen" @click="mobileComposerSettingsOpen = !mobileComposerSettingsOpen">{{ mobileComposerSettingsOpen ? '收起设置' : '设置' }} · {{ composerPermissionOptions.find(option => option.value === permission)?.label || permission }}</button><button type="button" class="mobile-composer-collapse" aria-label="收起消息输入区" @click="setComposerCollapsed(true)">⌄</button></template></CodyComposer>
               <div v-if="selectedModelDetails" class="composer-model-detail" :title="selectedModelDetails" role="status">当前模型 · {{ selectedModelDetails }}</div>
             </div>
           </section>
@@ -223,6 +223,7 @@
 </template>
 
 <script setup lang="ts">
+import { materializeAttachmentText, parseAttachmentText, isImageAttachment } from '@codycodeagent/cody-web-core/composer'
 import { vModalFocus } from './modalFocus'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
@@ -605,7 +606,7 @@ const composerSkills = computed<CodyComposerOption[]>(() => runtimeCapabilities.
   description: [skillSourceLabel(skill.scope), skill.description, skillIdentityDescription(runtimeSkills.value, skill), sameNameSkills(runtimeSkills.value, skill).length ? skill.path : ''].filter(Boolean).join(' · '),
 })) : [])
 const composerPlaceholder = computed(() => {
-  const imageHint = runtimeCapabilities.value.imageInput ? '（可粘贴或拖入图片；Enter 换行，Control + Enter 发送）' : '（Enter 换行，Control + Enter 发送）'
+  const imageHint = '（可添加任意格式附件、粘贴图片；Enter 换行，Control + Enter 发送）'
   if (isRunning.value) return selectedSubmitMode.value === 'steer' ? `描述引导…${imageHint}` : selectedSubmitMode.value === 'append' ? `补充当前任务…${imageHint}` : `描述下一步…${imageHint}`
   return `描述你希望完成的事情…${imageHint}`
 })
@@ -1883,7 +1884,7 @@ async function submitConversationMessage(
   try {
     const submitMode = modeOverride ?? resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value)
     await submitUserMessage(
-      { text: optimisticText, ...(images.length ? { images: images.map(image => image.url) } : {}), ...(skillReferences.length ? { skills: skillReferences } : {}) },
+      { text: materializeAttachmentText(optimisticText, images.filter(file => !isImageAttachment(file))), ...(images.length ? { images: images.filter(isImageAttachment).map(image => image.url) } : {}), ...(skillReferences.length ? { skills: skillReferences } : {}) },
       {
         mode: submitMode,
         input: {
@@ -1952,6 +1953,7 @@ async function sendMessage(): Promise<void> {
   draftByConversationId.delete(conversationId)
   if (await submitConversationMessage(content, turnSkills, optimisticText, skillReferences, images)) {
     selectedSkillsForTurn.value = []
+    composerImageError.value = ''
     composerImages.value = []
     composerImagesByConversationId.delete(conversationId)
   }
@@ -2030,14 +2032,23 @@ async function recoverFailedMessageInNewConversation(message: CodyMessage): Prom
         // many images the user needs to attach again.
       }
     }
+    const original = parseAttachmentText(message.text)
+    const migratedFiles: ComposerImage[] = []
+    for (const file of original.attachments) {
+      if (!file.url?.startsWith('/api/')) throw new Error(`附件 ${file.name} 不可用，请重新附加后发送`)
+      const response = await fetch(file.url)
+      if (!response.ok) throw new Error(`无法迁移附件 ${file.name}，请重新附加后发送`)
+      const upload = await api.uploadConversationImage(activeWorkspace.id, created.id, { name: file.name, dataUrl: await blobAsDataUrl(await response.blob()) })
+      migratedFiles.push(imageFromUpload(upload))
+    }
     const recoveryPrompt = buildConversationRecoveryPrompt(
-      sourceMessages,
-      message,
+      sourceMessages.map(item => ({ ...item, text: parseAttachmentText(item.text).text })),
+      { ...message, text: original.text },
       sourceImageUrls.length - migratedImages.length,
     )
     await submitUserMessage(
       {
-        text: message.text,
+        text: materializeAttachmentText(original.text, migratedFiles),
         ...(migratedImages.length ? { images: migratedImages.map(image => image.url) } : {}),
         ...(skillReferences.length ? { skills: skillReferences } : {}),
       },
@@ -2045,7 +2056,7 @@ async function recoverFailedMessageInNewConversation(message: CodyMessage): Prom
         mode: 'queue',
         input: {
           content: recoveryPrompt,
-          ...(migratedImages.length ? { imageIds: migratedImages.map(image => image.id) } : {}),
+          ...([...migratedImages, ...migratedFiles].length ? { imageIds: [...migratedImages, ...migratedFiles].map(file => file.id) } : {}),
           settings: {
             ...(selectedModel.value ? { model: selectedModel.value } : {}),
             ...(created.runtimeType === 'codex' ? { serviceTier: conversationServiceTier(created.id, selectedModelSupportsFast.value) } : {}),
@@ -2066,20 +2077,20 @@ function updateDraft(value: string): void { draft.value = value; const conversat
 function imageIdFromUrl(url: string): string | null {
   try {
     const id = new URL(url, window.location.origin).pathname.split('/').at(-1)
-    return id?.startsWith('image_') ? id : null
+    return id && /^(image_|file_)/.test(id) ? id : null
   } catch { return null }
 }
 function imageFromUpload(upload: ConversationImageUpload): ComposerImage {
   // `path` is deliberately empty in the browser. It remains present for
   // compatibility with the current tagged Core type; CodyWork resolves the
   // opaque id to its private local path only on the server.
-  return { id: upload.id, name: upload.name, path: '', url: upload.url, mimeType: upload.mimeType }
+  return { ...upload, id: upload.id, name: upload.name, path: '', url: upload.url, mimeType: upload.mimeType }
 }
 function blobAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('无法读取图片'))
-    reader.onerror = () => reject(new Error('无法读取图片'))
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('无法读取附件'))
+    reader.onerror = () => reject(new Error('无法读取附件'))
     reader.readAsDataURL(blob)
   })
 }
@@ -2093,8 +2104,8 @@ function persistComposerImages(images: ComposerImage[]): void {
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('无法读取图片'))
-    reader.onerror = () => reject(new Error('无法读取图片'))
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('无法读取附件'))
+    reader.onerror = () => reject(new Error('无法读取附件'))
     reader.readAsDataURL(file)
   })
 }
@@ -2103,18 +2114,18 @@ async function uploadImages(files: File[]): Promise<void> {
   const activeConversation = selectedConversation.value
   if (!activeWorkspace || !activeConversation || uploadingImages.value || !files.length) return
   const remaining = 8 - composerImages.value.length
-  if (remaining <= 0) { composerImageError.value = '每条消息最多附加 8 张图片'; return }
+  if (remaining <= 0) { composerImageError.value = '每条消息最多附加 8 个附件'; return }
   const candidates = files.slice(0, remaining)
-  composerImageError.value = files.length > remaining ? '已达到 8 张图片上限，未添加其余图片' : ''
+  composerImageError.value = files.length > remaining ? '已达到 8 个附件上限，未添加其余附件' : ''
   uploadingImages.value = true
   try {
-    const uploaded = await Promise.all(candidates.map(async file => imageFromUpload(await api.uploadConversationImage(
-      activeWorkspace.id,
-      activeConversation.id,
-      { name: file.name, dataUrl: await readFileAsDataUrl(file) },
-    ))))
-    if (workspace.value?.id !== activeWorkspace.id || selectedConversation.value?.id !== activeConversation.id) return
-    persistComposerImages([...composerImages.value, ...uploaded])
+    for (const file of candidates) {
+      if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} 超过 20MB`)
+      const uploaded = imageFromUpload(await api.uploadConversationImage(activeWorkspace.id, activeConversation.id, { name: file.name, dataUrl: await readFileAsDataUrl(file) }))
+      const next = [...(composerImagesByConversationId.get(activeConversation.id) ?? []), uploaded]
+      composerImagesByConversationId.set(activeConversation.id, next)
+      if (workspace.value?.id === activeWorkspace.id && selectedConversation.value?.id === activeConversation.id) composerImages.value = next
+    }
   } catch (cause) {
     composerImageError.value = cause instanceof Error ? cause.message : String(cause)
   } finally {

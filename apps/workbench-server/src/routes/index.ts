@@ -1,3 +1,4 @@
+import { materializeAttachmentText, parseAttachmentText, isImageAttachment } from '@codycodeagent/cody-web-core/composer'
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { isIP } from 'node:net'
@@ -252,10 +253,10 @@ function workspaceRegistry(ctx: AppContext): WorkspaceRegistry {
 export function channelService(ctx: AppContext): CodyWorkChannelService {
   if (!ctx.channels) ctx.channels = new CodyWorkChannelService(ctx.db, conversationService(ctx), workspaceRegistry(ctx), {
     publicOrigin,
-    persistConversationImage: (workspaceId, conversationId, input) => {
+    persistConversationAttachment: (workspaceId, conversationId, input) => {
       const uploads = imageUploads(ctx)
-      const uploaded = uploads.importLocalFile(workspaceId, conversationId, input)
-      return uploads.resolveForTurn(workspaceId, conversationId, [uploaded.id])[0]!
+      const uploaded = uploads.importAttachment(workspaceId, conversationId, input)
+      return uploads.resolveAttachments(workspaceId, conversationId, [uploaded.id])[0]! as { path: string; id: string; name: string; mimeType: string; size: number; url: string }
     },
   })
   return ctx.channels
@@ -860,6 +861,32 @@ function buildRoutes(ctx: AppContext) {
     })
   })
 
+  add('POST', '/api/workspaces/:id/conversations/:conversationId/attachments', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const conversationId = requiredParam(c, 'conversationId')
+    conversationService(ctx).get(workspace.id, conversationId)
+    return imageUploads(ctx).uploadFile(workspace.id, conversationId, {
+      name: typeof c.body.name === 'string' ? c.body.name : '',
+      dataUrl: typeof c.body.dataUrl === 'string' ? c.body.dataUrl : '',
+    })
+  })
+  add('GET', '/api/workspaces/:id/conversations/:conversationId/attachments/:attachmentId', (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const conversationId = requiredParam(c, 'conversationId')
+    conversationService(ctx).get(workspace.id, conversationId)
+    const file = imageUploads(ctx).read(workspace.id, conversationId, requiredParam(c, 'attachmentId'))
+    const inline = isImageAttachment(file)
+    c.res.writeHead(200, {
+      'Content-Type': inline ? file.mimeType : 'application/octet-stream',
+      'Content-Length': file.bytes.length,
+      'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      ...corsHeaders(c.req),
+    })
+    c.res.end(file.bytes)
+  })
+
   add('POST', '/api/workspaces/:id/conversations/:conversationId/images', (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const conversationId = requiredParam(c, 'conversationId')
@@ -875,9 +902,9 @@ function buildRoutes(ctx: AppContext) {
     conversationService(ctx).get(workspace.id, conversationId)
     const image = imageUploads(ctx).read(workspace.id, conversationId, requiredParam(c, 'imageId'))
     c.res.writeHead(200, {
-      'Content-Type': image.mimeType,
+      'Content-Type': isImageAttachment(image) ? image.mimeType : 'application/octet-stream',
       'Content-Length': image.bytes.length,
-      'Content-Disposition': `inline; filename="${encodeURIComponent(image.name)}"`,
+      'Content-Disposition': `${isImageAttachment(image) ? 'inline' : 'attachment'}; filename="${encodeURIComponent(image.name)}"`,
       'Cache-Control': 'private, no-store, max-age=0',
       'X-Content-Type-Options': 'nosniff',
       ...corsHeaders(c.req),
@@ -900,11 +927,15 @@ function buildRoutes(ctx: AppContext) {
     }
     const clientCommandId = typeof c.body.clientCommandId === 'string' ? c.body.clientCommandId : undefined
     const conversationId = requiredParam(c, 'conversationId')
-    const imageIds = Array.isArray(c.body.images)
-      ? c.body.images.filter((item: unknown) => typeof item === 'string').slice(0, 8) as string[]
-      : []
-    const localImages = imageUploads(ctx).resolveForTurn(workspace.id, conversationId, imageIds)
-    return conversationService(ctx).send(workspace.id, conversationId, content, mode, settings, clientCommandId, localImages)
+    const requested = c.body.attachments ?? c.body.images ?? []
+    if (!Array.isArray(requested) || requested.some(item => typeof item !== 'string')) throw new Error('附件列表无效')
+    const parsed = parseAttachmentText(content)
+    // Retry uses the ids from the native manifest; ignore client-provided paths and URLs.
+    const ids = [...new Set([...requested, ...parsed.attachments.map(file => file.id)])] as string[]
+    const files = imageUploads(ctx).resolveAttachments(workspace.id, conversationId, ids)
+    const localImages = files.filter(isImageAttachment).map(file => ({ path: file.path! }))
+    const prompt = materializeAttachmentText(parsed.text, files.filter(file => !isImageAttachment(file)))
+    return conversationService(ctx).send(workspace.id, conversationId, prompt, mode, settings, clientCommandId, localImages)
   })
 
   add('POST', '/api/workspaces/:id/conversations/:conversationId/interrupt', async (c) => {
@@ -1063,7 +1094,7 @@ export function startServer(ctx: AppContext, options: ServerOptions): StartedWor
     }
     let body: Record<string, unknown>
     try {
-      const isImageUpload = route.pattern === '/api/workspaces/:id/conversations/:conversationId/images' && req.method === 'POST'
+      const isImageUpload = ['/api/workspaces/:id/conversations/:conversationId/images', '/api/workspaces/:id/conversations/:conversationId/attachments'].includes(route.pattern) && req.method === 'POST'
       body = await readBody(req, isImageUpload ? 29 * 1024 * 1024 : 1 * 1024 * 1024)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
