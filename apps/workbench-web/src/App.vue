@@ -70,7 +70,7 @@
       </section>
       <section v-else-if="activePage === 'chat' && (selectedDemand || isWorkspaceConversationPage)" class="demand-chat-page">
         <ResponsivePanel v-model:open="mobileContextOpen" title="会话详情与操作">
-        <header class="topbar chat-topbar">
+        <header class="topbar chat-topbar" :class="{ 'chat-topbar--collapsed': chatHeaderCollapsed && !isCompactViewport }">
           <div v-if="selectedDemand"><button class="back-link" @click="mobileContextOpen = false; returnToDemandList()">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="mobileContextOpen = false; copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="mobileContextOpen = false; copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
           <div v-else><button class="back-link" @click="mobileContextOpen = false; returnToWorkspace()">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 {{ activeRuntimeLabel }}</strong><span>默认 YOLO，可切换只读或 Normal；可用能力以当前 Runtime 声明为准</span></div></div>
           <div class="chat-toolbar-menu"><div class="topbar-actions">
@@ -85,7 +85,7 @@
               </template>
             </ChatToolbarPopover>
             <span class="chat-toolbar-divider" aria-hidden="true" />
-            <button v-if="selectedConversation" class="btn toolbar-quiet-action" type="button" @click="mobileContextOpen = false; openConversationFollowup()"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>定时跟进</button>
+            <button v-if="selectedConversation" class="btn toolbar-quiet-action" type="button" aria-label="定时跟进" title="定时跟进" @click="mobileContextOpen = false; openConversationFollowup()"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg><span>定时跟进</span></button>
             <DemandToolbox v-if="selectedDemand" :demand="selectedDemand" :repositories="demandBaselineRepositories" :usage="threadContextUsage" :can-settle="canSettleConversation" :settle-title="settleConversationTitle" :can-add-repository="canAddDemandRepository" :syncing-repository-id="syncingRepositoryId" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :quick-actions="demandQuickActions" :flux-integration="fluxIntegration" :flux-skill-installing="installingSkill" :quick-actions-disabled="sending || uploadingImages || !selectedConversation" :quick-action-feedback="quickActionFeedback" :can-compact="Boolean(selectedConversation) && !isRunning" :compacting="compactingConversation" :compact-message="compactConversationMessage" @settle="mobileContextOpen = false; settleConversation()" @compact="mobileContextOpen = false; compactConversation()" @add-repository="openAddDemandRepository" @sync="mobileContextOpen = false; syncRepositoryBaseline($event)" @cleanup="mobileContextOpen = false; requestBaselineCleanup($event)" @execute-quick-action="mobileContextOpen = false; executeQuickAction($event)" @execute-flux-instruction="mobileContextOpen = false; executeFluxInstruction($event)" @install-flux-skill="mobileContextOpen = false; installFluxSkill()" @manage-flux-binding="openFluxBindingDialog" />
             <ChatToolbarPopover :key="`more-${selectedConversation?.id}`" :label="aiReportSummary?.state === 'degraded' ? '更多会话操作，代码上报需关注' : '更多会话操作'" :attention="Boolean(selectedDemand && runtimeCapabilities.aiCodeReports && aiReportSummary?.state === 'degraded')" :inline="isCompactViewport">
               <template #trigger><svg class="toolbar-more-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg></template>
@@ -98,6 +98,7 @@
               </template>
             </ChatToolbarPopover>
             <button class="btn primary new-conversation-button" :disabled="creatingConversation" @click="mobileContextOpen = false; openCreateConversation()">＋ 新会话</button>
+            <button v-if="!isCompactViewport" class="btn chat-header-toggle" type="button" :aria-expanded="!chatHeaderCollapsed" :aria-label="chatHeaderCollapsed ? '展开顶部信息' : '收起顶部信息'" :title="chatHeaderCollapsed ? '展开顶部信息' : '收起顶部信息'" @click="setChatHeaderCollapsed(!chatHeaderCollapsed)"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="chatHeaderCollapsed ? 'm7 10 5 5 5-5' : 'm7 14 5-5 5 5'" /></svg></button>
           </div></div>
         </header>
         </ResponsivePanel>
@@ -351,6 +352,11 @@ const mobileNavigationOpen = ref(false)
 const mobileSessionsOpen = ref(false)
 const mobileContextOpen = ref(false)
 const mobileComposerSettingsOpen = ref(false)
+const chatHeaderCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-header'))
+function setChatHeaderCollapsed(collapsed: boolean) {
+  chatHeaderCollapsed.value = collapsed
+  writePanelCollapsed(window.localStorage, 'conversation-header', collapsed)
+}
 const compactViewport = typeof window !== 'undefined' ? window.matchMedia('(max-width: 900px)') : null
 const isCompactViewport = ref(compactViewport?.matches ?? false)
 function updateCompactViewport() {
@@ -2208,6 +2214,7 @@ watch(activePage, () => { mobileNavigationOpen.value = false; mobileSessionsOpen
 /* Reserve a utility slot on every page, separate from wrapping page actions. */
 .global-notification-entry { position: fixed; top: 24px; right: 24px; z-index: 6; }
 .has-notifications .topbar { padding-right: 88px; }
+.app-shell:has(.chat-topbar--collapsed) .global-notification-entry { top: 10px; }
 @media (max-width: 900px) {
   .global-notification-entry { top: calc(12px + env(safe-area-inset-top)); right: 14px; }
   .has-notifications .topbar { padding-right: 18px; }

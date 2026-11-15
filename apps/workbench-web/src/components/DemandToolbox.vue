@@ -1,6 +1,6 @@
 <template>
   <div ref="root" class="demand-toolbox">
-    <button ref="trigger" class="btn demand-toolbox-trigger" type="button" :aria-expanded="open" aria-controls="demand-toolbox-panel" @click="open ? closeToolbox() : openToolbox()">
+    <button ref="trigger" class="btn demand-toolbox-trigger" type="button" :aria-label="triggerLabel" :title="triggerLabel" :aria-expanded="open" aria-controls="demand-toolbox-panel" @click="open ? closeToolbox() : openToolbox()">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.1a4.8 4.8 0 0 0-5.8 6.2L3.7 17.5a2.1 2.1 0 0 0 3 3l5.2-5.2a4.8 4.8 0 0 0 6.2-5.8l-3 3-2.4-2.4 3-3Z" /></svg>
       <span>{{ triggerLabel }}</span>
     </button>

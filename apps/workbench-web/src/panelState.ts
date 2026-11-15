@@ -1,4 +1,4 @@
-export type WorkbenchPanel = 'workspace-sidebar' | 'conversation-sidebar' | 'trae-cache-banner' | 'conversation-composer'
+export type WorkbenchPanel = 'workspace-sidebar' | 'conversation-sidebar' | 'trae-cache-banner' | 'conversation-composer' | 'conversation-header'
 
 const storageKey = (panel: WorkbenchPanel): string => `codywork:panel:${panel}`
 

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 describe('chat header action grouping', () => {
   it('groups low-frequency actions while keeping frequent actions directly available', () => {
     const source = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
-    const header = source.match(/<header class="topbar chat-topbar">([\s\S]*?)<\/header>/)![1]
+    const header = source.match(/<header class="topbar chat-topbar"[^>]*>([\s\S]*?)<\/header>/)![1]
     expect(header).toContain('<div class="chat-toolbar-menu"><div class="topbar-actions">')
     expect(header).not.toContain('<details')
     expect(header).not.toContain('<summary')
@@ -32,7 +32,7 @@ describe('chat header action grouping', () => {
   })
   it('keeps the followup entry in the right action group instead of before the title', () => {
     const source = readFileSync(new URL('./App.vue', import.meta.url), 'utf8')
-    const header = source.match(/<header class="topbar chat-topbar">([\s\S]*?)<\/header>/)![1]
+    const header = source.match(/<header class="topbar chat-topbar"[^>]*>([\s\S]*?)<\/header>/)![1]
     const actions = header.indexOf('<div class="topbar-actions">')
     const followup = header.indexOf('@click="mobileContextOpen = false; openConversationFollowup()"')
     expect(header.match(/@click="mobileContextOpen = false; openConversationFollowup\(\)"/g)).toHaveLength(1)
