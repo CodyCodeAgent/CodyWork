@@ -386,7 +386,7 @@ describe('CodyWork channel end-to-end pipeline', () => {
         },
       }) as never,
       enqueue, addReceiptReaction: vi.fn(async () => 'reaction-received'), openUrl: () => 'http://localhost/conversation',
-      persistImage: (_workspaceId, _conversationId, input) => ({ path: `${input.path}.owned` }),
+      persistAttachment: (_workspaceId, _conversationId, input) => ({ id: input.path, name: input.name || 'file', mimeType: input.mimeType || 'application/octet-stream', path: `${input.path}.owned` }),
     })
     let bindings!: ChannelBindingService
     const bindingHooks = {

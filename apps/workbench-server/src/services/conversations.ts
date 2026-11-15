@@ -1,3 +1,4 @@
+import { materializeAttachmentText, parseAttachmentText } from '@codycodeagent/cody-web-core/composer'
 import { composerHasContent } from '@codycodeagent/cody-web-core/composer'
 import { RuntimeRegistry } from '@codycodeagent/cody-web-core/runtime'
 import {
@@ -755,13 +756,22 @@ export class ConversationService implements ConversationCommandGateway {
   }
 
   private withPublicImageUrls(event: RuntimeEvent): RuntimeEvent {
-    if (!this.imageUrlForPath || !Array.isArray(event.data.images)) return event
+    if (!this.imageUrlForPath) return event
     const resolveImageUrl = this.imageUrlForPath
     const workspaceId = this.requireConversationById(event.conversationId).workspace_id
-    const images = event.data.images.map(image => typeof image === 'string'
+    const images = (Array.isArray(event.data.images) ? event.data.images : []).map(image => typeof image === 'string'
       ? resolveImageUrl(workspaceId, event.conversationId, image) ?? image
       : image)
-    return { ...event, data: { ...event.data, images } }
+    const data: Record<string, unknown> = { ...event.data, ...(Array.isArray(event.data.images) ? { images } : {}) }
+    if (typeof data.text === 'string') {
+      const parsed = parseAttachmentText(data.text)
+      if (parsed.attachments.length) data.text = materializeAttachmentText(parsed.text, parsed.attachments.map(file => {
+        const { path, url: _url, ...metadata } = file
+        const url = path ? resolveImageUrl(workspaceId, event.conversationId, path) : null
+        return { ...metadata, ...(url ? { url } : {}) }
+      }))
+    }
+    return { ...event, data }
   }
 
   private requireConversationById(conversationId: string): ConversationRow {

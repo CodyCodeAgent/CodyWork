@@ -1,3 +1,4 @@
+import { parseAttachmentText } from '@codycodeagent/cody-web-core/composer'
 import { execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -489,6 +490,59 @@ describe('conversation websocket control plane', () => {
 
     test.db.close()
     rmSync(test.root, { recursive: true, force: true })
+  })
+
+  it('uploads arbitrary attachments, isolates ownership, and reconstructs file cards from native history', async () => {
+    const test = await fixture()
+    const runtime = new TestRuntimeAdapter()
+    const uploads = new ConversationImageUploads(test.db, join(test.root, 'uploads'))
+    const conversations = new ConversationService(test.db, runtime, undefined, (w, c, path) => uploads.urlForPath(w, c, path))
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Files')
+    const other = await conversations.create(test.workspaceId, test.demandId, 'Other')
+    const server = startServer({ db: test.db, conversations, images: uploads }, { host: '127.0.0.1', port: 0 })
+    await once(server, 'listening')
+    const address = server.address() as { port: number }
+    const origin = `http://127.0.0.1:${address.port}`
+    const base = `${origin}/api/workspaces/${test.workspaceId}/conversations/${conversation.id}`
+    const post = (url: string, body: unknown) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    try {
+      const response = await post(`${base}/attachments`, { name: '../report.pdf', dataUrl: 'data:application/pdf;base64,' + Buffer.from('%PDF synthetic').toString('base64') })
+      expect(response.status).toBe(200)
+      const { data: file } = await response.json() as { data: { id: string; name: string; url: string } }
+      expect(file.name).toBe('report.pdf')
+      expect(file.url).not.toContain(test.root)
+      const download = await fetch(origin + file.url)
+      expect(download.headers.get('content-disposition')).toContain('attachment;')
+      expect(download.headers.get('content-type')).toBe('application/octet-stream')
+      expect(await download.text()).toBe('%PDF synthetic')
+      expect((await post(`${base}/messages`, { content: 'Read file', attachments: [file.id] })).status).toBe(200)
+      await new Promise(resolve => setImmediate(resolve))
+      const history = await conversations.history(test.workspaceId, conversation.id)
+      const message = history.events.find(event => event.type === 'user.completed')!
+      const parsed = parseAttachmentText(String(message.data.text))
+      expect(parsed.text).toBe('Read file')
+      expect(parsed.attachments).toMatchObject([{ id: file.id, name: 'report.pdf', url: file.url }])
+      expect(parsed.attachments[0]?.path).toBeUndefined()
+      expect((await post(base.replace(conversation.id, other.id) + '/messages', { content: '', attachments: [file.id] })).status).toBeGreaterThanOrEqual(400)
+      // Retries use persisted ids, not supplied paths, and do not duplicate the manifest.
+      expect((await post(`${base}/messages`, { content: String(message.data.text) })).status).toBe(200)
+      expect((await post(`${base}/messages`, { content: '', attachments: [file.id] })).status).toBe(200)
+      await new Promise(resolve => setImmediate(resolve))
+      const fileOnly = (await conversations.history(test.workspaceId, conversation.id)).events.filter(event => event.type === 'user.completed').at(-1)!
+      expect(parseAttachmentText(String(fileOnly.data.text)).attachments[0]?.url).toBe(file.url)
+      expect(String(fileOnly.data.text)).not.toContain(test.root)
+      expect((await post(`${base}/messages`, { attachments: Array.from({ length: 9 }, (_, n) => `missing-${n}`) })).status).toBeGreaterThanOrEqual(400)
+      expect((await post(`${base}/attachments`, { name: 'empty.unknown', dataUrl: 'data:;base64,' })).status).toBe(200)
+      const html = await post(`${base}/attachments`, { name: 'test.html', dataUrl: 'data:text/html;base64,' + Buffer.from('<script>alert(1)</script>').toString('base64') })
+      const htmlFile = await html.json() as { data: { url: string } }
+      const htmlDownload = await fetch(origin + htmlFile.data.url)
+      expect(htmlDownload.headers.get('content-disposition')).toContain('attachment;')
+      expect(htmlDownload.headers.get('content-security-policy')).toContain('sandbox')
+    } finally {
+      server.closeRealtime()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+      test.db.close(); rmSync(test.root, { recursive: true, force: true })
+    }
   })
 
   it('accepts image uploads only for the owning conversation and serves them through an opaque URL', async () => {

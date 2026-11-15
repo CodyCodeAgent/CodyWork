@@ -79,11 +79,11 @@ export class CodyWorkChannelService {
       documentPublisher?: ConversationDocumentPublisher
       permissionInspector?: { inspect(account: import('./channelStore.js').ChannelAccountSecret): Promise<FeishuPermissionStatus> }
       recipientResolver?: Pick<NotificationRecipientResolver, 'resolve'>
-      persistConversationImage?: (
+      persistConversationAttachment?: (
         workspaceId: string,
         conversationId: string,
         input: { path: string; name?: string; mimeType?: string },
-      ) => Promise<{ path: string }> | { path: string }
+      ) => Promise<import('@codycodeagent/cody-web-core/composer').ComposerAttachment & { path: string }> | (import('@codycodeagent/cody-web-core/composer').ComposerAttachment & { path: string })
     } = {},
   ) {
     this.repositories = new ChannelRepositories(new ChannelStore(database))
@@ -150,7 +150,7 @@ export class CodyWorkChannelService {
         enqueue: (accountId, input) => this.accounts.enqueue(accountId, input),
         addReceiptReaction: (accountId, messageId) => this.accounts.addReceiptReaction(accountId, messageId),
         openUrl: binding => this.openUrl(binding),
-        persistImage: this.options.persistConversationImage,
+        persistAttachment: this.options.persistConversationAttachment,
       },
     )
     this.bindings = new ChannelBindingService(
