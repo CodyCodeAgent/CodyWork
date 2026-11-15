@@ -5,15 +5,15 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@codycodeagent/cody-web-core@0.44.0': d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07
+  '@codycodeagent/cody-web-core@0.45.0': d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07
 
 importers:
 
   .:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.44.0
-        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/63fe1f3fe24d484651eccaab1528fa8c3c73311a(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.45.0
+        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/2cd2e801e6be8869e18eeb130387298153b3ad7d(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))
     devDependencies:
       concurrently:
         specifier: ^9.2.1
@@ -25,8 +25,8 @@ importers:
   apps/workbench-server:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.44.0
-        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/63fe1f3fe24d484651eccaab1528fa8c3c73311a(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.45.0
+        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/2cd2e801e6be8869e18eeb130387298153b3ad7d(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.2
         version: 1.73.2
@@ -53,8 +53,8 @@ importers:
   apps/workbench-web:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.44.0
-        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/63fe1f3fe24d484651eccaab1528fa8c3c73311a(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.45.0
+        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/2cd2e801e6be8869e18eeb130387298153b3ad7d(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.39(typescript@6.0.3)
@@ -126,9 +126,9 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/63fe1f3fe24d484651eccaab1528fa8c3c73311a':
-    resolution: {gitHosted: true, integrity: sha512-K5ZbMlSY40bk0YXq2utnzijDbxMzHpbPvu/DtrCcVZCsBok9CxrbsnUR4Dvb/EHgqHSf0OYpcd9D427ApgBQQw==, tarball: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/63fe1f3fe24d484651eccaab1528fa8c3c73311a}
-    version: 0.44.0
+  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/2cd2e801e6be8869e18eeb130387298153b3ad7d':
+    resolution: {gitHosted: true, integrity: sha512-/rV51ikNnK6hdARFPFdc4aT0Bvai0/qWnQfGHlYgGQfs6aoLzBu8CKqQkLmfyg6cdLJzi3fnITBajEio3QaYGg==, tarball: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/2cd2e801e6be8869e18eeb130387298153b3ad7d}
+    version: 0.45.0
     peerDependencies:
       vue: ^3.5.0
 
@@ -2276,7 +2276,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/63fe1f3fe24d484651eccaab1528fa8c3c73311a(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))':
+  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/2cd2e801e6be8869e18eeb130387298153b3ad7d(patch_hash=d2f7f72fd0fb3380ec2c4f92c78607f32b10ca9e9bc0450d297859f467e95b07)(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       '@larksuiteoapi/node-sdk': 1.73.2
       dompurify: 3.4.16

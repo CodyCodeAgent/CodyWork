@@ -7,13 +7,13 @@
 :root[data-skin-panel=beveled] .codywork-vue :is(.metric-card,.workspace-header-card,.parallel-panel,.modal,.knowledge-detail-card,.skill-detail-card) { box-shadow:var(--shadow-panel); border:1px solid var(--border-strong); border-radius:var(--radius-panel); }
 :root[data-skin-control=beveled] .codywork-vue .btn:not(.primary):not(.danger) { background:linear-gradient(var(--surface-panel),var(--surface-subtle)); box-shadow:inset 0 1px #ffffff60,0 1px 2px #00000015; border-color:var(--border-strong); }
 :root[data-skin-control=outline] .codywork-vue .btn:not(.primary) { background:transparent; border-color:var(--accent); }
-:root[data-skin-composer=beveled] .codywork-vue .cody-composer[data-variant=embedded] { background:linear-gradient(var(--surface-panel),var(--surface-subtle)); box-shadow:var(--shadow-panel); border:1px solid var(--border-strong); border-radius:var(--radius-panel); padding:12px; }
+:root[data-skin-composer=beveled] .codywork-vue .cody-composer[data-variant=embedded]:not([data-compact=true]) { background:linear-gradient(var(--surface-panel),var(--surface-subtle)); box-shadow:var(--shadow-panel); border:1px solid var(--border-strong); border-radius:var(--radius-panel); padding:12px; }
 :root[data-skin-message=rail] .codywork-vue .cody-conversation[data-variant=embedded] .cody-message-body { border-left:3px solid var(--accent); padding:12px 16px; background:var(--surface-panel); border-radius:0 var(--radius-panel) var(--radius-panel) 0; }
 :root[data-skin-message=bubble] .codywork-vue .cody-conversation[data-variant=embedded] .cody-message-body { border:1px solid var(--border-default); padding:14px 18px; background:var(--surface-panel); border-radius:20px; }
 :root[data-skin-identity=avatars] .codywork-vue .cody-message-identity[data-role=assistant] { background-image:var(--skin-assistant-avatar); }
 :root[data-skin-identity=avatars] .codywork-vue .cody-message-identity[data-role=user] { background-image:var(--skin-user-avatar); }
 :root[data-skin-identity=avatars][data-skin-user-avatar=true] .codywork-vue .cody-message-identity[data-role=user],
-:root[data-skin-identity=avatars][data-skin-assistant-avatar=true] .codywork-vue .cody-message-identity[data-role=assistant] { width:36px; height:36px; flex:0 0 36px; background-size:cover; background-position:center; font-size:0; border:1px solid var(--border-strong); border-radius:5px; }
+:root[data-skin-identity=avatars][data-skin-assistant-avatar=true] .codywork-vue .cody-message-identity[data-role=assistant] { width:var(--message-avatar-size,36px); height:var(--message-avatar-size,36px); flex:0 0 var(--message-avatar-size,36px); background-size:cover; background-position:center; font-size:0; border:1px solid var(--border-strong); border-radius:5px; }
 :root[data-skin-brand=true] .codywork-vue .brand-mark { background:var(--skin-brand-mark) center/contain no-repeat; }
 :root[data-skin-brand=true] .codywork-vue .brand-mark > * { visibility:hidden; }
 /* A separate noninteractive layer keeps blur and dim away from text and focus rings. */
@@ -24,7 +24,7 @@
 :root[data-skin-backdrop=aero-grid] .codywork-vue .main:before { background-image:radial-gradient(ellipse at 20% 0%,var(--surface-panel),transparent 70%),linear-gradient(120deg,var(--accent-subtle),transparent 60%); }
 :root:is([data-skin-backdrop=image],[data-skin-backdrop=grid],[data-skin-backdrop=aero-grid]) .codywork-vue :is(.chat-main,.chat-layout,.chat-scroll,.demand-chat-page,.settings-page,.settings-body,.parallel-body) { background:transparent; }
 :root[data-skin-panel=glass] .codywork-vue :is(.workspace-header-card,.metric-card,.knowledge-detail-card,.skill-detail-card,.parallel-panel) { background:color-mix(in srgb,var(--surface-panel) 94%,transparent); box-shadow:var(--shadow-panel); }
-:root[data-skin-composer=glass] .codywork-vue .cody-composer[data-variant=embedded] { background:color-mix(in srgb,var(--surface-panel) 96%,transparent); border-radius:var(--radius-panel); border:1px solid var(--border-default); padding:12px; }
+:root[data-skin-composer=glass] .codywork-vue .cody-composer[data-variant=embedded]:not([data-compact=true]) { background:color-mix(in srgb,var(--surface-panel) 96%,transparent); border-radius:var(--radius-panel); border:1px solid var(--border-default); padding:12px; }
 :root[data-skin-backdrop=image] .codywork-vue .cody-message-body { background:var(--surface-panel); padding:14px 18px; border-radius:var(--radius-panel); }
 :root[data-density=compact] .codywork-vue :is(.sidebar-item,.conversation-row-main) { padding-top:8px; padding-bottom:8px; }
 :root[data-density=spacious] .codywork-vue :is(.sidebar-item,.conversation-row-main) { padding-top:16px; padding-bottom:16px; }
