@@ -545,6 +545,12 @@ export interface FeishuChannelAccountInput {
   privateConversationMode: 'topic' | 'chat'
 }
 
+export interface BotCollaborationConfig { chatId: string; bindingId: string; enabled: boolean; maxRounds: number; maxMinutes: number }
+export interface BotCollaborationSession {
+  id: string; chatId: string; bindingId: string; participants: Array<{ id: string; name: string }>; lastError: string
+  state: { batch: string; topic: string; round: number; maxRounds: number; deadline: string; status: string; joined: number[]; decisions: Record<string, { round: number; decision: { action: string; reason: string; pendingIssues: string[] } }> }
+}
+
 export interface FeishuChannelBinding {
   id: string
   conversationKey: string
@@ -646,6 +652,9 @@ export const api = {
   reconnectFeishuAccount: (id: string) => request<{ reconnected: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/reconnect`),
   feishuDiagnostics: (id: string) => request<FeishuChannelDiagnostics>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/diagnostics`),
   feishuPermissions: (id: string) => request<FeishuPermissionStatus>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/permissions`),
+  botCollaboration: (id: string) => request<{ configs: BotCollaborationConfig[]; sessions: BotCollaborationSession[] }>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/collaboration`),
+  saveBotCollaboration: (id: string, config: BotCollaborationConfig) => request<BotCollaborationConfig>('PUT', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/collaboration`, config),
+  stopBotCollaboration: (id: string, sessionId: string) => request('POST', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/collaboration/${encodeURIComponent(sessionId)}/stop`),
   listFeishuBindings: (id: string) => request<FeishuChannelBinding[]>('GET', `/api/channels/feishu/accounts/${encodeURIComponent(id)}/bindings`),
   listConversationChannelBindings: (workspaceId: string, conversationId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(conversationId)}/channel-bindings`),
   listDemandChannelBindings: (workspaceId: string, demandId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/channel-bindings`),

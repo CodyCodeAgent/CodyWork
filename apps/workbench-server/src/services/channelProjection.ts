@@ -1,3 +1,4 @@
+import type { CollaborationRunRef } from './channelCollaboration.js'
 import { realpath, stat } from 'node:fs/promises'
 import { extname, isAbsolute, relative } from 'node:path'
 import { projectChannelTurn } from '@codycodeagent/cody-web-core/channel'
@@ -23,6 +24,7 @@ type CodyWorkInboundMessage = {
 }
 
 type ChannelProjectionHooks = {
+  collaborationComplete?(ref: CollaborationRunRef, text: string, error?: string): Promise<void>
   enqueue(accountId: string, input: Parameters<ChannelAccountManager['enqueue']>[1]): ReturnType<ChannelAccountManager['enqueue']>
   queue(accountId: string, input: Parameters<ChannelAccountManager['queue']>[1]): ReturnType<ChannelAccountManager['queue']>
   fail(accountId: string, action: string, error: unknown): void
@@ -207,6 +209,13 @@ export class ChannelProjectionService {
   private publishRequestEvent(conversationId: string, event: ConversationEvent, knownSourceBinding?: CodyWorkChannelBinding | null): void {
     const sourceLink = event.turnId ? this.repositories.projections.turnByConversation(conversationId, event.turnId) : null
     const sourceBinding = knownSourceBinding === undefined ? (sourceLink ? this.bindingOrDetach(conversationId, sourceLink.bindingId) : null) : knownSourceBinding
+    const sourcePresentation = sourceLink ? this.findTurnPresentation(sourceLink.id) : null
+    if (sourcePresentation?.state.collaboration) {
+      void this.hooks.collaborationComplete?.(sourcePresentation.state.collaboration as CollaborationRunRef, '', '讨论需要交互确认，请在工作台处理').catch(error => {
+        if (sourceBinding) this.hooks.fail(sourceBinding.accountId, 'collaboration.interactive', error)
+      })
+      return
+    }
     const requestBindings = sourceBinding
       ? [sourceBinding]
       : [...(this.bindings.get(conversationId) ?? [])].reduce<CodyWorkChannelBinding[]>((rows, bindingId) => {
@@ -241,6 +250,16 @@ export class ChannelProjectionService {
     let presentation = this.findTurnPresentation(link.id)
     if (!presentation) return
     const projection = projectChannelTurn(state, turnId, presentation.revision + 1)
+    const collaboration = presentation.state.collaboration as CollaborationRunRef | undefined
+    if (collaboration) {
+      if (projection.terminal) {
+        await this.hooks.collaborationComplete?.(collaboration, projection.assistantText, projection.status === 'completed' ? '' : projection.error || projection.status)
+        this.repositories.inbox.update(link.inboxId, projection.status === 'completed' ? 'completed' : 'failed', { turnId, lastError: projection.error || null })
+        this.repositories.projections.updateTurnLink(link.clientCommandId, { turnId, status: projection.status })
+        this.repositories.projections.updatePresentation(presentation.id, { status: projection.status, terminal: true })
+      }
+      return
+    }
     if (projection.terminal) presentation = await this.finalizeReceiptReaction(presentation, projection.status === 'completed' ? 'DONE' : 'ERROR')
     const prompt = string(presentation.state.prompt)
     const cards = projectionCards(projection, prompt, this.hooks.openUrl(binding), executionContextFromState(presentation.state.executionContext), { bindingId: binding.id, runtimePicker: true })
@@ -270,6 +289,12 @@ export class ChannelProjectionService {
   async renderCommandFailure(turnLinkId: string, error: string): Promise<void> {
     let presentation = this.findTurnPresentation(turnLinkId)
     if (!presentation) return
+    const collaboration = presentation.state.collaboration as CollaborationRunRef | undefined
+    if (collaboration) {
+      await this.hooks.collaborationComplete?.(collaboration, '', error)
+      this.repositories.projections.updatePresentation(presentation.id, { status: 'failed', terminal: true })
+      return
+    }
     presentation = await this.finalizeReceiptReaction(presentation, 'ERROR')
     let openUrl = ''
     try { openUrl = this.hooks.openUrl(this.repositories.bindings.get(presentation.bindingId)) } catch { /* removed binding */ }
@@ -355,6 +380,17 @@ export class ChannelProjectionService {
     const inside = relative(realRoot, realPath)
     if (!inside || inside.startsWith('..') || isAbsolute(inside)) return false
     return stat(realPath).then(metadata => metadata.isFile() && metadata.size > 0 && metadata.size <= 10 * 1024 * 1024).catch(() => false)
+  }
+
+  /** Cancel only our own currently running Turn, never a queued human Turn. */
+  async interruptOwnTurn(messageId: string): Promise<void> {
+    const row = this.database.db.prepare("SELECT id FROM channel_inbox WHERE json_extract(message_json, '$.messageId') = ?").get(messageId) as { id: string } | undefined
+    if (!row) return
+    const inbox = this.repositories.inbox.get(row.id)
+    if (!inbox.turnId || !inbox.bindingId) return
+    const binding = this.repositories.bindings.get(inbox.bindingId)
+    if (this.host.state(binding.conversationId)?.activeTurnId !== inbox.turnId) return
+    await this.conversations.executeAction({ kind: 'interrupt', workspaceId: binding.workspaceId, conversationId: binding.conversationId, origin: { kind: 'channel', provider: 'feishu', accountId: binding.accountId, bindingId: binding.id, messageId, conversationKey: inbox.conversationKey } })
   }
 
   async recoverBindings(accountId: string): Promise<void> {

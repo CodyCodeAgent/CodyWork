@@ -35,6 +35,7 @@ type AccountRuntime = {
 }
 
 export type ChannelAccountManagerHooks = {
+  beforeDelivery?(item: ChannelOutboxItem): void
   onMessage(message: ChannelInboundMessage): Promise<void>
   onAction(accountId: string, action: FeishuCardAction): Promise<unknown>
   recoverBindings(accountId: string): Promise<void>
@@ -353,6 +354,7 @@ export class ChannelAccountManager {
 
   private async deliver(provider: FeishuProvider, accountId: string, item: ChannelOutboxItem): Promise<{ remoteMessageId?: string }> {
     try {
+      this.hooks.beforeDelivery?.(item)
       const payload = object(item.payload) as DeliveryPayload
       const uuid = stableUuid(item.dedupeKey)
       let remoteMessageId = ''

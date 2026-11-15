@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FeishuChannelSettings from './FeishuChannelSettings.vue'
 
 const api = vi.hoisted(() => ({
+  botCollaboration: vi.fn().mockResolvedValue({ configs: [], sessions: [] }),
   listFeishuAccounts: vi.fn(), createFeishuAccount: vi.fn(), updateFeishuAccount: vi.fn(), deleteFeishuAccount: vi.fn(),
   reconnectFeishuAccount: vi.fn(), feishuDiagnostics: vi.fn(), listFeishuBindings: vi.fn(), retryFeishuOutbox: vi.fn(),
   feishuPermissionTemplate: vi.fn(), feishuPermissions: vi.fn(),

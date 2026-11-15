@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
+import { collaborationEventFromContent } from '@codycodeagent/cody-web-core/channel'
 import type { ChannelInboundMessage } from '@codycodeagent/cody-web-core/channel'
 import type { FeishuCard, FeishuCardAction, FeishuProvider } from '@codycodeagent/cody-web-core/feishu'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
@@ -209,5 +210,50 @@ describe('CodyWork channel composition root', () => {
       test.db.close()
       rmSync(test.root, { recursive: true, force: true })
     }
+  })
+})
+
+
+describe('collaboration through the shared native command pipeline', () => {
+  it('submits read-only decisions, suppresses JSON/streaming cards, and recovers without resubmission', async () => {
+    const test = createFixture()
+    class DiscussionRuntime extends TestRuntimeAdapter {
+      profiles: unknown[] = []
+      protected assistantReply() { return JSON.stringify({ action: 'done', reply: '方案已核对，无遗漏。', pendingIssues: [], reason: '已达成一致' }) }
+      submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) { this.profiles.push(request.executionProfile); return super.submitTurn(request) }
+    }
+    class DiscussionProvider extends FakeFeishuProvider {
+      async chatBots() { return [{ id: 'ou-test-bot', name: 'Local' }, { id: 'ou_peer', name: 'Peer' }] }
+    }
+    const runtime = new DiscussionRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    const conversation = await conversations.create(test.workspaceId, test.demandId, 'Cooperation', 'feishu')
+    const provider = new DiscussionProvider()
+    let service = new CodyWorkChannelService(test.db, conversations, new WorkspaceRegistry(test.db), { providerFactory: () => provider as unknown as FeishuProvider })
+    try {
+      const account = await service.saveAccount(null, { name: 'Discussion', appId: 'cli_discussion', appSecret: 'synthetic', enabled: true, allowAllUsers: true, allowedConversationIds: ['oc_discussion'] })
+      const message: ChannelInboundMessage = { ...inbound(account.id, '方案讨论', 'oc_discussion', 'group'), mentionsOtherRecipient: true, mentions: [{ id: 'ou-test-bot', idType: 'open_id', type: 'bot', name: 'Local', isAgent: true }, { id: 'ou_peer', idType: 'open_id', type: 'bot', name: 'Peer', isAgent: false }] }
+      const store = new ChannelStore(test.db)
+      const binding = store.createBinding({ message, targetType: 'codywork-demand', workspaceId: test.workspaceId, demandId: test.demandId, conversationId: conversation.id, threadId: conversation.nativeId, ownerIdentity: 'ou-owner', permissionMode: 'yolo', notificationPolicy: 'mirror-requests' })
+      await service.collaboration.saveConfig(account.id, { chatId: 'oc_discussion', bindingId: binding.id, enabled: true, maxRounds: 3, maxMinutes: 15 })
+      await provider.emitMessage(message)
+      await waitFor(() => provider.replies.length > 0)
+      const join = collaborationEventFromContent(provider.replies[0]!.card)!
+      await provider.emitMessage({ ...message, messageId: 'peer-join', eventId: 'peer-join', sender: { id: 'ou_peer', type: 'app' }, content: { type: 'interactive', raw: { value: { codywork_collaboration: { ...join, slot: 1 } } } } })
+      await waitFor(() => provider.replies.some(row => collaborationEventFromContent(row.card)?.kind === 'decision'))
+      expect(runtime.profiles).toEqual([{ permissionMode: 'read-only' }])
+      expect(provider.updates).toHaveLength(0)
+      expect(provider.replies).toHaveLength(2)
+      const decision = provider.replies.map(row => collaborationEventFromContent(row.card)).find(item => item?.kind === 'decision')!
+      expect(decision.decision?.action).toBe('done')
+      await provider.emitMessage({ ...message, messageId: 'peer-done', eventId: 'peer-done', sender: { id: 'ou_peer', type: 'app' }, content: { type: 'interactive', raw: { value: { codywork_collaboration: { ...decision, slot: 1 } } } } })
+      expect(service.collaboration.sessions(account.id)[0]!.state.status).toBe('completed')
+      await service.close()
+      service = new CodyWorkChannelService(test.db, conversations, new WorkspaceRegistry(test.db), { providerFactory: () => provider as unknown as FeishuProvider })
+      await service.start()
+      await new Promise(resolve => setTimeout(resolve, 40))
+      expect(runtime.profiles).toHaveLength(1)
+      expect(service.collaboration.sessions(account.id)[0]!.state.status).toBe('completed')
+    } finally { await service.close(); await conversations.closeRuntimes(); test.db.close(); rmSync(test.root, { recursive: true, force: true }) }
   })
 })

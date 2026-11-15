@@ -385,6 +385,7 @@ export class CodyWorkCodexRuntime implements CodyWorkRuntime {
       turn,
       request.mode === 'steer' ? 'steer' : 'queue',
       request.clientCommandId,
+      request.beforeStart,
     )
     this.commandPermissionModes.set(submission.clientCommandId, turnMode)
     // Workspace setup and one-shot Skill installation consume progress as a

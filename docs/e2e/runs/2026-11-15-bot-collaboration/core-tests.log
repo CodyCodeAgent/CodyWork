@@ -1,0 +1,24 @@
+$ pnpm check:boundaries && pnpm --filter @codycodeagent/cody-web-core-build test && pnpm --filter @codycodeagent/cody-web-core-build build && pnpm --filter @codycodeagent/cody-web-ui test
+$ node scripts/check-boundaries.mjs
+CodyWebCore boundaries are valid.
+$ vitest run
+
+ RUN  v4.1.11 /Users/bytedance/GC/GitHub/CodyWebCore/packages/core
+
+
+ Test Files  28 passed (28)
+      Tests  326 passed (326)
+   Start at  16:05:08
+   Duration  1.80s (transform 2.79s, setup 0ms, import 5.59s, tests 2.35s, environment 2ms)
+
+$ tsc -p tsconfig.json
+$ vitest run
+
+ RUN  v4.1.11 /Users/bytedance/GC/GitHub/CodyWebCore/packages/vue
+
+
+ Test Files  5 passed (5)
+      Tests  33 passed (33)
+   Start at  16:05:13
+   Duration  1.31s (transform 557ms, setup 0ms, import 917ms, tests 123ms, environment 2.56s)
+
