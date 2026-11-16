@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it } from 'vitest'
-import { collaborationEventFromContent } from '@codycodeagent/cody-web-core/channel'
+import { collaborationEventFromContent, serializeCollaborationEvent } from '@codycodeagent/cody-web-core/channel'
 import type { ChannelInboundMessage } from '@codycodeagent/cody-web-core/channel'
 import type { FeishuCard, FeishuCardAction, FeishuProvider } from '@codycodeagent/cody-web-core/feishu'
 import { WorkbenchDb, makeId, nowIso } from '../src/db/index.js'
@@ -239,14 +239,14 @@ describe('collaboration through the shared native command pipeline', () => {
       await provider.emitMessage(message)
       await waitFor(() => provider.replies.length > 0)
       const join = collaborationEventFromContent(provider.replies[0]!.card)!
-      await provider.emitMessage({ ...message, messageId: 'peer-join', eventId: 'peer-join', sender: { id: 'ou_peer', type: 'app' }, content: { type: 'interactive', raw: { value: { codywork_collaboration: { ...join, slot: 1 } } } } })
+      await provider.emitMessage({ ...message, messageId: 'peer-join', eventId: 'peer-join', sender: { id: 'ou_peer', type: 'app' }, content: { type: 'interactive', raw: { elements: [[{ tag: 'a', href: 'https://peer.example/#' + serializeCollaborationEvent({ ...join, slot: 1 }), text: '协作状态' }]] } } })
       await waitFor(() => provider.replies.some(row => collaborationEventFromContent(row.card)?.kind === 'decision'))
       expect(runtime.profiles).toEqual([{ permissionMode: 'read-only' }])
       expect(provider.updates).toHaveLength(0)
       expect(provider.replies).toHaveLength(2)
       const decision = provider.replies.map(row => collaborationEventFromContent(row.card)).find(item => item?.kind === 'decision')!
       expect(decision.decision?.action).toBe('done')
-      await provider.emitMessage({ ...message, messageId: 'peer-done', eventId: 'peer-done', sender: { id: 'ou_peer', type: 'app' }, content: { type: 'interactive', raw: { value: { codywork_collaboration: { ...decision, slot: 1 } } } } })
+      await provider.emitMessage({ ...message, messageId: 'peer-done', eventId: 'peer-done', sender: { id: 'ou_peer', type: 'app' }, content: { type: 'interactive', raw: { elements: [{ tag: 'note', elements: [{ tag: 'lark_md', content: '[协作状态](https://peer.example/#' + serializeCollaborationEvent({ ...decision, slot: 1 }) + ')' }] }] } } })
       expect(service.collaboration.sessions(account.id)[0]!.state.status).toBe('completed')
       await service.close()
       service = new CodyWorkChannelService(test.db, conversations, new WorkspaceRegistry(test.db), { providerFactory: () => provider as unknown as FeishuProvider })

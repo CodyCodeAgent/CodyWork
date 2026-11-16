@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import {
   applyCollaborationEvent, collaborationCanRun, collaborationEventFromContent, collaborationTerminal,
-  createCollaborationState, parseCollaborationDecision,
+  createCollaborationState, parseCollaborationDecision, serializeCollaborationEvent,
   type CollaborationEvent, type CollaborationState, type ChannelInboundMessage, type ChannelOutboxItem,
 } from '@codycodeagent/cody-web-core/channel'
 import type { FeishuCard } from '@codycodeagent/cody-web-core/feishu'
@@ -24,6 +24,7 @@ type Hooks = {
   queue: ChannelAccountManager['queueDurable']
   submit: ChannelCommandAdapter['submitInbox']
   interrupt: ChannelProjectionService['interruptOwnTurn']
+  openUrl?: (bindingId: string) => string
 }
 const identifier = (account: string, batch: string) => `collab_${createHash('sha256').update(`${account}:${batch}`).digest('hex').slice(0, 24)}`
 function controlText(message: ChannelInboundMessage): string {
@@ -285,10 +286,22 @@ export class ChannelCollaborationService {
     const title = event.kind === 'join' ? '加入方案讨论' : event.kind === 'stop' ? '讨论已停止' : event.decision?.action === 'done' ? '本轮无需补充' : event.decision?.action === 'needs_human' ? '需要人工确认' : `方案讨论 · 第 ${event.round} 轮`
     // Mention peers using IDs resolved by THIS application's chat roster.
     const mentions = session.participants.filter((_, index) => index !== session.self).map(peer => `<at id=${peer.id}></at>`).join(' ')
+    const envelope = serializeCollaborationEvent(event)
+    let sync = envelope
+    try {
+      const url = new URL(this.hooks.openUrl?.(session.bindingId) || '')
+      if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) {
+        url.hash = envelope
+        sync = `[协作状态](${url.toString()})`
+      }
+    } catch { /* No public origin: retain a readable transport envelope. */ }
     return { config: { wide_screen_mode: true }, header: { title: { tag: 'plain_text', content: title } }, elements: [
       { tag: 'div', text: { tag: 'lark_md', content: `${mentions}\n${event.decision?.reply || (event.kind === 'join' ? '仅讨论方案；等待其他参与者加入。' : event.decision?.reason || session.lastError || statuses[session.state.status])}` } },
       { tag: 'note', elements: [{ tag: 'plain_text', content: `${event.round}/${event.maxRounds} 轮 · 截止 ${event.deadline} · ${statuses[session.state.status]}` }] },
-      { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '协作状态' }, value: { action: 'collaboration.status', codywork_collaboration: event } }] },
+      // Feishu strips callback value from peer events. Ordinary Markdown links
+      // survive both message events and flattened message-detail responses.
+      // The fragment stays client-side; peers decode it without fetching URLs.
+      { tag: 'note', elements: [{ tag: 'lark_md', content: sync }] },
     ] }
   }
   complete(ref: CollaborationRunRef, text: string, error = ''): Promise<void> {
