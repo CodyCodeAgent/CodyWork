@@ -22,6 +22,7 @@ function fixture(self: number, maxRounds = 3) {
   const hooks = {
     provider: () => ({ chatBots: async () => [0,1,2].map(slot => ({ id: `ou_observer${self}_bot${slot}`, name: `Bot ${slot}` })), messageDetail: async () => human() }),
     queue, interrupt,
+    openUrl: () => 'https://work.example/?workspace=ws&conversation=conversation',
     submit: async (id: string) => { const inbox = repos.inbox.get(id); submitted.push({ ref: (inbox.message as ChannelInboundMessage & { collaboration: CollaborationRunRef }).collaboration, prompt: inbox.message.text }); repos.inbox.update(id, 'submitted') },
   }
   let service = new ChannelCollaborationService(db, repos, hooks as never, () => now)
@@ -36,6 +37,39 @@ function fixture(self: number, maxRounds = 3) {
 }
 const result = (action: string) => JSON.stringify({ action, reply: action === 'reply' ? '方案及待验证问题' : '', pendingIssues: action === 'reply' ? ['验证边界'] : [], reason: action === 'done' ? '无待解决问题' : '需要补充' })
 describe('group-scoped decentralized Bot collaboration', () => {
+  it('exchanges rendered body links through stripped peer events and flattened detail, retaining authentication', async () => {
+    const a = fixture(0), b = fixture(1)
+    await a.configure(); await b.configure()
+    await a.service.handle(a.human()); await b.service.handle(b.human())
+    const relay = async (source: ReturnType<typeof fixture>, target: ReturnType<typeof fixture>, slot: number, detail: boolean, spoof = false) => {
+      const card = source.queue.mock.calls.at(-1)![1].payload.card
+      const note = card.elements.at(-1).elements[0].content as string
+      expect(note).toMatch(/^\[协作状态\]\(https:\/\/work.example\//)
+      expect(JSON.stringify(card)).not.toContain('codywork_collaboration')
+      const href = note.slice('[协作状态]('.length, -1)
+      const raw = detail ? { title: '加入方案讨论', elements: [[{ tag: 'note', elements: [{ tag: 'a', href, text: '协作状态' }] }]] }
+        : { elements: [{ tag: 'note', elements: [{ tag: 'lark_md', content: note }] }, { tag: 'action', actions: [{ tag: 'button', custom_action_id: 'act_v1_x', behaviors: [{ type: 'callback' }] }] }] }
+      const self = target.service.sessions(target.account.id)[0]!.self
+      await target.service.handle({ ...target.human(), sender: { id: spoof ? 'ou_stranger' : `ou_observer${self}_bot${slot}`, type: 'bot' }, messageId: `wire-${slot}-${source.sent.length}`, content: { type: 'interactive', raw } })
+    }
+    await relay(b, a, 1, false, true)
+    expect(a.submitted).toHaveLength(0)
+    await relay(b, a, 1, false); await relay(a, b, 0, true)
+    expect(a.submitted).toHaveLength(1); expect(b.submitted).toHaveLength(1)
+    await a.service.complete(a.submitted[0]!.ref, result('reply')); await b.service.complete(b.submitted[0]!.ref, result('reply'))
+    await relay(b, a, 1, true); await relay(a, b, 0, false)
+    expect(a.submitted).toHaveLength(2); expect(b.submitted).toHaveLength(2)
+    await a.service.complete(a.submitted[1]!.ref, result('done')); await b.service.complete(b.submitted[1]!.ref, result('done'))
+    await relay(b, a, 1, false); await relay(a, b, 0, true)
+    expect(a.service.sessions(a.account.id)[0]!.state.status).toBe('completed')
+    expect(b.service.sessions(b.account.id)[0]!.state.status).toBe('completed')
+    await a.restart(); await relay(b, a, 1, false)
+    expect(a.submitted).toHaveLength(2)
+    await a.service.handle(a.human('next')); await b.service.handle(b.human('next'))
+    await a.service.stop(a.account.id, a.service.sessions(a.account.id)[0]!.id)
+    await relay(a, b, 0, true)
+    expect(b.service.sessions(b.account.id)[0]!.state.status).toBe('stopped')
+  })
   it('runs two independent hosts with observer-scoped identities, joins, multiple rounds and no acknowledgment loop', async () => {
     const a = fixture(0), b = fixture(1)
     await a.configure(); await b.configure()

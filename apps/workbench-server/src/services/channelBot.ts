@@ -166,6 +166,7 @@ export class CodyWorkChannelService {
       queue: (accountId, input) => this.accounts.queueDurable(accountId, input),
       submit: (inboxId, binding) => this.commands.submitInbox(inboxId, binding),
       interrupt: messageId => this.projection.interruptOwnTurn(messageId),
+      openUrl: bindingId => this.openUrl(this.repositories.bindings.get(bindingId)),
     }, () => this.now())
     this.bindings = new ChannelBindingService(
       this.database,
