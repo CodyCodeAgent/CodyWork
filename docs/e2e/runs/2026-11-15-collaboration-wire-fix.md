@@ -38,7 +38,7 @@ Screenshot: local `/tmp/cody-wire-evidence/collaboration-completed.png` (synthet
 
 ## Actual provider transport evidence
 
-Under explicit authorization, a few clearly labeled transport-only cards were sent in the original discussion topic, without mentioning bots or invoking business/model actions. V2 collapsible content was not preserved in the tested message-detail response; rejected that approach. A legacy Markdown note link preserved an encoded envelope of **12,862 characters** exactly, including Chinese payload. A final probe uses the actual built Core serializer/parser and a valid synthetic decision envelope. These are transport checks; they do not prove an unupdated remote bot can decode the new protocol.
+Under explicit authorization, a few clearly labeled transport-only cards were sent in the original discussion topic, without mentioning bots or invoking business/model actions. V2 collapsible content was not preserved in the tested message-detail response; rejected that approach. A legacy Markdown note link preserved an encoded envelope of **12,862 characters** exactly, including Chinese payload. A final probe used the actual built Core serializer/parser and a valid synthetic decision envelope: **10,286 characters**, send/read both returned code 0, parsed event exactly matched the source. These are transport checks; they do not prove an unupdated remote bot can decode the new protocol.
 
 ## Rollout and limitations
 
@@ -48,4 +48,17 @@ CodyWeb cross-product live verification is BLOCKED: no configured isolated remot
 
 ## Cleanup
 
-Temporary browser tabs closed. Disposable local server, database and worktrees scheduled for removal after verification. Production transport test cards remain as labeled audit evidence; no real bindings, allowlists or business conversations changed for tests.
+Temporary browser tabs closed. Disposable local server stopped; both temporary fixture roots, SQLite databases, worktrees and local harness files removed after verification. Production transport test cards remain as labeled audit evidence; no real bindings, allowlists or business conversations changed for tests.
+
+
+## Deployment — 2026-11-16
+
+- Core [PR #11](https://github.com/CodyCodeAgent/CodyWebCore/pull/11) merged into main: `a9ed604cf582c35c1b9c77c0f369c2837961eac1`.
+- Work [PR #17](https://github.com/CodyCodeAgent/CodyWork/pull/17) merged into main: `5043d8bf5366efddf809befdef9b92daa629125e` (deployed functional build).
+- CN production staged on the target server with frozen offline install, typecheck, 17 targeted tests and production build; all passed. Cutover observed zero active/awaiting-approval conversations.
+- Existing main fast-forwarded from `785c1b64`, SQLite online backup plus environment/dependencies/dist backups retained in restricted deployment directory `.runtime/deployments/collaboration-wire-5043d8bf5366/`. No historical discussion was replayed.
+- systemd `codywork.service` active/running, PID 3001064, started 2026-11-16 10:31:45 CST. `/api/health` returned ok. Bot reconnected at 10:32:55 CST with empty last_error.
+- SQLite quick_check=ok; Workspaces 4, Demands 46, Conversations 116, channel accounts 1, bindings 14 and collaboration sessions 1 unchanged across cutover. Service environment bytes unchanged. Live web index and collaboration server module exactly matched staged build. Working tree clean on main.
+- Other bot is maintained externally; no claim of completed real two-bot acceptance until that maintainer updates. User requested this one-sided deployment now.
+
+![Isolated saved group configuration](assets/2026-11-15-collaboration-wire-settings.png)
