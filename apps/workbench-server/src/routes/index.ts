@@ -11,6 +11,7 @@ import { bindDemandToFlux, unbindDemandFromFlux } from '../services/fluxBindings
 import { addRepository, clearRepositoryBaselineChanges, listCachedRepositories, syncRepositoryBaseline } from '../services/repositories.js'
 import { DEFAULT_WORKSPACE_SETUP_PROMPT } from '../runtime/bootstrap.js'
 import { CodyWorkCodexRuntime } from '../runtime/codex.js'
+import { CodyWorkGeminiRuntime, DEFAULT_GEMINI_CLI_COMMAND } from '../runtime/gemini.js'
 import { CodyWorkTraeRuntime } from '../runtime/trae.js'
 import { runtimeSettings, updateRuntimeSettings } from '../runtime/settings.js'
 import type { RuntimeSettingsPatch } from '../runtime/settings.js'
@@ -335,8 +336,16 @@ function createRuntimeRegistry(ctx: AppContext): CodyWorkRuntimeRegistry {
     ...(model ? { model } : {}),
     productToolHandler: call => call.namespace === FOLLOWUP_TOOL_NAMESPACE ? followupTools.handle(call) : quickActionTools.handle(call),
   })
+  const geminiCommand = saved.commands.gemini?.trim()
+    || process.env.CODY_ANTIGRAVITY_COMMAND?.trim()
+    || process.env.CODY_GEMINI_COMMAND?.trim()
+    || DEFAULT_GEMINI_CLI_COMMAND
   const traeCommand = saved.commands.trae?.trim() || process.env.CODY_TRAE_COMMAND?.trim() || 'traex acp serve'
-  return createCodyWorkRuntimeRegistry(saved.runtimeType, { codex: runtime, trae: new CodyWorkTraeRuntime({ command: traeCommand }) })
+  return createCodyWorkRuntimeRegistry(saved.runtimeType, {
+    codex: runtime,
+    gemini: new CodyWorkGeminiRuntime({ command: geminiCommand }),
+    trae: new CodyWorkTraeRuntime({ command: traeCommand }),
+  })
 }
 
 async function awaitInitialization(ctx: AppContext, path: string) {
@@ -832,7 +841,7 @@ function buildRoutes(ctx: AppContext) {
   add('POST', '/api/workspaces/:id/conversations/:conversationId/migrate-runtime', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const targetRuntimeType = c.body?.targetRuntimeType
-    if (targetRuntimeType !== 'codex' && targetRuntimeType !== 'trae') throw new Error('请选择有效的目标 Runtime')
+    if (targetRuntimeType !== 'codex' && targetRuntimeType !== 'gemini' && targetRuntimeType !== 'trae') throw new Error('请选择有效的目标 Runtime')
     return conversationService(ctx).migrateRuntime(
       workspace.id,
       requiredParam(c, 'conversationId'),

@@ -333,7 +333,7 @@ export interface Conversation {
   scope: 'demand' | 'workspace'
   demandId: string | null
   nativeId: string
-  runtimeType: 'codex' | 'trae'
+  runtimeType: 'codex' | 'gemini' | 'trae'
   title: string
   createdVia: 'browser' | 'feishu'
   status: ConversationStatus

@@ -17,16 +17,16 @@
       <div v-if="loading" class="page-loading">正在加载 CodyWork…</div>
       <section v-else-if="!workspace" class="create-page"><div class="create-hero"><div class="eyebrow">CodyWork / 开发工作台</div><h1>你的代码。<br />一个专注的工作空间。</h1><p>Workspace 管理真实目录，Demand 组织独立 Worktree；执行权限直接使用底层 Codex 原生模式。</p></div><button class="btn primary" @click="showCreateWorkspace = true">创建 Workspace</button></section>
       <section v-else-if="activePage === 'dashboard'" class="workspace-page">
-        <header class="topbar"><div><div class="eyebrow">{{ workspace.name.toUpperCase() }} / OVERVIEW</div><h1>Workspace 概览</h1></div><div class="topbar-actions"><span v-if="dashboard" :class="['cache-status', dashboard.cache.state]">{{ dashboardCacheLabel }}</span><button class="btn" :disabled="dashboardRefreshing" @click="requestDashboardRefresh">{{ dashboardRefreshing ? '刷新中…' : '刷新状态' }}</button><button class="btn primary" @click="showAddRepository = true">＋ 添加 Repo</button></div></header>
+        <header class="topbar"><div class="topbar-identity"><h1>Workspace 概览</h1><span class="eyebrow">{{ workspace.name.toUpperCase() }} / OVERVIEW</span></div><div class="topbar-actions"><span v-if="dashboard" :class="['cache-status', dashboard.cache.state]">{{ dashboardCacheLabel }}</span><button class="btn" :disabled="dashboardRefreshing" @click="requestDashboardRefresh">{{ dashboardRefreshing ? '刷新中…' : '刷新状态' }}</button><button class="btn primary" @click="showAddRepository = true">＋ 添加 Repo</button></div></header>
         <div class="workspace-body">
           <div class="workspace-header-card"><span class="workspace-large-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><div class="workspace-header-copy"><h2>{{ workspace.name }}</h2><code>{{ workspace.path }}</code><p>Workspace 和 Demand 负责组织上下文；实际读写、命令与审批权限由底层 Codex 模式控制。</p></div><span class="ready-pill"><i />ready</span></div>
           <div class="metric-grid" aria-label="Workspace 统计"><article class="metric-card"><small>REPOSITORIES</small><strong>{{ dashboard?.repositories.total ?? repositories.length }}</strong><span>登记开发仓库</span></article><article class="metric-card"><small>DEMANDS</small><strong>{{ dashboard?.demands.total ?? demands.length }}</strong><span>隔离 Worktree</span></article><article class="metric-card"><small>KNOWLEDGE</small><strong>{{ dashboard?.knowledge.documents ?? 0 }}</strong><span>可读文档</span></article><article class="metric-card"><small>SKILLS</small><strong>{{ dashboard?.skills.available ?? 0 }}</strong><span>可调用能力</span></article></div>
           <div class="workspace-grid"><RepositoryOverviewCard :repositories="repositories" :syncing-repository-id="syncingRepositoryId" :syncing-all="syncingAllRepositories" :clearing-repository-id="clearingRepositoryId" :sync-results="repositorySyncResults" :bulk-progress="repositoryBulkSyncProgress" :bulk-message="repositoryBulkSyncMessage" @sync="syncRepositoryBaseline" @sync-all="syncAllRepositoryBaselines" @cleanup="requestBaselineCleanup" @manage="showAddRepository = true" /><article class="info-card next-step-card"><div class="card-kicker">NEXT STEP</div><h3>按需求进入执行</h3><p>Demand 为每个仓库创建独立 Worktree；实际读写和审批由所选 Codex 模式决定。</p><button class="btn primary" @click="goTo('demands')">查看需求</button></article></div>
         </div>
       </section>
-      <section v-else-if="activePage === 'knowledge'" class="knowledge-page"><header class="topbar"><div><div class="eyebrow">WORKSPACE / KNOWLEDGE</div><h1>知识库</h1></div><button class="btn" @click="loadKnowledge">刷新</button></header><div class="knowledge-body"><div class="knowledge-layout"><article class="knowledge-list-card"><div class="knowledge-list-head"><strong>文档</strong><span>{{ filteredKnowledge.length }}</span></div><div class="knowledge-search"><input v-model="knowledgeQuery" class="input" type="search" aria-label="搜索知识文档" placeholder="搜索文档…" /></div><button v-for="doc in filteredKnowledge" :key="doc.id" :class="['knowledge-row', { active: selectedKnowledge?.id === doc.id }]" :aria-pressed="selectedKnowledge?.id === doc.id" @click="openKnowledge(doc)"><span class="knowledge-file-icon">{{ doc.extension.replace('.', '').slice(0, 4) || 'doc' }}</span><span class="knowledge-row-copy"><strong>{{ doc.name }}</strong><small>{{ doc.relativePath }}</small></span></button><p v-if="!filteredKnowledge.length" class="knowledge-empty">{{ knowledgeQuery.trim() ? '没有匹配的文档，试试其他名称或路径。' : 'Workspace 中还没有可展示的知识文档。' }}</p></article><article class="knowledge-detail-card"><template v-if="selectedKnowledge"><div class="knowledge-detail-head"><div><div class="card-kicker">{{ selectedKnowledge.extension || 'DOCUMENT' }}</div><h2>{{ selectedKnowledge.name }}</h2><p>{{ selectedKnowledge.path }}</p></div><span class="knowledge-extension">{{ selectedKnowledge.size }} bytes</span></div><pre class="knowledge-content">{{ selectedKnowledge.content ?? '正在读取文档…' }}</pre></template><p v-else class="knowledge-detail-empty">从左侧选择一个文档查看其内容。</p></article></div></div></section>
+      <section v-else-if="activePage === 'knowledge'" class="knowledge-page"><header class="topbar"><div class="topbar-identity"><h1>知识库</h1><span class="eyebrow">WORKSPACE / KNOWLEDGE</span></div><div class="topbar-actions"><button class="btn" @click="loadKnowledge">刷新</button></div></header><div class="knowledge-body"><div class="knowledge-layout"><article class="knowledge-list-card"><div class="knowledge-list-head"><strong>文档</strong><span>{{ filteredKnowledge.length }}</span></div><div class="knowledge-search"><input v-model="knowledgeQuery" class="input" type="search" aria-label="搜索知识文档" placeholder="搜索文档…" /></div><button v-for="doc in filteredKnowledge" :key="doc.id" :class="['knowledge-row', { active: selectedKnowledge?.id === doc.id }]" :aria-pressed="selectedKnowledge?.id === doc.id" @click="openKnowledge(doc)"><span class="knowledge-file-icon">{{ doc.extension.replace('.', '').slice(0, 4) || 'doc' }}</span><span class="knowledge-row-copy"><strong>{{ doc.name }}</strong><small>{{ doc.relativePath }}</small></span></button><p v-if="!filteredKnowledge.length" class="knowledge-empty">{{ knowledgeQuery.trim() ? '没有匹配的文档，试试其他名称或路径。' : 'Workspace 中还没有可展示的知识文档。' }}</p></article><article class="knowledge-detail-card"><template v-if="selectedKnowledge"><div class="knowledge-detail-head"><div><div class="card-kicker">{{ selectedKnowledge.extension || 'DOCUMENT' }}</div><h2>{{ selectedKnowledge.name }}</h2><p>{{ selectedKnowledge.path }}</p></div><span class="knowledge-extension">{{ selectedKnowledge.size }} bytes</span></div><pre class="knowledge-content">{{ selectedKnowledge.content ?? '正在读取文档…' }}</pre></template><p v-else class="knowledge-detail-empty">从左侧选择一个文档查看其内容。</p></article></div></div></section>
       <section v-else-if="activePage === 'skills'" class="skills-page">
-        <header class="topbar"><div><div class="eyebrow">WORKSPACE / SKILLS</div><h1>Skills</h1></div><button class="btn" @click="loadSkills(true)">刷新</button></header>
+        <header class="topbar"><div class="topbar-identity"><h1>Skills</h1><span class="eyebrow">WORKSPACE / SKILLS</span></div><div class="topbar-actions"><button class="btn" @click="loadSkills(true)">刷新</button></div></header>
         <div class="skills-body">
           <div class="skill-install-card"><div><div class="card-kicker">ADD CAPABILITY</div><h2>为当前 Workspace 安装 Skill</h2><p>Skill 会被安装到 Workspace 的 <code>.agents/skills</code>，并且仍受当前 Workspace 写入策略约束。</p></div><div class="skill-install-form"><input v-model="skillSource" aria-label="Skill 安装来源" class="input" placeholder="Git URL 或 Skill 来源" /><button class="btn primary" :disabled="installingSkill || !skillSource.trim()" @click="installSkill">{{ installingSkill ? '安装中…' : '安装' }}</button></div></div>
           <button v-if="skillJob && skillJob.workspaceId === workspace.id" ref="skillRunResult" class="skill-run-result" :class="skillJob.status" type="button" @click="showSkillInstallDialog = true"><span class="skill-run-result-copy"><strong>{{ skillInstallStatusLabel(skillJob.status) }}</strong><small>{{ skillJob.message || (skillInstallIsActive(skillJob.status) ? 'Agent 正在执行，点击查看实时输出。' : '点击查看完整执行记录。') }}</small></span><span>{{ skillJob.events.length }} 个事件 · 查看执行</span></button>
@@ -45,16 +45,16 @@
         </div>
       </section>
       <section v-else-if="activePage === 'settings'" class="workspace-page">
-        <header class="topbar"><div><button v-if="settingsSection !== 'overview'" class="back-link" type="button" @click="openSettingsSection('overview')">‹ 返回设置</button><div class="eyebrow">WORKSPACE / SETTINGS</div><h1>{{ settingsTitle }}</h1></div><button v-if="settingsSection === 'runtime'" class="btn" :disabled="testingRuntime" @click="testRuntime">{{ testingRuntime ? '检查中…' : '测试连接' }}</button></header>
+        <header class="topbar"><div class="topbar-identity"><button v-if="settingsSection !== 'overview'" class="back-link topbar-back-pill" type="button" @click="openSettingsSection('overview')">‹ 返回设置</button><h1>{{ settingsTitle }}</h1><span class="eyebrow">WORKSPACE / SETTINGS</span></div><div v-if="settingsSection === 'runtime'" class="topbar-actions"><button class="btn" :disabled="testingRuntime" @click="testRuntime">{{ testingRuntime ? '检查中…' : '测试连接' }}</button></div></header>
         <SettingsOverview v-if="settingsSection === 'overview'" :action-count="quickActions.length" @open="openSettingsSection" />
         <QuickActionSettings v-else-if="settingsSection === 'quick-actions'" :actions="quickActions" :skills="skills" :selected-id="selectedQuickActionId" :saving="savingQuickAction" :message="quickActionMessage" @update:selected-id="selectedQuickActionId = $event" @save="saveQuickAction" @delete="deleteQuickAction" />
         <FeishuChannelSettings v-else-if="settingsSection === 'feishu'" />
         <SmartNotificationSettings v-else-if="settingsSection === 'smart-notifications'" :key="workspace.id" :workspace-id="workspace.id" />
         <FollowupSettings v-else-if="settingsSection === 'followups'" :key="workspace.id" :workspace-id="workspace.id" :origin-conversation-id="followupOriginWorkspaceId === workspace.id ? followupOriginConversationId : ''" />
         <div v-else class="runtime-settings-body">
-          <section class="settings-intro"><div><div class="card-kicker">CODEX RUNTIME</div><h2>App Server 运行状态</h2><p>CodyWork 只展示 Core 的权威状态，不自行重启或复制 Runtime 状态。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
+          <section class="settings-intro"><div><div class="card-kicker">{{ runtimeBaseLabel(runtimeType) }} RUNTIME</div><h2>{{ selectedRuntimeDescriptor?.label ?? runtimeType }} 运行状态</h2><p>CodyWork 支持 Codex、Gemini (Antigravity ACP) 与 Trae ACP 多运行时自由切换，所有状态均由 Core 权威托管。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
           <div class="runtime-settings-grid">
-            <article class="settings-card runtime-config-card"><div class="settings-card-head"><div><div class="card-kicker">APP SERVER</div><h3>启动配置</h3></div><button class="btn" type="button" :disabled="loadingRuntimeDetails" @click="loadRuntimeDetails">{{ loadingRuntimeDetails ? '刷新中…' : '刷新状态' }}</button></div><p>服务级共享进程；每个会话仍通过 Demand Worktree policy 隔离。</p><label for="runtime-command">启动命令</label><input id="runtime-command" v-model="runtimeCommand" class="input" placeholder="codex app-server --stdio" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><div class="runtime-actions"><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button><button class="btn" type="button" :disabled="reloadingMcp" @click="reloadRuntimeMcp">{{ reloadingMcp ? '刷新中…' : '刷新 MCP Server' }}</button></div></article>
+            <article class="settings-card runtime-config-card"><div class="settings-card-head"><div><div class="card-kicker">RUNTIME LAUNCH</div><h3>启动配置</h3></div><button class="btn" type="button" :disabled="loadingRuntimeDetails" @click="loadRuntimeDetails">{{ loadingRuntimeDetails ? '刷新中…' : '刷新状态' }}</button></div><p>{{ selectedRuntimeDescriptor?.description ?? '每个会话通过 Demand Worktree policy 隔离。' }}</p><label for="runtime-command">启动命令</label><input id="runtime-command" v-model="runtimeCommand" class="input" :placeholder="runtimeType === 'gemini' ? 'agy acp' : runtimeType === 'trae' ? 'traex acp serve' : 'codex app-server --stdio'" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><div class="runtime-actions"><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button><button class="btn" type="button" :disabled="reloadingMcp" @click="reloadRuntimeMcp">{{ reloadingMcp ? '刷新中…' : '刷新 MCP Server' }}</button></div></article>
             <article class="settings-card"><div class="card-kicker">RUNTIME</div><h3>{{ selectedRuntimeDescriptor?.label ?? runtimeType }}</h3><p>{{ selectedRuntimeDescriptor?.description ?? '选择新建会话默认使用的 Runtime。' }}</p><label for="runtime-default">默认运行时</label><select id="runtime-default" v-model="runtimeType" class="input"><option v-for="option in runtimeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></article>
             <article class="settings-card"><div class="settings-card-head"><div><div class="card-kicker">HEALTH</div><h3>进程诊断</h3></div><span class="runtime-mini-state">PID {{ runtimeDiagnostics?.pid ?? '—' }}</span></div><div v-if="runtimeDiagnostics" class="runtime-facts"><div><span>生命周期</span><strong>{{ runtimeDiagnostics.lifecycle }}</strong></div><div><span>启动次数</span><strong>{{ runtimeDiagnostics.startCount }}</strong></div><div><span>RPC 成功</span><strong>{{ runtimeDiagnostics.completedClientRequestCount }}</strong></div><div><span>RPC 失败</span><strong>{{ runtimeDiagnostics.failedClientRequestCount }}</strong></div></div><p v-else class="settings-note">Runtime 尚未产生诊断快照。</p><p v-if="runtimeDiagnostics?.unavailableReason" class="runtime-warning">{{ runtimeDiagnostics.unavailableReason }}</p></article>
             <article class="settings-card runtime-usage-card"><div class="settings-card-head"><div><div class="card-kicker">ACCOUNT USAGE</div><h3>Codex 用量</h3></div><span v-if="runtimeRateLimits?.resetCreditsAvailable !== null && runtimeRateLimits?.resetCreditsAvailable !== undefined" class="runtime-mini-state">Reset {{ runtimeRateLimits.resetCreditsAvailable }}</span></div><div v-if="runtimeRateLimits?.buckets.length" class="runtime-rate-list"><div v-for="bucket in runtimeRateLimits.buckets" :key="bucket.id" class="runtime-rate-row"><div><strong>{{ bucket.name }}</strong><small>{{ bucket.planType || bucket.id }}</small></div><div class="runtime-rate-window"><span v-if="bucket.primary">{{ formatRuntimeWindow(bucket.primary) }}</span><span v-if="bucket.secondary">{{ formatRuntimeWindow(bucket.secondary) }}</span></div></div></div><p v-else class="settings-note">当前账户没有可展示的用量窗口。</p></article>
@@ -64,15 +64,27 @@
       </section>
       <ParallelDevelopment v-else-if="activePage === 'parallel'" :key="workspace.id" :workspace="workspace" :demands="demands" @open="openParallelConversation" @open-file="openParallelFile" />
       <section v-else-if="activePage === 'demands' && !selectedDemand" class="demands-page">
-        <header class="topbar"><div><div class="eyebrow">{{ workspace.name.toUpperCase() }} / WORK MODE</div><h1>需求工作台</h1></div><div class="topbar-actions"><button class="btn" :disabled="importingWorktrees" @click="importExistingWorktrees">{{ importingWorktrees ? '扫描中…' : '扫描已有 Worktree' }}</button><button class="btn primary" @click="showCreateDemand = true">＋ 新建需求</button></div></header>
+        <header class="topbar"><div class="topbar-identity"><h1>需求工作台</h1><span class="eyebrow">{{ workspace.name.toUpperCase() }} / WORK MODE</span></div><div class="topbar-actions"><button class="btn" :disabled="importingWorktrees" @click="importExistingWorktrees">{{ importingWorktrees ? '扫描中…' : '扫描已有 Worktree' }}</button><button class="btn primary" @click="showCreateDemand = true">＋ 新建需求</button></div></header>
         <div class="demands-body"><div class="dashboard-note"><div><strong>执行权限直接交给 Codex</strong><p>需求用于组织 Worktree、文档和上下文，不再叠加 CodyWork 目录白名单；只读、Normal 与 YOLO 分别使用 Codex 原生权限。</p></div><code>{{ workspace.path }}</code></div>
         <div class="demand-grid"><button v-for="demand in demands" :key="demand.id" class="demand-card" @click="openDemand(demand)"><span :class="['demand-dot', demand.status]" /><div><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small><p>{{ demand.repositories.length }} 个 Repo · {{ demand.status === 'in_progress' ? '开发中' : demand.status }}</p></div><span>→</span></button><div v-if="demands.length === 0" class="empty-list"><strong>还没有需求</strong><span>先选择开发 Repo，再创建一个隔离的 Demand Worktree。</span><button class="btn primary" @click="showCreateDemand = true">创建需求</button></div></div></div>
       </section>
       <section v-else-if="activePage === 'chat' && (selectedDemand || isWorkspaceConversationPage)" class="demand-chat-page">
         <ResponsivePanel v-model:open="mobileContextOpen" title="会话详情与操作">
-        <header class="topbar chat-topbar" :class="{ 'chat-topbar--collapsed': chatHeaderCollapsed && !isCompactViewport }">
-          <div v-if="selectedDemand"><button class="back-link" @click="mobileContextOpen = false; returnToDemandList()">‹ 返回需求</button><div class="eyebrow">DEMAND / {{ selectedDemand.branchName }}</div><h1>{{ selectedDemand.name }}</h1><div class="demand-link-actions"><button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="mobileContextOpen = false; copyDemandPath(selectedDemand)"><span>Worktree</span><code>{{ selectedDemand.path }}</code><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制' : '复制路径' }}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg></button><button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="mobileContextOpen = false; copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制需求链接' }}</button></div></div>
-          <div v-else><button class="back-link" @click="mobileContextOpen = false; returnToWorkspace()">‹ 返回 Workspace</button><div class="eyebrow">WORKSPACE / SESSION</div><h1>Workspace 会话</h1><div class="workspace-readonly-note"><strong>直接使用 {{ activeRuntimeLabel }}</strong><span>默认 YOLO，可切换只读或 Normal；可用能力以当前 Runtime 声明为准</span></div></div>
+        <header class="topbar chat-topbar" :class="{ 'chat-topbar--slim': !isCompactViewport }">
+          <div v-if="selectedDemand" class="chat-topbar-identity">
+            <button class="chat-back-btn" type="button" aria-label="返回需求" title="返回需求" @click="mobileContextOpen = false; returnToDemandList()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg></button>
+            <h1 :title="selectedDemand.name">{{ selectedDemand.name }}</h1>
+            <span v-if="selectedDemand.branchName && selectedDemand.branchName !== selectedDemand.name" class="chat-branch-pill" :title="`分支：${selectedDemand.branchName}`">{{ selectedDemand.branchName }}</span>
+            <div class="demand-link-actions">
+              <button class="demand-path-link" type="button" :title="`复制 Worktree 路径：${selectedDemand.path}`" :aria-label="`复制 ${selectedDemand.name} 的 Worktree 路径`" @click="mobileContextOpen = false; copyDemandPath(selectedDemand)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8.5A2.5 2.5 0 0 1 11.5 6H18a2.5 2.5 0 0 1 2.5 2.5V15a2.5 2.5 0 0 1-2.5 2.5h-6.5A2.5 2.5 0 0 1 9 15V8.5Z" /><path d="M15 6V4.5A2.5 2.5 0 0 0 12.5 2H6A2.5 2.5 0 0 0 3.5 4.5V11A2.5 2.5 0 0 0 6 13.5H9" /></svg><span class="demand-path-action">{{ copiedDemandPath === selectedDemand.id ? '已复制路径' : '复制路径' }}</span></button>
+              <button class="demand-deep-link" type="button" :title="`复制需求链接：${demandUrl(selectedDemand)}`" :aria-label="`复制 ${selectedDemand.name} 的需求链接`" @click="mobileContextOpen = false; copyDemandLink(selectedDemand)">{{ copiedDemandLink === selectedDemand.id ? '已复制链接' : '复制链接' }}</button>
+            </div>
+          </div>
+          <div v-else class="chat-topbar-identity">
+            <button class="chat-back-btn" type="button" aria-label="返回 Workspace" title="返回 Workspace" @click="mobileContextOpen = false; returnToWorkspace()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg></button>
+            <h1>Workspace 会话</h1>
+            <span class="chat-branch-pill" :title="`当前使用 ${activeRuntimeLabel}，默认 YOLO，可切换只读或 Normal`">{{ activeRuntimeLabel }}</span>
+          </div>
           <div class="chat-toolbar-menu"><div class="topbar-actions">
             <ChatToolbarPopover :key="`runtime-${selectedConversation?.id}`" class="chat-runtime-menu" label="连接状态与 Runtime" :inline="isCompactViewport">
               <template #trigger><span :class="['chat-connection-dot', socketState]" aria-hidden="true" /><span class="chat-connection-label">{{ socketLabel }}</span><span class="chat-runtime-name">{{ runtimeBaseLabel(activeRuntimeType) }}</span><svg class="toolbar-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></template>
@@ -98,7 +110,6 @@
               </template>
             </ChatToolbarPopover>
             <button class="btn primary new-conversation-button" :disabled="creatingConversation" @click="mobileContextOpen = false; openCreateConversation()">＋ 新会话</button>
-            <button v-if="!isCompactViewport" class="btn chat-header-toggle" type="button" :aria-expanded="!chatHeaderCollapsed" :aria-label="chatHeaderCollapsed ? '展开顶部信息' : '收起顶部信息'" :title="chatHeaderCollapsed ? '展开顶部信息' : '收起顶部信息'" @click="setChatHeaderCollapsed(!chatHeaderCollapsed)"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="chatHeaderCollapsed ? 'm7 10 5 5 5-5' : 'm7 14 5-5 5 5'" /></svg></button>
           </div></div>
         </header>
         </ResponsivePanel>
@@ -352,11 +363,7 @@ const mobileNavigationOpen = ref(false)
 const mobileSessionsOpen = ref(false)
 const mobileContextOpen = ref(false)
 const mobileComposerSettingsOpen = ref(false)
-const chatHeaderCollapsed = ref(readPanelCollapsed(typeof window === 'undefined' ? null : window.localStorage, 'conversation-header'))
-function setChatHeaderCollapsed(collapsed: boolean) {
-  chatHeaderCollapsed.value = collapsed
-  writePanelCollapsed(window.localStorage, 'conversation-header', collapsed)
-}
+
 const compactViewport = typeof window !== 'undefined' ? window.matchMedia('(max-width: 900px)') : null
 const isCompactViewport = ref(compactViewport?.matches ?? false)
 function updateCompactViewport() {
@@ -541,10 +548,10 @@ const migrationTargets = computed(() => migrationRuntimeOptions(runtimeOptions.v
 const composerRuntimeHint = computed(() => {
   if (selectedCollaborationModeKind.value === 'plan') return 'Plan 模式：本次 Turn 先澄清和规划，再确认执行。'
   const provider = activeRuntimeLabel.value
-  if (activeRuntimeType.value === 'trae') {
-    if (permission.value === 'yolo') return `${provider} YOLO：自动选择 ACP 提供的允许选项；仅在 Trae 请求权限时生效。`
-    if (permission.value === 'workspace-write') return `${provider} Normal：将 Trae ACP 权限请求交给当前审批界面。`
-    return `${provider} 只读：拒绝 Trae ACP 请求的写入权限；未声明权限请求的工具不会被伪装为已沙箱化。`
+  if (activeRuntimeType.value === 'trae' || activeRuntimeType.value === 'gemini') {
+    if (permission.value === 'yolo') return `${provider} YOLO：自动选择 ACP 提供的允许选项；仅在 ${provider} 请求权限时生效。`
+    if (permission.value === 'workspace-write') return `${provider} Normal：将 ${provider} ACP 权限请求交给当前审批界面。`
+    return `${provider} 只读：拒绝 ${provider} ACP 请求的写入权限；未声明权限请求的工具不会被伪装为已沙箱化。`
   }
   if (permission.value === 'yolo') return `${provider} YOLO：使用当前服务账号的完整系统权限执行。`
   if (permission.value === 'workspace-write') return `${provider} Normal：使用原生 workspace-write 与审批机制。`
@@ -601,11 +608,15 @@ const composerSubmitModes = computed<CodyComposerOption[]>(() => [
   ...(runtimeCapabilities.value.steer ? [{ value: 'steer', label: '引导', description: '正在执行时发送给当前 Turn。' }] : []),
 ])
 const composerReasoningOptions = computed<CodyComposerOption[]>(() => runtimeCapabilities.value.reasoning ? reasoningOptionsForModel(runtimeModels.value, selectedModel.value) : [])
-const composerPermissionOptions = computed<CodyComposerOption[]>(() => [
-  { value: 'read-only', label: '只读', description: activeRuntimeType.value === 'trae' ? '拒绝 Trae ACP 请求的写入权限。' : '使用 Codex 原生 read-only，只读取和查询。' },
-  { value: 'workspace-write', label: 'Normal', description: activeRuntimeType.value === 'trae' ? '将 Trae ACP 权限请求交给审批界面。' : '使用 Codex 原生 workspace-write 与审批机制。' },
-  { value: 'yolo', label: 'YOLO', description: activeRuntimeType.value === 'trae' ? '自动选择 Trae ACP 提供的允许选项。' : '使用 Codex danger-full-access；拥有服务账号可用的完整系统权限。' },
-])
+const composerPermissionOptions = computed<CodyComposerOption[]>(() => {
+  const isAcp = activeRuntimeType.value === 'trae' || activeRuntimeType.value === 'gemini'
+  const acpName = activeRuntimeType.value === 'gemini' ? 'Antigravity CLI ACP' : 'Trae ACP'
+  return [
+    { value: 'read-only', label: '只读', description: isAcp ? `拒绝 ${acpName} 请求的写入权限。` : '使用 Codex 原生 read-only，只读取和查询。' },
+    { value: 'workspace-write', label: 'Normal', description: isAcp ? `将 ${acpName} 权限请求交给审批界面。` : '使用 Codex 原生 workspace-write 与审批机制。' },
+    { value: 'yolo', label: 'YOLO', description: isAcp ? `自动选择 ${acpName} 提供的允许选项。` : '使用 Codex danger-full-access；拥有服务账号可用的完整系统权限。' },
+  ]
+})
 const composerSkills = computed<CodyComposerOption[]>(() => runtimeCapabilities.value.structuredSkills ? runtimeSkills.value.map(skill => ({
   value: skill.id,
   label: skill.label,
@@ -2204,17 +2215,23 @@ watch(() => selectedConversation.value?.id, () => { compactConversationMessage.v
 watch(() => conversationState.value.activeTurnId, (activeTurnId, previousTurnId) => {
   if (previousTurnId && !activeTurnId && selectedDemand.value) void loadQuickActions()
 })
+function onSpotlightPointerMove(event: PointerEvent): void {
+  const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.metric-card, .demand-card, .settings-card, .info-card, .workspace-header-card') : null
+  if (!target) return
+  const rect = target.getBoundingClientRect()
+  target.style.setProperty('--spot-x', `${event.clientX - rect.left}px`)
+  target.style.setProperty('--spot-y', `${event.clientY - rect.top}px`)
+}
 let dashboardTimer: number | null = null
-onMounted(() => { void loadWorkspaces(); void loadRuntime().catch(() => {}); window.addEventListener('popstate', () => { void restoreRoute() }); document.addEventListener('visibilitychange', refreshVisibleTraeCache); document.addEventListener('fullscreenchange', syncConversationFilePreviewFullscreen); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
-onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer); resetTraeCachePolling(); document.removeEventListener('visibilitychange', refreshVisibleTraeCache); document.removeEventListener('fullscreenchange', syncConversationFilePreviewFullscreen) })
+onMounted(() => { void loadWorkspaces(); void loadRuntime().catch(() => {}); window.addEventListener('popstate', () => { void restoreRoute() }); document.addEventListener('pointermove', onSpotlightPointerMove, { passive: true }); document.addEventListener('visibilitychange', refreshVisibleTraeCache); document.addEventListener('fullscreenchange', syncConversationFilePreviewFullscreen); dashboardTimer = window.setInterval(() => { if (activePage.value === 'dashboard' && document.visibilityState === 'visible') void requestDashboardRefresh() }, 5 * 60_000) })
+onBeforeUnmount(() => { if (copiedDemandPathTimer !== null) window.clearTimeout(copiedDemandPathTimer); if (copiedDemandLinkTimer !== null) window.clearTimeout(copiedDemandLinkTimer); if (quickActionFeedbackTimer !== null) window.clearTimeout(quickActionFeedbackTimer); if (dashboardTimer !== null) window.clearInterval(dashboardTimer); resetTraeCachePolling(); document.removeEventListener('pointermove', onSpotlightPointerMove); document.removeEventListener('visibilitychange', refreshVisibleTraeCache); document.removeEventListener('fullscreenchange', syncConversationFilePreviewFullscreen) })
 watch(() => selectedConversation.value?.id, () => { mobileSessionsOpen.value = false })
 watch(activePage, () => { mobileNavigationOpen.value = false; mobileSessionsOpen.value = false; mobileContextOpen.value = false })
 </script>
 <style scoped>
 /* Reserve a utility slot on every page, separate from wrapping page actions. */
-.global-notification-entry { position: fixed; top: 24px; right: 24px; z-index: 6; }
+.global-notification-entry { position: fixed; top: 10px; right: 24px; z-index: 6; }
 .has-notifications .topbar { padding-right: 88px; }
-.app-shell:has(.chat-topbar--collapsed) .global-notification-entry { top: 10px; }
 @media (max-width: 900px) {
   .global-notification-entry { top: calc(12px + env(safe-area-inset-top)); right: 14px; }
   .has-notifications .topbar { padding-right: 18px; }
