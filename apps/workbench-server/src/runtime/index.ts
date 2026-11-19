@@ -1,6 +1,7 @@
 export * from './protocol.js'
 export * from './policy.js'
 export * from './codex.js'
+export * from './gemini.js'
 export * from './trae.js'
 export * from './bootstrap.js'
 export * from './registry.js'

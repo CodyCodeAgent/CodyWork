@@ -1,0 +1,704 @@
+/* ==========================================================================
+   CodyWork v2 — Thorough Modern Workbench Skin & Smooth Micro-Interactions
+   Linear / Raycast / Cursor inspired visual overhaul, honoring theme tokens.
+   ========================================================================== */
+
+:root, :root[data-theme="professional"] {
+  --surface-canvas: #f4f6fb;
+  --surface-panel: #ffffff;
+  --surface-subtle: #eef2f8;
+  --surface-raised: #ffffff;
+  --ink-primary: #0f172a;
+  --ink-secondary: #475569;
+  --ink-tertiary: #64748b;
+  --border-default: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-subtle: rgba(79, 70, 229, 0.1);
+  --on-accent: #ffffff;
+  --nav-bg: rgba(255, 255, 255, 0.86);
+  --nav-text: #1e293b;
+  --nav-muted: #64748b;
+  --nav-hover: rgba(79, 70, 229, 0.07);
+  --radius-panel: 16px;
+  --radius-control: 10px;
+  --shadow-panel: 0 2px 10px -2px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-popover: 0 24px 64px -16px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  --cw-v2-ambient-a: rgba(99, 102, 241, 0.08);
+  --cw-v2-ambient-b: rgba(14, 165, 233, 0.07);
+  --cw-v2-spot: rgba(79, 70, 229, 0.12);
+  --cw-v2-glass: rgba(255, 255, 255, 0.82);
+}
+
+:root[data-theme="midnight"] {
+  --surface-canvas: #090b10;
+  --surface-panel: #10131c;
+  --surface-subtle: #171b26;
+  --surface-raised: #1c2230;
+  --ink-primary: #f1f5f9;
+  --ink-secondary: #94a3b8;
+  --ink-tertiary: #64748b;
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-subtle: rgba(99, 102, 241, 0.16);
+  --on-accent: #ffffff;
+  --nav-bg: rgba(16, 19, 28, 0.9);
+  --nav-text: #e2e8f0;
+  --nav-muted: #94a3b8;
+  --nav-hover: rgba(255, 255, 255, 0.05);
+  --success: #34d399;
+  --success-bg: rgba(16, 185, 129, 0.14);
+  --warning: #fbbf24;
+  --warning-bg: rgba(245, 158, 11, 0.14);
+  --danger: #fb7185;
+  --danger-bg: rgba(244, 63, 94, 0.14);
+  --code-bg: #0b0e14;
+  --code-text: #e2e8f0;
+  --overlay: rgba(4, 6, 12, 0.72);
+  --radius-panel: 16px;
+  --radius-control: 10px;
+  --shadow-panel: 0 8px 24px -10px rgba(0, 0, 0, 0.45);
+  --shadow-popover: 0 28px 72px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --cw-v2-ambient-a: rgba(99, 102, 241, 0.14);
+  --cw-v2-ambient-b: rgba(56, 189, 248, 0.1);
+  --cw-v2-spot: rgba(129, 140, 248, 0.17);
+  --cw-v2-glass: rgba(16, 19, 28, 0.82);
+}
+
+/* Smooth Ambient Canvas */
+.codywork-vue.app-shell {
+  background-color: var(--surface-canvas);
+  background-image:
+    radial-gradient(640px circle at 14% 0%, var(--cw-v2-ambient-a, rgba(99, 102, 241, 0.08)), transparent 58%),
+    radial-gradient(560px circle at 88% 100%, var(--cw-v2-ambient-b, rgba(14, 165, 233, 0.07)), transparent 58%);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Page Entrance Animation */
+@keyframes cwPageEnter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.codywork-vue .workspace-page,
+.codywork-vue .demands-page,
+.codywork-vue .knowledge-page,
+.codywork-vue .skills-page,
+.codywork-vue .demand-chat-page {
+  animation: cwPageEnter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Glassmorphic Sidebar & Topbar */
+.codywork-vue .sidebar {
+  background: var(--nav-bg);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-right: 1px solid var(--border-default);
+}
+
+.codywork-vue .sidebar-item,
+.codywork-vue .sidebar-subnav-item {
+  border-radius: 10px;
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.codywork-vue .sidebar-item.active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.codywork-vue .topbar {
+  background: var(--cw-v2-glass, var(--surface-panel));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-default);
+}
+
+/* Tactile Buttons & Gradient Primary CTA */
+.codywork-vue .btn {
+  border-radius: var(--radius-control);
+  transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.codywork-vue .btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.codywork-vue .btn.primary {
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 76%, #7c3aed));
+  border-color: transparent;
+  color: var(--on-accent);
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.codywork-vue .btn.primary:hover:not(:disabled) {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px -8px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+/* Spotlight Hover Cards */
+.codywork-vue .metric-card,
+.codywork-vue .demand-card,
+.codywork-vue .settings-card,
+.codywork-vue .info-card,
+.codywork-vue .workspace-header-card,
+.codywork-vue .skill-install-card,
+.codywork-vue .knowledge-list-card,
+.codywork-vue .knowledge-detail-card,
+.codywork-vue .skills-list-card,
+.codywork-vue .skill-detail-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-panel);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), border-color 220ms ease, box-shadow 220ms ease;
+}
+
+.codywork-vue .metric-card::before,
+.codywork-vue .demand-card::before,
+.codywork-vue .settings-card::before,
+.codywork-vue .info-card::before,
+.codywork-vue .workspace-header-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms ease;
+  background: radial-gradient(320px circle at var(--spot-x, 50%) var(--spot-y, 50%), var(--cw-v2-spot, rgba(99, 102, 241, 0.14)), transparent 68%);
+}
+
+.codywork-vue .metric-card:hover::before,
+.codywork-vue .demand-card:hover::before,
+.codywork-vue .settings-card:hover::before,
+.codywork-vue .info-card:hover::before,
+.codywork-vue .workspace-header-card:hover::before {
+  opacity: 1;
+}
+
+.codywork-vue .metric-card:hover,
+.codywork-vue .demand-card:hover,
+.codywork-vue .settings-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-default));
+  box-shadow: 0 14px 32px -14px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* Distinct Runtime Pills: Codex / Gemini / Trae */
+.codywork-vue .conversation-runtime-pill,
+.codywork-vue .runtime-migration-node {
+  transition: all 180ms ease;
+}
+
+.codywork-vue .conversation-runtime-pill.codex {
+  background: rgba(99, 102, 241, 0.14);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.codywork-vue .conversation-runtime-pill.gemini {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.16), rgba(99, 102, 241, 0.18));
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.38);
+}
+
+.codywork-vue .conversation-runtime-pill.trae {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+:root[data-theme="professional"] .codywork-vue .conversation-runtime-pill.codex { color: #4338ca; }
+:root[data-theme="professional"] .codywork-vue .conversation-runtime-pill.gemini { color: #0284c7; }
+:root[data-theme="professional"] .codywork-vue .conversation-runtime-pill.trae { color: #059669; }
+
+/* Chat & Composer Elevation */
+.codywork-vue .conversation-sidebar {
+  background: var(--cw-v2-glass, var(--surface-panel));
+  backdrop-filter: blur(14px);
+  border-right: 1px solid var(--border-default);
+}
+
+.codywork-vue .conversation-row {
+  border-radius: 12px;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.codywork-vue .conversation-row.active {
+  background: var(--accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.codywork-vue .composer {
+  border-top: 1px solid var(--border-default);
+  background: linear-gradient(to top, var(--surface-canvas) 70%, transparent);
+}
+
+.codywork-vue .composer .cody-composer {
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-panel);
+  box-shadow: 0 14px 36px -14px rgba(15, 23, 42, 0.2);
+  transition: border-color 180ms ease, box-shadow 220ms ease;
+}
+
+.codywork-vue .composer .cody-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle), 0 18px 42px -14px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Modals */
+.codywork-vue .modal-backdrop {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.codywork-vue .modal-card {
+  border-radius: 18px;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-popover);
+  animation: cwPageEnter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Settings Overview — Appearance Studio Card (2-Column Bento Layout) */
+.codywork-vue .skin-settings--studio {
+  max-width: none;
+  margin: 0;
+  padding: 22px 24px 24px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.codywork-vue .skin-settings--studio .theme-preferences-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.codywork-vue .skin-settings--studio .theme-preferences-heading h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.codywork-vue .skin-settings--studio .theme-preferences-heading p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.codywork-vue .skin-settings--studio .skin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.codywork-vue .skin-settings--studio button:not(.skin-card) {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: var(--radius-control);
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.codywork-vue .skin-settings--studio .skin-group-title {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.codywork-vue .skin-settings--studio .skin-gallery {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.codywork-vue .skin-settings--studio .skin-card {
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-default);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, box-shadow 180ms ease;
+}
+
+.codywork-vue .skin-settings--studio .skin-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-default));
+}
+
+.codywork-vue .skin-settings--studio .skin-card[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.codywork-vue .skin-settings--studio .skin-card-title {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.codywork-vue .skin-settings--studio .skin-card-description {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-secondary);
+}
+
+.codywork-vue .skin-settings--studio .skin-customization {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-default);
+}
+
+.codywork-vue .skin-settings--studio .skin-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.codywork-vue .skin-settings--studio .skin-section-heading p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.codywork-vue .skin-settings--studio .skin-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.codywork-vue .skin-settings--studio .skin-advanced-toggle {
+  margin-top: 0;
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  color: var(--ink-secondary);
+}
+
+.codywork-vue .skin-settings--studio .skin-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.codywork-vue .skin-settings--studio .skin-advanced {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-default);
+}
+
+@media (max-width: 1400px) {
+  .codywork-vue .skin-settings--studio .skin-gallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .codywork-vue .skin-settings--studio .skin-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sidebar Hover Tooltip Bubble (Teleported to body to avoid overflow clipping) */
+@keyframes cwTooltipFade {
+  from { opacity: 0; transform: translate(-4px, -50%); }
+  to { opacity: 1; transform: translate(0, -50%); }
+}
+
+.cw-sidebar-tooltip {
+  position: fixed;
+  z-index: 120;
+  max-width: 380px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--surface-raised, var(--surface-panel));
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: none;
+  transform: translate(0, -50%);
+  animation: cwTooltipFade 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cw-sidebar-tooltip::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  background: var(--surface-raised, var(--surface-panel));
+  border-left: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.cw-sidebar-tooltip-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cw-sidebar-tooltip-head strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.cw-sidebar-tooltip-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.cw-sidebar-tooltip-sub {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.cw-sidebar-tooltip-meta {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border-default);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-tertiary);
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+/* Unified Slim Single-Row Desktop Topbar (~58px across all pages) */
+@media (min-width: 901px) {
+  .codywork-vue .topbar {
+    min-height: 58px;
+    padding: 9px 88px 9px 24px;
+    gap: 14px;
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .codywork-vue .topbar .topbar-identity,
+  .codywork-vue .chat-topbar--slim .chat-topbar-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .codywork-vue .topbar h1 {
+    margin: 0;
+    font-size: 16.5px;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .codywork-vue .topbar .eyebrow {
+    margin: 0;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border-default);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    line-height: 1.4;
+    color: var(--ink-tertiary);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .codywork-vue .topbar .topbar-back-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    margin: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border-default);
+    background: var(--surface-subtle);
+    color: var(--ink-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+  }
+
+  .codywork-vue .topbar .topbar-back-pill:hover {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border-default));
+    background: var(--accent-subtle);
+  }
+
+  .codywork-vue .parallel-topbar p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ink-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .codywork-vue .topbar .topbar-actions,
+  .codywork-vue .parallel-topbar .parallel-topbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .codywork-vue .topbar:not(.chat-topbar) .btn {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 12.5px;
+  }
+
+  .codywork-vue .parallel-topbar .parallel-layout-toggle {
+    padding: 2px;
+  }
+
+  .codywork-vue .parallel-topbar .parallel-layout-toggle button {
+    min-height: 28px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .codywork-vue .chat-topbar.chat-topbar--slim {
+    padding-left: 20px;
+  }
+
+  .codywork-vue .chat-topbar--slim .chat-back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    flex-shrink: 0;
+    border-radius: 9px;
+    border: 1px solid var(--border-default);
+    background: var(--surface-subtle);
+    color: var(--ink-secondary);
+    cursor: pointer;
+    transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+  }
+
+  .codywork-vue .chat-topbar--slim .chat-back-btn:hover {
+    color: var(--ink-primary);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border-default));
+    background: var(--accent-subtle);
+  }
+
+  .codywork-vue .chat-topbar--slim .chat-back-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .codywork-vue .chat-topbar--slim .chat-branch-pill {
+    flex: 0 1 auto;
+    max-width: 180px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border-default);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .codywork-vue .chat-topbar--slim .demand-link-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .codywork-vue .chat-topbar--slim .demand-path-link,
+  .codywork-vue .chat-topbar--slim .demand-deep-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border-default);
+    color: var(--ink-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+  }
+
+  .codywork-vue .chat-topbar--slim .demand-path-link:hover,
+  .codywork-vue .chat-topbar--slim .demand-deep-link:hover {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border-default));
+    background: var(--accent-subtle);
+  }
+
+  .codywork-vue .chat-topbar--slim .demand-path-link svg {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .codywork-vue .chat-topbar--slim .chat-toolbar-menu {
+    flex: 0 0 auto;
+  }
+}

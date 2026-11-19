@@ -9,6 +9,7 @@ import './themes.css'
 import './conversation-theme.css'
 import './skin-recipes.css'
 import './skin-studio.css'
+import './workbench-v2.css'
 
 const disposeTheme = initializeTheme()
 createApp(App).mount('#root')

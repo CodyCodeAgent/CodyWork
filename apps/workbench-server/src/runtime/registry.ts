@@ -10,6 +10,12 @@ export const RUNTIME_DEFINITIONS = Object.freeze({
     description: '服务级共享 App Server；会话由原生 Thread 持久化。',
     capabilities: {},
   },
+  gemini: {
+    id: 'gemini',
+    label: 'Gemini (Antigravity)',
+    description: '每个会话使用独立 Antigravity CLI ACP 进程（agy acp）；支持与 Codex 自由切换与会话迁移。',
+    capabilities: {},
+  },
   trae: {
     id: 'trae',
     label: 'Trae ACP',

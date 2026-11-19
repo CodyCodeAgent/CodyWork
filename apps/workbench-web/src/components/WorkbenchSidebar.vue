@@ -1,23 +1,41 @@
 <template>
   <aside :class="['sidebar', { collapsed }]">
     <div class="brand"><span class="brand-mark"><WorkbenchIcon name="code" /></span><span><strong>CodyWork</strong><small>开发工作台</small></span></div>
-    <div class="sidebar-scroll">
+    <div class="sidebar-scroll" @scroll="hideHoverTip">
       <template v-if="workspace">
         <div class="switcher-wrap">
-          <button class="switcher" :aria-label="collapsed ? `切换 Workspace：${workspace.name}` : undefined" :title="collapsed ? workspace.name : undefined" @click="emit('update:workspacePickerOpen', !workspacePickerOpen)"><span class="folder-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><span class="switcher-copy"><strong>{{ workspace.name }}</strong><small>{{ workspace.path }}</small></span><span class="switcher-action">切换</span></button>
+          <button
+            class="switcher"
+            :aria-label="collapsed ? `切换 Workspace：${workspace.name}` : undefined"
+            @mouseenter="showHoverTip($event, { title: workspace.name, subtitle: workspace.path, badge: 'Workspace' })"
+            @mouseleave="hideHoverTip"
+            @focus="showHoverTip($event, { title: workspace.name, subtitle: workspace.path, badge: 'Workspace' })"
+            @blur="hideHoverTip"
+            @click="hideHoverTip(); emit('update:workspacePickerOpen', !workspacePickerOpen)"
+          ><span class="folder-mark">{{ workspace.name.slice(0, 1).toUpperCase() }}</span><span class="switcher-copy"><strong>{{ workspace.name }}</strong><small>{{ workspace.path }}</small></span><span class="switcher-action">切换</span></button>
           <div v-if="workspacePickerOpen" class="switcher-menu">
-            <div v-for="item in workspaces" :key="item.id" class="workspace-picker-row"><button class="workspace-picker-select" :class="{ selected: item.id === workspace.id }" @click="emit('selectWorkspace', item)"><span class="folder-mark small">{{ item.name.slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.name }}</strong><small>{{ item.path }}</small></span></button><button class="workspace-picker-remove" type="button" :aria-label="`从 CodyWork 移除 ${item.name}`" @click.stop="emit('removeWorkspace', item)">移除</button></div>
-            <button class="menu-create" @click="emit('createWorkspace')">＋ 创建 Workspace</button>
+            <div v-for="item in workspaces" :key="item.id" class="workspace-picker-row"><button class="workspace-picker-select" :class="{ selected: item.id === workspace.id }" @mouseenter="showHoverTip($event, { title: item.name, subtitle: item.path })" @mouseleave="hideHoverTip" @click="hideHoverTip(); emit('selectWorkspace', item)"><span class="folder-mark small">{{ item.name.slice(0, 1).toUpperCase() }}</span><span><strong>{{ item.name }}</strong><small>{{ item.path }}</small></span></button><button class="workspace-picker-remove" type="button" :aria-label="`从 CodyWork 移除 ${item.name}`" @click.stop="hideHoverTip(); emit('removeWorkspace', item)">移除</button></div>
+            <button class="menu-create" @click="hideHoverTip(); emit('createWorkspace')">＋ 创建 Workspace</button>
           </div>
         </div>
         <div class="sidebar-section-label"><span>工作空间</span><small>上下文与资产</small></div>
         <button v-for="item in workspacePages" :key="item.page" class="sidebar-item" :class="{ active: activePage === item.page }" :aria-label="collapsed ? item.label : undefined" :title="collapsed ? item.label : undefined" @click="emit('navigate', item.page)"><WorkbenchIcon :name="item.icon" /><span class="sidebar-label"><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span></button>
-        <button class="sidebar-item workspace-search-entry" :class="{ active: workspaceConversationActive }" :aria-label="collapsed ? 'Workspace 会话' : undefined" :title="collapsed ? 'Workspace 会话' : undefined" @click="emit('openWorkspaceConversations')"><WorkbenchIcon name="chat" /><span class="sidebar-label"><strong>Workspace 会话</strong><small>直接使用 Codex</small></span><em v-if="workspaceConversationCount">{{ workspaceConversationCount }}</em></button>
+        <button class="sidebar-item workspace-search-entry" :class="{ active: workspaceConversationActive }" :aria-label="collapsed ? 'Workspace 会话' : undefined" :title="collapsed ? 'Workspace 会话' : undefined" @click="emit('openWorkspaceConversations')"><WorkbenchIcon name="chat" /><span class="sidebar-label"><strong>Workspace 会话</strong><small>直接使用 Codex / Gemini</small></span><em v-if="workspaceConversationCount">{{ workspaceConversationCount }}</em></button>
         <section class="sidebar-demand-section" aria-label="需求列表">
           <button class="sidebar-section-label sidebar-accordion-trigger" :class="{ expanded: demandExpanded }" type="button" :aria-expanded="demandExpanded" aria-controls="sidebar-demand-list" @click="emit('update:demandExpanded', !demandExpanded)"><span>开发需求</span><small>独立工作树</small><em>{{ demands.length }}</em><i class="sidebar-accordion-chevron" aria-hidden="true">⌄</i></button>
           <div v-show="demandExpanded" id="sidebar-demand-list" class="sidebar-subnav">
             <button class="sidebar-subnav-item all-demands" :class="{ active: activePage === 'demands' }" @click="emit('navigate', 'demands')"><span class="subnav-rail-icon" aria-hidden="true">▦</span><span><strong>全部需求</strong><small>查看和管理 Worktree</small></span></button>
-            <button v-for="demand in demands" :key="demand.id" class="sidebar-subnav-item" :class="{ active: activePage === 'chat' && demand.id === selectedDemandId }" @click="emit('openDemand', demand)"><span :class="['subnav-status', demand.status]" /><span><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small></span><em :class="['demand-status-tag', demand.status]">{{ demandStatusLabel(demand.status) }}</em></button>
+            <button
+              v-for="demand in demands"
+              :key="demand.id"
+              class="sidebar-subnav-item"
+              :class="{ active: activePage === 'chat' && demand.id === selectedDemandId }"
+              @mouseenter="showHoverTip($event, demandTip(demand))"
+              @mouseleave="hideHoverTip"
+              @focus="showHoverTip($event, demandTip(demand))"
+              @blur="hideHoverTip"
+              @click="hideHoverTip(); emit('openDemand', demand)"
+            ><span :class="['subnav-status', demand.status]" /><span><strong>{{ demand.name }}</strong><small>{{ demand.branchName }}</small></span><em :class="['demand-status-tag', demand.status]">{{ demandStatusLabel(demand.status) }}</em></button>
             <button v-if="demands.length === 0" class="sidebar-subnav-empty" @click="emit('createDemand')">还没有需求，创建第一个 Worktree</button>
           </div>
           <button v-show="demandExpanded" class="sidebar-new-demand" @click="emit('createDemand')"><span aria-hidden="true">＋</span> 新建需求</button>
@@ -35,16 +53,44 @@
         <span class="sidebar-collapse-label">{{ collapsed ? '展开导航' : '收起导航' }}</span>
       </button>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="hoverTip"
+        class="cw-sidebar-tooltip"
+        role="tooltip"
+        :style="{ left: `${hoverTip.x}px`, top: `${hoverTip.y}px` }"
+      >
+        <div class="cw-sidebar-tooltip-head">
+          <strong>{{ hoverTip.title }}</strong>
+          <span v-if="hoverTip.badge" class="cw-sidebar-tooltip-badge">{{ hoverTip.badge }}</span>
+        </div>
+        <div v-if="hoverTip.subtitle" class="cw-sidebar-tooltip-sub">{{ hoverTip.subtitle }}</div>
+        <div v-if="hoverTip.meta" class="cw-sidebar-tooltip-meta">{{ hoverTip.meta }}</div>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import WorkbenchIcon from './WorkbenchIcon.vue'
 import type { Demand, Workspace } from '../api'
 import { demandStatusLabel } from '../workbenchUi'
 
 type Page = 'dashboard' | 'demands' | 'knowledge' | 'skills' | 'settings' | 'chat' | 'parallel'
+
+interface HoverTipPayload {
+  title: string
+  subtitle?: string
+  meta?: string
+  badge?: string
+}
+
+interface HoverTipState extends HoverTipPayload {
+  x: number
+  y: number
+}
 
 const props = defineProps<{
   workspace: Workspace | null
@@ -60,6 +106,35 @@ const props = defineProps<{
   workspaceConversationCount: number
   workspaceConversationActive: boolean
 }>()
+
+const hoverTip = ref<HoverTipState | null>(null)
+
+function demandTip(demand: Demand): HoverTipPayload {
+  const repoCount = demand.repositories?.length ?? 0
+  return {
+    title: demand.name,
+    subtitle: demand.branchName && demand.branchName !== demand.name ? `分支：${demand.branchName}` : demand.branchName,
+    meta: [repoCount ? `${repoCount} 个 Repo` : '', demand.path].filter(Boolean).join(' · '),
+    badge: demandStatusLabel(demand.status),
+  }
+}
+
+function showHoverTip(event: Event, payload: HoverTipPayload): void {
+  const target = event.currentTarget
+  if (!(target instanceof HTMLElement)) return
+  const rect = target.getBoundingClientRect()
+  const maxY = typeof window !== 'undefined' ? window.innerHeight - 56 : rect.top + rect.height / 2
+  const centerY = Math.min(Math.max(rect.top + rect.height / 2, 56), maxY)
+  hoverTip.value = {
+    ...payload,
+    x: rect.right + 12,
+    y: centerY,
+  }
+}
+
+function hideHoverTip(): void {
+  hoverTip.value = null
+}
 
 const realtimeLabel = computed(() => {
   if (props.activePage === 'parallel') return '并行开发'
