@@ -32,15 +32,24 @@
           <button v-if="skillJob && skillJob.workspaceId === workspace.id" ref="skillRunResult" class="skill-run-result" :class="skillJob.status" type="button" @click="showSkillInstallDialog = true"><span class="skill-run-result-copy"><strong>{{ skillInstallStatusLabel(skillJob.status) }}</strong><small>{{ skillJob.message || (skillInstallIsActive(skillJob.status) ? 'Agent 正在执行，点击查看实时输出。' : '点击查看完整执行记录。') }}</small></span><span>{{ skillJob.events.length }} 个事件 · 查看执行</span></button>
           <div class="skills-layout">
             <article class="skills-list-card">
-              <div class="skills-list-head"><strong>全部 Skills</strong><span>{{ skillSearchSummary(skills.length, filteredSkills.length, skillQuery) }}</span></div>
+              <div class="skills-list-head">
+                <strong>全部 Skills</strong>
+                <div class="skills-list-actions">
+                  <span>{{ skillSearchSummary(skills.length, filteredSkills.length, skillQuery) }}</span>
+                  <button type="button" class="btn" :disabled="!skills.length" @click="showSkillSync = true">同步 Skills</button>
+                </div>
+              </div>
               <label class="skills-search"><span class="sr-only">搜索 Skills</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m16 16 4 4" /></svg><input v-model.trim="skillQuery" type="search" placeholder="搜索名称、描述、路径或来源…" aria-label="搜索 Skills" /></label>
               <div class="skills-results">
-                <button v-for="skill in filteredSkills" :key="skill.id" :class="['skill-row', { active: selectedSkill?.id === skill.id }]" :aria-pressed="selectedSkill?.id === skill.id" @click="openSkill(skill)"><span class="skill-row-copy"><strong>{{ skill.displayName || skill.name }}</strong><small>{{ skill.description || skill.path }}</small></span><span class="skill-row-badges"><span v-if="sameNameSkills(skills, skill).length" class="skill-identity-pill">同名 {{ sameNameSkills(skills, skill).length + 1 }}</span><span class="skill-source-pill">{{ skillSourceLabel(skill.source) }}</span><span :class="['skill-status-pill', skill.status]">{{ skill.status }}</span></span></button>
+                <button v-for="skill in filteredSkills" :key="skill.id" :class="['skill-row', { active: selectedSkill?.id === skill.id }]" :aria-pressed="selectedSkill?.id === skill.id" @click="openSkill(skill)"><span class="skill-row-copy"><strong>{{ skill.displayName || skill.name }}</strong><small>{{ skill.description || skill.path }}</small></span><span class="skill-row-badges"><span v-if="(skillNameCounts.get(skill.name.trim().toLocaleLowerCase()) ?? 0) > 1" class="skill-identity-pill">同名 {{ skillNameCounts.get(skill.name.trim().toLocaleLowerCase()) }}</span><span class="skill-source-pill">{{ skillSourceLabel(skill.source) }}</span><span :class="['skill-status-pill', skill.status]">{{ skill.status }}</span><span v-if="skill.applicableRuntimes?.length" class="skill-runtime-tags"><span v-for="id in skill.applicableRuntimes" :key="id" class="skill-runtime-pill" title="上次检查时在工作空间中已发现">{{ skillRuntimeLabel(id) }}</span></span></span></button>
                 <p v-if="skills.length && !filteredSkills.length" class="skills-empty"><strong>没有匹配的 Skill</strong><span>换个名称、描述、路径或来源试试。</span></p>
                 <p v-else-if="!skills.length" class="skills-empty">Runtime 还没有发现可用 Skill。</p>
               </div>
             </article>
-            <article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ skillSourceLabel(selectedSkill.source) }} · {{ selectedSkill.scope }}</div><h2>{{ selectedSkill.displayName || selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><div v-if="selectedSkill.geminiSharing" class="skill-meta">
+            <article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ skillSourceLabel(selectedSkill.source) }} · {{ selectedSkill.scope }}</div><h2>{{ selectedSkill.displayName || selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><div v-if="selectedSkill.applicableRuntimes?.length" class="skill-meta skill-runtime-labels" aria-label="适用 Runtime">
+              <strong>适用 Runtime</strong>
+              <span v-for="id in selectedSkill.applicableRuntimes" :key="id" class="skill-runtime-pill" title="上次检查时在工作空间中已发现">{{ skillRuntimeLabel(id) }}</span>
+            </div><div v-if="selectedSkill.geminiSharing" class="skill-meta">
               <span v-if="selectedSkill.geminiSharing === 'shared'">已放入共享目录 · 会话以 Gemini 发现结果为准</span>
               <button v-else class="btn" :disabled="sharingGeminiSkill" @click="shareSelectedSkillWithGemini">
                 {{ selectedSkill.geminiSharing === 'import' ? '导入工作空间并共享' : '共享给 Gemini' }}
@@ -188,6 +197,7 @@
     </main>
 
     <WorkspaceSetupDialog :visible="showCreateWorkspace" @close="showCreateWorkspace = false" @completed="workspaceCreated" />
+    <SkillSyncDialog v-if="showSkillSync && workspace" :key="workspace.id" :workspace-id="workspace.id" :skills="skills" @close="showSkillSync = false" @synced="reloadSyncedSkills" />
     <SkillInstallDialog :visible="showSkillInstallDialog" :job="skillJob" :pausing="pausingSkillInstall" @close="closeSkillInstallDialog" @pause="pauseSkillInstall" />
     <ConversationChannelDialog :visible="Boolean(channelDialogConversation)" :conversation="channelDialogConversation" :bindings="channelDialogBindings" :loading="channelDialogLoading" :error="channelDialogError" :message="channelBindingMessage" :unbinding-id="unbindingChannelId" @close="closeChannelBindingDialog" @copy="copyChannelConversationLink" @unbind="unbindChannel" />
     <ConversationShareDialog :visible="showConversationShare" :title="conversationShareTitle" :account-id="conversationShareAccountId" :accounts="conversationShareAccounts" :sharing="sharingConversation" :error="conversationShareError" :result="conversationShareResult" @close="closeConversationShare" @share="shareConversation" @copy="copyConversationShareLink" @update:title="conversationShareTitle = $event" @update:account-id="conversationShareAccountId = $event" />
@@ -299,6 +309,7 @@ import SmartNotificationSettings from './components/SmartNotificationSettings.vu
 import NotificationBell from './components/NotificationBell.vue'
 import FollowupSettings from './components/FollowupSettings.vue'
 import SkillInstallDialog from './components/SkillInstallDialog.vue'
+import SkillSyncDialog from './components/SkillSyncDialog.vue'
 import ConversationChannelDialog from './components/ConversationChannelDialog.vue'
 import ConversationShareDialog from './components/ConversationShareDialog.vue'
 import AiCodeReportDialog from './components/AiCodeReportDialog.vue'
@@ -545,6 +556,14 @@ const sharedConversationEntries = computed(() => allSharedConversationEntries.va
 ))
 const filteredKnowledge = computed(() => { const query = knowledgeQuery.value.trim().toLowerCase(); return query ? knowledge.value.filter(doc => `${doc.name} ${doc.relativePath}`.toLowerCase().includes(query)) : knowledge.value })
 const filteredSkills = computed(() => filterSkills(skills.value, skillQuery.value))
+const skillNameCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const skill of skills.value) {
+    const name = skill.name.trim().toLocaleLowerCase()
+    if (name) counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  return counts
+})
 const dashboardCacheLabel = computed(() => formatDashboardCacheLabel(dashboard.value?.cache))
 const demandQuickActions = computed(() => quickActionsForScene(quickActions.value, 'demand-development'))
 const fluxIntegration = computed(() => fluxIntegrationForDemand(selectedDemand.value, runtimeSkills.value))
@@ -846,6 +865,7 @@ async function selectWorkspace(next: Workspace, options: { demandId?: string | n
   repositoryBulkSyncMessage.value = ''
   skillQuery.value = ''
   selectedSkill.value = null
+  showSkillSync.value = false
   showWorkspacePicker.value = false
   activePage.value = 'dashboard'
   selectedDemand.value = null
@@ -955,6 +975,13 @@ async function requestDashboardRefresh(): Promise<void> {
 }
 async function loadKnowledge(): Promise<void> { if (workspace.value) knowledge.value = await api.listKnowledge(workspace.value.id) }
 async function openKnowledge(document: KnowledgeDocument): Promise<void> { if (workspace.value) selectedKnowledge.value = await api.getKnowledge(workspace.value.id, document.id) }
+const showSkillSync = ref(false)
+function skillRuntimeLabel(id: string): string { return id === 'codex' ? 'Codex' : 'Gemini' }
+async function reloadSyncedSkills(workspaceId: string): Promise<void> {
+  if (workspace.value?.id !== workspaceId) return
+  try { await loadSkills(true) }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
+}
 const sharingGeminiSkill = ref(false)
 const skillSharingMessage = ref('')
 const geminiCommandInput = ref('')
@@ -1004,8 +1031,10 @@ async function shareSelectedSkillWithGemini(): Promise<void> {
   }
 }
 async function loadSkills(forceReload = false): Promise<void> {
-  if (!workspace.value) return
-  const nextSkills = await api.listSkills(workspace.value.id, forceReload)
+  const workspaceId = workspace.value?.id
+  if (!workspaceId) return
+  const nextSkills = await api.listSkills(workspaceId, forceReload)
+  if (workspace.value?.id !== workspaceId) return
   skills.value = nextSkills
   if (selectedSkill.value) selectedSkill.value = nextSkills.find(skill => skill.id === selectedSkill.value?.id) ?? null
 }

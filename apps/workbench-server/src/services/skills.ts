@@ -1,11 +1,13 @@
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { cp, mkdir, mkdtemp, readdir, rename, rm, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { WorkspaceRow } from '../db/index.js'
 import type { CodyWorkRuntime, RuntimeSkillCatalogEntry, RuntimeSkillScope } from '../runtime/protocol.js'
 
 export type SkillStatus = 'available' | 'disabled' | 'load_failed'
 export type SkillSource = 'workspace' | 'user' | 'system' | 'admin'
+export type SkillSyncRuntime = 'codex' | 'gemini'
 
 /** CodyWork's presentation view over the provider-owned Runtime catalog. */
 export interface SkillCatalogEntry {
@@ -21,6 +23,11 @@ export interface SkillCatalogEntry {
   content: string
   updatedAt: string
   geminiSharing?: 'shared' | 'link' | 'import'
+  applicableRuntimes?: SkillSyncRuntime[]
+}
+
+export function canonicalSkillPath(path: string): string | undefined {
+  try { return statSync(path).isFile() ? realpathSync(path) : undefined } catch { return undefined }
 }
 
 /** Skill directory links must resolve inside the root authorized by the caller. */
@@ -78,9 +85,9 @@ function geminiSharing(workspacePath: string, skill: RuntimeSkillCatalogEntry): 
   if (!skill.enabled || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skill.name) || basename(skill.path) !== 'SKILL.md') return
   const workspaceSkills = join(workspacePath, '.agents', 'skills')
   const existing = join(workspaceSkills, skill.name, 'SKILL.md')
-  if (containsSkillPath(workspacePath, existing) && containsSkillPath(dirname(skill.path), existing)) return 'shared'
-  if (skill.scope === 'repo' && containsSkillPath(workspacePath, skill.path)
-    && containsSkillPath(join(workspacePath, '.codex', 'skills'), skill.path)) return 'link'
+  const source = canonicalSkillPath(skill.path)
+  if (source && containsSkillPath(workspacePath, existing) && source === canonicalSkillPath(existing)) return 'shared'
+  if (source && skill.scope === 'repo' && containsSkillPath(workspacePath, skill.path)) return 'link'
   const userSkills = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'skills')
   if (skill.scope === 'user' && containsSkillPath(userSkills, skill.path)) return 'import'
 }
@@ -113,11 +120,12 @@ export async function listManagedSkills(codex: CodyWorkRuntime, workspace: Works
     discoverSkillDirectories(join(workspace.path, root), workspace.path, 'repo'))
   let catalog: SkillCatalogEntry[]
   try {
-    catalog = await listSkills(codex, workspace, forceReload)
+    catalog = (await listSkills(codex, workspace, forceReload))
+      .map(skill => ({ ...skill, applicableRuntimes: skill.status === 'available' ? ['codex'] : [] }))
   } catch {
     catalog = []
   }
-  const seen = new Set(catalog.map(skill => skill.id))
+  const seen = new Set(catalog.flatMap(skill => [skill.id, canonicalSkillPath(skill.path) ?? skill.path]))
   for (const skill of local) {
     if (seen.has(skill.id) || seen.has(skill.path)) continue
     catalog.push(toCatalogEntry(skill, workspace.path))
@@ -132,50 +140,57 @@ export async function getSkill(runtime: CodyWorkRuntime, workspace: WorkspaceRow
   return skill
 }
 
-function assertPortableDirectory(directory: string): void {
-  for (const name of readdirSync(directory)) {
-    const path = join(directory, name)
-    const entry = lstatSync(path)
-    if (entry.isDirectory()) assertPortableDirectory(path)
+async function assertPortableDirectory(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) await assertPortableDirectory(join(directory, entry.name))
     else if (!entry.isFile()) throw new Error('此 Skill 包含软链或特殊文件，请先整理成独立的 Skill 目录')
   }
 }
 
 export async function shareGeminiSkill(runtime: CodyWorkRuntime, workspace: WorkspaceRow, id: string): Promise<void> {
   const skill = await getSkill(runtime, workspace, id)
-  if (skill.geminiSharing === 'shared') return
-  if (!skill.geminiSharing) throw new Error('此 Skill 无法从当前位置共享给 Gemini')
+  await placeSharedSkill(workspace, skill)
+}
+
+export async function placeSharedSkill(workspace: WorkspaceRow, skill: SkillCatalogEntry): Promise<string> {
+  const sharing = geminiSharing(workspace.path, { ...skill, label: skill.displayName, enabled: skill.status === 'available' })
+  if (!sharing) throw new Error('此 Skill 无法从当前位置共享')
   const root = join(workspace.path, '.agents', 'skills')
+  const target = join(root, skill.name)
+  const manifest = join(target, 'SKILL.md')
+  if (sharing === 'shared') return manifest
   for (const directory of [dirname(root), root]) {
-    if (!existsSync(directory)) mkdirSync(directory, { recursive: true })
+    if (!existsSync(directory)) await mkdir(directory, { recursive: true })
     if (!containsSkillPath(workspace.path, directory)) throw new Error('共享目录必须在当前工作空间内')
   }
   const source = realpathSync(dirname(skill.path))
-  const target = join(root, skill.name)
-  const createTarget = (create: () => void) => {
-    try { create() }
+  if (containsSkillPath(source, root)) throw new Error('Skill 目录不能包含共享目录')
+  const createTarget = async (create: () => Promise<unknown>) => {
+    try { await create() }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`共享目录里已经有同名 Skill「${skill.name}」`)
       throw error
     }
   }
-  if (skill.geminiSharing === 'link') {
-    createTarget(() => symlinkSync(relative(realpathSync(root), source), target, 'dir'))
-    return
+  if (sharing === 'link') {
+    await assertPortableDirectory(source)
+    await createTarget(() => symlink(relative(realpathSync(root), source), target, 'dir'))
+    return manifest
   }
-  assertPortableDirectory(source)
-  const staging = mkdtempSync(join(root, '.import-'))
+  await assertPortableDirectory(source)
+  const staging = await mkdtemp(join(root, '.import-'))
   try {
     const copy = join(staging, skill.name)
-    cpSync(source, copy, { recursive: true, errorOnExist: true, force: false })
-    assertPortableDirectory(copy)
+    await cp(source, copy, { recursive: true, errorOnExist: true, force: false })
+    await assertPortableDirectory(copy)
     // Reserve atomically so a different Skill with this name is never overwritten.
-    createTarget(() => { mkdirSync(target) })
-    try { renameSync(copy, target) }
-    catch (error) { rmSync(target, { recursive: true }); throw error }
+    await createTarget(() => mkdir(target))
+    try { await rename(copy, target) }
+    catch (error) { await rm(target, { recursive: true }); throw error }
   } finally {
-    rmSync(staging, { recursive: true, force: true })
+    await rm(staging, { recursive: true, force: true })
   }
+  return manifest
 }
 
 interface ParsedInstalledSkill {

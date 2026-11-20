@@ -87,6 +87,22 @@ export interface WorkspaceSkill {
   content: string
   updatedAt: string
   geminiSharing?: 'shared' | 'link' | 'import'
+  applicableRuntimes?: SkillSyncRuntime[]
+}
+
+export type SkillSyncRuntime = 'codex' | 'gemini'
+export interface SkillSyncTarget {
+  id: string
+  label: string
+  available: boolean
+  reason?: string
+}
+export interface SkillSyncResult {
+  skillId: string
+  name: string
+  runtimeId: SkillSyncRuntime
+  status: 'synced' | 'already_available' | 'skipped' | 'not_discovered' | 'failed'
+  message?: string
 }
 
 export interface GeminiRuntimeCheck {
@@ -692,6 +708,9 @@ export const api = {
   refreshDashboard: (id: string) => request<DashboardSnapshot>('POST', `/api/workspaces/${id}/dashboard/refresh`),
   shareGeminiSkill: (id: string, skillId: string) => request<{ shared: boolean }>('POST', `/api/workspaces/${id}/skills/share-gemini`, { skillId }),
   listSkills: (id: string, forceReload = false) => request<WorkspaceSkill[]>('GET', `/api/workspaces/${id}/skills${forceReload ? '?force=1' : ''}`),
+  skillSyncTargets: (id: string) => request<SkillSyncTarget[]>('GET', `/api/workspaces/${id}/skills/sync-targets`),
+  syncSkills: (id: string, skillIds: string[], runtimeIds: string[]) =>
+    request<SkillSyncResult[]>('POST', `/api/workspaces/${id}/skills/sync`, { skillIds, runtimeIds }),
   getSkill: (id: string, skillId: string) => request<WorkspaceSkill>('GET', `/api/workspaces/${id}/skills/${encodeURIComponent(skillId)}`),
   installSkill: (id: string, source: string) => request<SkillInstallStatus>('POST', `/api/workspaces/${id}/skills`, { source }),
   skillInstallStatus: (id: string, jobId: string) => request<SkillInstallStatus>('GET', `/api/workspaces/${id}/skills/install/${encodeURIComponent(jobId)}`),

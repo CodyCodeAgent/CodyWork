@@ -18,6 +18,7 @@ import type { RuntimeSettingsPatch } from '../runtime/settings.js'
 import { createCodyWorkRuntimeRegistry, type CodyWorkRuntimeRegistry } from '../runtime/registry.js'
 import { ConversationService } from '../services/conversations.js'
 import { getSkill, listManagedSkills, listSkills, shareGeminiSkill } from '../services/skills.js'
+import { checkSkillSyncTarget, SKILL_SYNC_RUNTIMES, syncWorkspaceSkills, withSkillRuntimeLabels } from '../services/skillSync.js'
 import { getKnowledgeDocument, listKnowledgeDocuments } from '../services/knowledge.js'
 import { getWorkspaceFilePreview } from '../services/workspaceFilePreview.js'
 import { listBrowsableDirectories } from '../services/directories.js'
@@ -609,12 +610,39 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/workspaces/:id/skills', async (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return workspaceSkillCatalog(ctx, row, c.query.get('force') === '1')
+    return withSkillRuntimeLabels(ctx.db, row, await workspaceSkillCatalog(ctx, row, c.query.get('force') === '1'))
+  })
+
+  add('GET', '/api/workspaces/:id/skills/sync-targets', async (c) => {
+    const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
+    const service = conversationService(ctx)
+    return Promise.all(service.runtimeDescriptors().map(({ id, label }) =>
+      checkSkillSyncTarget({ id, label }, workspace.path, () => service.getRuntime(id))))
   })
 
   add('GET', '/api/workspaces/:id/skills/:skillId', async (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return getSkill(conversationService(ctx).getRuntime('codex'), row, requiredParam(c, 'skillId'))
+    const skill = await getSkill(conversationService(ctx).getRuntime('codex'), row, requiredParam(c, 'skillId'))
+    return withSkillRuntimeLabels(ctx.db, row, [skill])[0]
+  })
+
+  const syncingWorkspaces = new Set<string>()
+  add('POST', '/api/workspaces/:id/skills/sync', async (c) => {
+    const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    const { skillIds, runtimeIds } = c.body
+    if (!Array.isArray(skillIds) || !skillIds.length || skillIds.length > 5000
+      || !skillIds.every(value => typeof value === 'string' && value.length > 0)) throw new Error('请选择要同步的 Skills（最多 5,000 项）')
+    if (!Array.isArray(runtimeIds) || !runtimeIds.length || runtimeIds.length > SKILL_SYNC_RUNTIMES.length
+      || !runtimeIds.every(id => SKILL_SYNC_RUNTIMES.some(runtime => runtime === id))) {
+      throw new Error('请选择支持同步的 Runtime')
+    }
+    if (syncingWorkspaces.has(row.id)) throw new Error('当前工作空间已有同步正在进行')
+    syncingWorkspaces.add(row.id)
+    try {
+      return await syncWorkspaceSkills(ctx.db, row, id => conversationService(ctx).getRuntime(id), [...new Set(skillIds)], [...new Set(runtimeIds)])
+    } finally {
+      syncingWorkspaces.delete(row.id)
+    }
   })
 
   add('POST', '/api/workspaces/:id/skills/share-gemini', async (c) => {
