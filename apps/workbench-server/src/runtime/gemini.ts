@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { accessSync, constants as fsConstants, existsSync, readFileSync, realpathSync } from 'node:fs'
+import { accessSync, constants as fsConstants, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { delimiter, isAbsolute, join } from 'node:path'
 import {
   AcpSessionHost,
@@ -10,6 +11,7 @@ import {
   type AcpSessionUpdate,
 } from '@codycodeagent/cody-web-core/acp'
 import { nowIso } from '../db/index.js'
+import { discoverSkillDirectories } from '../services/skills.js'
 import type {
   ConversationHandle,
   CodyWorkRuntime,
@@ -71,6 +73,9 @@ const GEMINI_NOT_FOUND = /(?:enoent|not found|command not found)/i
 
 export function presentGeminiFailure(error: unknown): { message: string; code?: string } {
   const original = error instanceof Error ? error.message : String(error)
+  if (/location_not_eligible|unsupported_location|location is not supported|location is not eligible|not currently available in your location/i.test(original)) {
+    return { message: 'Google 拒绝了模型请求的地区资格，请检查 Google 账号关联地区和 API 出口。', code: 'gemini_location_ineligible' }
+  }
   if (GEMINI_NOT_FOUND.test(original)) {
     return {
       message: '未找到 Antigravity CLI 可执行文件（agy），请先安装 Antigravity CLI 或在 Runtime 设置中配置 agy acp 命令路径。',
@@ -222,6 +227,40 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     return { runtimeVersion: 'antigravity-cli-acp', protocolVersion: WORKBENCH_RUNTIME_PROTOCOL_VERSION }
   }
 
+  async checkModelAccess() {
+    let installed = false
+    let connected = false
+    let session: AcpSession | undefined
+    let cwd: string | undefined
+    try {
+      this.assertCommandAvailable()
+      installed = true
+      await this.acp.probe(10_000)
+      connected = true
+      cwd = mkdtempSync(join(tmpdir(), 'codywork-gemini-check-'))
+      session = await this.acp.open({ bindingId: `gemini-check-${randomUUID()}`, cwd, timeoutMs: 15_000 })
+      this.acp.setPermissionHandler(session, () => null)
+      let responseText = ''
+      this.acp.subscribe(session, update => {
+        if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') responseText += update.content.text
+      })
+      const prompt = this.acp.prompt(session, [{ type: 'text', text: 'Reply with exactly OK. Do not use tools or access files.' }])
+      if (!(await settlesWithin(prompt, 25_000))) throw new Error('Gemini 模型请求超时')
+      const response = await prompt
+      if (response.stopReason === 'cancelled') throw new Error('Gemini 模型请求已取消')
+      if (responseText.trim() !== 'OK') {
+        const failure = presentGeminiFailure(responseText)
+        return { installed, connected, modelReady: false, ...(failure.code ? failure : { message: 'Gemini 没有返回预期的测试结果' }) }
+      }
+      return { installed, connected, modelReady: true }
+    } catch (cause) {
+      return { installed, connected, modelReady: false, ...presentGeminiFailure(cause) }
+    } finally {
+      if (session) await this.acp.close(session)
+      if (cwd) rmSync(cwd, { recursive: true, force: true })
+    }
+  }
+
   diagnostics() {
     return { runtime: 'gemini', activeSessions: this.acp.size }
   }
@@ -310,12 +349,13 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     const session = await this.createEphemeralSession(context)
     try {
       const models = this.models(session.acp.configOptions)
+      const skills = await this.sessionSkills(session)
       return {
         provider: { type: 'gemini', label: 'Gemini (Antigravity)' },
         capabilities: {
           modelSelection: models.length > 0,
           reasoning: false,
-          structuredSkills: false,
+          structuredSkills: skills.some(skill => skill.enabled),
           imageInput: supportsImage(session),
           nativeSessionList: Boolean(session.acp.capabilities.sessionCapabilities?.list)
             && Boolean(session.acp.capabilities.loadSession || session.acp.capabilities.sessionCapabilities?.resume),
@@ -326,7 +366,7 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
           aiCodeReports: false,
         },
         models,
-        skills: [],
+        skills,
         collaborationModes: [],
       }
     } finally {
@@ -334,13 +374,48 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     }
   }
 
-  async listSkillCatalog(_request: RuntimeSkillCatalogRequest): Promise<RuntimeSkillCatalogEntry[]> {
-    return []
+  private skillCandidates(workspacePath: string, demandPath?: string): RuntimeSkillCatalogEntry[] {
+    const roots = [...new Set([demandPath, workspacePath].filter((path): path is string => Boolean(path)))]
+    const skills = roots.flatMap(root => discoverSkillDirectories(join(root, '.agents', 'skills'), root, 'repo'))
+    const home = this.resolvedEnv.HOME ?? this.resolvedEnv.USERPROFILE
+    if (home) {
+      for (const root of ['.gemini/antigravity-cli/skills', '.gemini/skills', '.gemini/config/skills']) {
+        skills.push(...discoverSkillDirectories(join(home, root), join(home, '.gemini'), 'user'))
+      }
+    }
+    return [...new Map(skills.map(skill => [skill.id, skill])).values()]
   }
 
-  async resolveSkills(_context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
-    if (skillIds.length) throw new Error('当前 Gemini CLI ACP 未提供可解析的 Skill catalog')
-    return []
+  private async sessionSkills(session: ProductSession): Promise<RuntimeSkillCatalogEntry[]> {
+    const commands = await this.acp.listAvailableCommands(session.acp)
+    const names = new Set(commands.map(command => command.name))
+    const candidates = this.skillCandidates(session.context.workspacePath, session.context.demandPath)
+    const counts = new Map<string, number>()
+    for (const skill of candidates) counts.set(skill.name, (counts.get(skill.name) ?? 0) + 1)
+    return candidates.filter(skill => names.has(skill.name) && counts.get(skill.name) === 1)
+  }
+
+  async listSkillCatalog(request: RuntimeSkillCatalogRequest): Promise<RuntimeSkillCatalogEntry[]> {
+    const { workspacePath, demandPath } = request
+    const session = await this.createEphemeralSession({
+      workspacePath, ...(demandPath ? { demandPath } : {}),
+      instructionBundle: resolveInstructionBundle({ workspacePath, demandPath }),
+      effectivePolicy: resolveEffectivePolicy({ workspacePath, writableRoots: [], shell: 'disabled' }),
+    })
+    try {
+      return await this.sessionSkills(session)
+    } finally {
+      this.releaseConversation(session.handle)
+    }
+  }
+
+  async resolveSkills(context: RuntimeContext, skillIds: string[]): Promise<Array<{ name: string; path: string }>> {
+    if (!skillIds.length) return []
+    if (skillIds.length !== 1) throw new Error('Gemini 每条消息可选择一个 Skill')
+    const skill = this.skillCandidates(context.workspacePath, context.demandPath)
+      .find(candidate => candidate.enabled && candidate.id === skillIds[0])
+    if (!skill) throw new Error('Skill 不存在、已禁用或不适用于当前 Gemini 会话')
+    return [{ name: skill.name, path: skill.id }]
   }
 
   async setPermission(conversation: ConversationHandle, mode: RuntimePermissionMode): Promise<void> {
@@ -433,7 +508,7 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     const cwd = executionCwd(context)
     let acp: AcpSession
     try {
-      acp = await this.acp.open({ bindingId: id, cwd, ...(nativeId ? { sessionId: nativeId } : {}) })
+      acp = await this.acp.open({ bindingId: id, cwd, timeoutMs: 20_000, ...(nativeId ? { sessionId: nativeId } : {}) })
     } catch (error) {
       throw new Error(presentGeminiFailure(error).message)
     }
@@ -480,6 +555,7 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
         const prompt = this.acp.prompt(session.acp, [{ type: 'text', text: request.prompt }])
         this.emit(session, runtimeEvent(session, 'command.appended', { clientCommandId, delivery: 'acp_prompt' }, activeTurnId, clientCommandId))
         await prompt
+        this.emit(session, runtimeEvent(session, 'user.completed', { text: request.prompt }, activeTurnId, clientCommandId))
         return { conversation: session.handle, finalText: this.finalText(events), events: [...events] }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
@@ -515,13 +591,19 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     session.activeTurnId = turnId
     try {
       if (request.localImages?.length && !supportsImage(session)) throw new Error('当前 Gemini CLI ACP 未声明图片 Prompt 能力')
-      if (request.settings?.skills?.length) throw new Error('当前 Gemini CLI ACP 未提供结构化 Skill 输入能力')
+      const selected = request.settings?.skills ?? []
+      if (selected.length > 1) throw new Error('Gemini 每条消息可选择一个 Skill')
+      const skill = selected[0]
+      if (skill && !(await this.sessionSkills(session)).some(candidate => candidate.enabled && candidate.id === skill.path && candidate.name === skill.name)) {
+        throw new Error(`当前 Gemini 会话未发现 Skill「${skill.name}」，请确认后重试`)
+      }
       if (request.settings?.reasoningEffort) throw new Error('当前 Gemini CLI ACP 未提供推理程度配置')
       if (request.settings?.collaborationMode === 'plan') throw new Error('当前 Gemini CLI ACP 未提供 Plan 模式配置')
       if (request.mode === 'steer') throw new Error('当前 Gemini CLI ACP 未提供引导当前 Turn 的能力；请使用“追加到当前任务”')
       if (request.settings?.model?.trim()) await this.setModel(session, request.settings.model.trim())
+      const promptText = this.promptWithInstructions(session.context, request.prompt)
       const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
-        { type: 'text', text: this.promptWithInstructions(session.context, request.prompt) },
+        { type: 'text', text: skill ? `/${skill.name} ${promptText}` : promptText },
       ]
       for (const image of request.localImages ?? []) {
         blocks.push({
@@ -533,7 +615,10 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
       request.beforeStart?.()
       this.emit(session, runtimeEvent(session, 'turn.started', {}, turnId))
       this.emit(session, runtimeEvent(session, 'turn.activity', { label: '正在准备 Gemini CLI 请求…', details: ['已建立 ACP 会话', '正在提交提示词'] }, turnId))
-      this.emit(session, runtimeEvent(session, 'user.completed', { text: request.prompt }, turnId, turnId))
+      this.emit(session, runtimeEvent(session, 'user.completed', {
+        text: request.prompt,
+        ...(skill ? { skills: [skill] } : {}),
+      }, turnId, turnId))
       started = true
       const interrupted = new Promise<{ kind: 'interrupted' }>(resolve => {
         session.forcedInterruptionResolvers.set(turnId, () => resolve({ kind: 'interrupted' }))
@@ -588,7 +673,9 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     if (update.sessionUpdate === 'agent_message_chunk') {
       this.emit(session, runtimeEvent(session, 'turn.activity', { label: 'Gemini CLI 正在生成回复…', details: ['正在接收模型输出'] }, turnId))
       this.emit(session, runtimeEvent(session, 'assistant.delta', { text }, turnId, turnId ? `assistant:${turnId}` : undefined))
-    } else if (update.sessionUpdate === 'user_message_chunk') {
+    } else if (update.sessionUpdate === 'user_message_chunk' && !turnId) {
+      // Live prompt echoes include provider instructions and the native slash
+      // command. The Work event already records the original user message.
       this.emit(session, runtimeEvent(session, 'user.completed', { text }, turnId, turnId))
     } else if (update.sessionUpdate === 'agent_thought_chunk') {
       this.emit(session, runtimeEvent(session, 'reasoning.delta', { text }, turnId, turnId ? `reasoning:${turnId}` : undefined))

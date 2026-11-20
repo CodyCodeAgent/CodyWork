@@ -865,7 +865,8 @@ function buildTraeCacheHandoff(transcript: string): string {
 }
 
 function migratedConversationTitle(sourceTitle: string, targetRuntimeType: ConversationRuntimeType): string {
-  const suffix = ` · 切换到 ${targetRuntimeType === 'trae' ? 'Trae' : 'Codex'}`
+  const labels: Record<string, string> = { codex: 'Codex', gemini: 'Gemini', trae: 'Trae' }
+  const suffix = ` · 切换到 ${labels[targetRuntimeType] ?? targetRuntimeType}`
   return `${sourceTitle.slice(0, Math.max(1, 120 - suffix.length)).trim() || '会话'}${suffix}`
 }
 

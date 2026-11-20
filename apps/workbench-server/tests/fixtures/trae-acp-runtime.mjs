@@ -29,9 +29,13 @@ const app = acp.agent({ name: 'trae-acp-fixture' })
     agentInfo: { name: 'Trae ACP fixture', version: '1.0' },
     agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { list: {}, resume: {}, close: {} } },
   }))
-  .onRequest(acp.methods.agent.session.new, ({ params }) => {
+  .onRequest(acp.methods.agent.session.new, async ({ params, client }) => {
     const sessionId = `trae-fixture-${process.pid}-${nextSession++}`
     sessions.set(sessionId, { cwd: params.cwd, cancelled: false, model: 'trae-fixture', appendRejected: false })
+    await update(client, sessionId, { sessionUpdate: 'available_commands_update', availableCommands: [
+      { name: 'fixture-review', description: 'Review fixture code' },
+      { name: 'config', description: 'A built-in command' },
+    ] })
     return { sessionId, configOptions: configOptions() }
   })
   .onRequest(acp.methods.agent.session.load, ({ params }) => {
@@ -56,7 +60,11 @@ const app = acp.agent({ name: 'trae-acp-fixture' })
     }
     if (text.includes('NETWORK_REQUEST_FAILURE')) throw new Error('Connection failed: error sending request')
     await update(client, params.sessionId, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text } })
-    if (text.includes('APPROVAL')) {
+    if (text === 'Reply with exactly OK. Do not use tools or access files.') {
+      await update(client, params.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: process.env.CODY_FIXTURE_ACP_HEALTH_RESULT ?? 'OK' } })
+    } else if (text.startsWith('/fixture-review ')) {
+      await update(client, params.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'FIXTURE_SKILL_OK' } })
+    } else if (text.includes('APPROVAL')) {
       const permission = await client.request(acp.methods.client.session.requestPermission, {
         sessionId: params.sessionId,
         toolCall: { toolCallId: 'fixture-write', title: 'Write fixture file', kind: 'edit', status: 'pending' },
