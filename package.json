@@ -30,6 +30,6 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.46.0"
+    "@codycodeagent/cody-web-core": "git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.47.0"
   }
 }

@@ -5,15 +5,15 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@codycodeagent/cody-web-core@0.46.0': 6ab32703a2c358a30125bbc61a21373f15d1114b9e0a4f731c2cc37530dcea32
+  '@codycodeagent/cody-web-core@0.47.0': fefd2c9d2458267e889062e88862dcd2b46ba193c3f98c85aa787ce5b5f94269
 
 importers:
 
   .:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.46.0
-        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/6b81acf634deab11dad2a9bb29a43ea348184b24(patch_hash=6ab32703a2c358a30125bbc61a21373f15d1114b9e0a4f731c2cc37530dcea32)(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.47.0
+        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/9960a9b6433edf4480a3acfb9a10e4d85f2ae43f(patch_hash=fefd2c9d2458267e889062e88862dcd2b46ba193c3f98c85aa787ce5b5f94269)(vue@3.5.39(typescript@6.0.3))
     devDependencies:
       concurrently:
         specifier: ^9.2.1
@@ -25,8 +25,8 @@ importers:
   apps/workbench-server:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.46.0
-        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/6b81acf634deab11dad2a9bb29a43ea348184b24(patch_hash=6ab32703a2c358a30125bbc61a21373f15d1114b9e0a4f731c2cc37530dcea32)(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.47.0
+        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/9960a9b6433edf4480a3acfb9a10e4d85f2ae43f(patch_hash=fefd2c9d2458267e889062e88862dcd2b46ba193c3f98c85aa787ce5b5f94269)(vue@3.5.39(typescript@6.0.3))
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.2
         version: 1.73.2
@@ -53,8 +53,8 @@ importers:
   apps/workbench-web:
     dependencies:
       '@codycodeagent/cody-web-core':
-        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.46.0
-        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/6b81acf634deab11dad2a9bb29a43ea348184b24(patch_hash=6ab32703a2c358a30125bbc61a21373f15d1114b9e0a4f731c2cc37530dcea32)(vue@3.5.39(typescript@6.0.3))
+        specifier: git+ssh://git@github.com/CodyCodeAgent/CodyWebCore.git#v0.47.0
+        version: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/9960a9b6433edf4480a3acfb9a10e4d85f2ae43f(patch_hash=fefd2c9d2458267e889062e88862dcd2b46ba193c3f98c85aa787ce5b5f94269)(vue@3.5.39(typescript@6.0.3))
       vue:
         specifier: ^3.5.13
         version: 3.5.39(typescript@6.0.3)
@@ -126,9 +126,9 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/6b81acf634deab11dad2a9bb29a43ea348184b24':
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/6b81acf634deab11dad2a9bb29a43ea348184b24}
-    version: 0.46.0
+  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/9960a9b6433edf4480a3acfb9a10e4d85f2ae43f':
+    resolution: {gitHosted: true, integrity: sha512-trHxWH1xtqvY/DV+pEO//21R2ctP9p59X58Jpf7vnCl256/1HVW+FWP3IpFgHfz02W4PMPAb28tig6MhDHIDYw==, tarball: https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/9960a9b6433edf4480a3acfb9a10e4d85f2ae43f}
+    version: 0.47.0
     peerDependencies:
       vue: ^3.5.0
 
@@ -2276,7 +2276,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/6b81acf634deab11dad2a9bb29a43ea348184b24(patch_hash=6ab32703a2c358a30125bbc61a21373f15d1114b9e0a4f731c2cc37530dcea32)(vue@3.5.39(typescript@6.0.3))':
+  '@codycodeagent/cody-web-core@https://codeload.github.com/CodyCodeAgent/CodyWebCore/tar.gz/9960a9b6433edf4480a3acfb9a10e4d85f2ae43f(patch_hash=fefd2c9d2458267e889062e88862dcd2b46ba193c3f98c85aa787ce5b5f94269)(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       '@larksuiteoapi/node-sdk': 1.73.2
       dompurify: 3.4.16
