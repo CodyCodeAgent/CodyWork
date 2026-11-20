@@ -40,7 +40,13 @@
                 <p v-else-if="!skills.length" class="skills-empty">Runtime 还没有发现可用 Skill。</p>
               </div>
             </article>
-            <article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ skillSourceLabel(selectedSkill.source) }} · {{ selectedSkill.scope }}</div><h2>{{ selectedSkill.displayName || selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><div v-if="sameNameSkills(skills, selectedSkill).length" class="skill-identity-note"><strong>同名 Skill 已按路径消歧</strong><p>当前引用固定绑定上方完整路径，不会被其他来源静默替换。</p><ul><li v-for="peer in sameNameSkills(skills, selectedSkill)" :key="peer.id"><span>{{ skillSourceLabel(peer.source) }}</span><code>{{ peer.path }}</code></li></ul></div><pre v-if="selectedSkill.content" class="skill-content">{{ selectedSkill.content }}</pre><p v-else class="skill-content-empty">该 Runtime Skill 没有可读取的本地文档，仍可按 Runtime 元数据调用。</p></template><p v-else class="skill-detail-empty">从左侧选择一个 Skill 查看详情。</p></article>
+            <article class="skill-detail-card"><template v-if="selectedSkill"><div class="skill-detail-head"><div><div class="card-kicker">{{ skillSourceLabel(selectedSkill.source) }} · {{ selectedSkill.scope }}</div><h2>{{ selectedSkill.displayName || selectedSkill.name }}</h2><p>{{ selectedSkill.description }}</p></div><span :class="['skill-status-pill', selectedSkill.status]">{{ selectedSkill.status }}</span></div><div class="skill-meta"><span>{{ selectedSkill.modelInvocable ? 'Agent 可调用' : '仅供参考' }}</span><code>{{ selectedSkill.path }}</code></div><div v-if="selectedSkill.geminiSharing" class="skill-meta">
+              <span v-if="selectedSkill.geminiSharing === 'shared'">已放入共享目录 · 会话以 Gemini 发现结果为准</span>
+              <button v-else class="btn" :disabled="sharingGeminiSkill" @click="shareSelectedSkillWithGemini">
+                {{ selectedSkill.geminiSharing === 'import' ? '导入工作空间并共享' : '共享给 Gemini' }}
+              </button>
+            </div>
+            <p v-if="skillSharingMessage" role="status">{{ skillSharingMessage }}</p><div v-if="sameNameSkills(skills, selectedSkill).length" class="skill-identity-note"><strong>同名 Skill 已按路径消歧</strong><p>当前引用固定绑定上方完整路径，不会被其他来源静默替换。</p><ul><li v-for="peer in sameNameSkills(skills, selectedSkill)" :key="peer.id"><span>{{ skillSourceLabel(peer.source) }}</span><code>{{ peer.path }}</code></li></ul></div><pre v-if="selectedSkill.content" class="skill-content">{{ selectedSkill.content }}</pre><p v-else class="skill-content-empty">该 Runtime Skill 没有可读取的本地文档，仍可按 Runtime 元数据调用。</p></template><p v-else class="skill-detail-empty">从左侧选择一个 Skill 查看详情。</p></article>
           </div>
         </div>
       </section>
@@ -54,6 +60,22 @@
         <div v-else class="runtime-settings-body">
           <section class="settings-intro"><div><div class="card-kicker">{{ runtimeBaseLabel(runtimeType) }} RUNTIME</div><h2>{{ selectedRuntimeDescriptor?.label ?? runtimeType }} 运行状态</h2><p>CodyWork 支持 Codex、Gemini (Antigravity ACP) 与 Trae ACP 多运行时自由切换，所有状态均由 Core 权威托管。</p></div><span :class="['runtime-status', runtimeDiagnostics?.lifecycle === 'running' ? '' : 'pending']"><i />{{ runtimeStatusLabel }}</span></section>
           <div class="runtime-settings-grid">
+            <article class="settings-card">
+              <div class="settings-card-head"><div><h3>连接 Gemini</h3></div>
+                <button class="btn" :disabled="checkingGemini" @click="checkGeminiConnection">{{ checkingGemini ? '检查中…' : '检查 Gemini 可用性' }}</button>
+              </div>
+              <p>在运行 CodyWork 的机器上安装 Antigravity CLI，并使用 CodyWork 服务账号执行 <code>agy acp --login</code>。</p>
+              <label for="gemini-launch-command">Gemini 启动命令</label>
+              <input id="gemini-launch-command" v-model="geminiCommandInput" class="input" placeholder="agy acp" />
+              <button class="btn" :disabled="savingGeminiCommand" @click="saveGeminiCommand">保存 Gemini 命令</button>
+              <p v-if="geminiCommandMessage" class="runtime-result" role="status">{{ geminiCommandMessage }}</p>
+              <div v-if="geminiCheck" class="runtime-facts" role="status">
+                <div><span>CLI</span><strong>{{ geminiCheck.installed ? '已安装' : '未检测到' }}</strong></div>
+                <div><span>ACP</span><strong>{{ geminiCheck.connected ? '已连接' : '未连接' }}</strong></div>
+                <div><span>模型请求</span><strong>{{ geminiCheck.modelReady ? '成功' : '未通过' }}</strong></div>
+              </div>
+              <p v-if="geminiCheck?.message" class="runtime-result" role="status">{{ geminiCheck.message }}</p>
+            </article>
             <article class="settings-card runtime-config-card"><div class="settings-card-head"><div><div class="card-kicker">RUNTIME LAUNCH</div><h3>启动配置</h3></div><button class="btn" type="button" :disabled="loadingRuntimeDetails" @click="loadRuntimeDetails">{{ loadingRuntimeDetails ? '刷新中…' : '刷新状态' }}</button></div><p>{{ selectedRuntimeDescriptor?.description ?? '每个会话通过 Demand Worktree policy 隔离。' }}</p><label for="runtime-command">启动命令</label><input id="runtime-command" v-model="runtimeCommand" class="input" :placeholder="runtimeType === 'gemini' ? 'agy acp' : runtimeType === 'trae' ? 'traex acp serve' : 'codex app-server --stdio'" /><p v-if="runtimeMessage" class="runtime-result">{{ runtimeMessage }}</p><div class="runtime-actions"><button class="btn primary" @click="saveRuntime">保存 Runtime 设置</button><button class="btn" type="button" :disabled="reloadingMcp" @click="reloadRuntimeMcp">{{ reloadingMcp ? '刷新中…' : '刷新 MCP Server' }}</button></div></article>
             <article class="settings-card"><div class="card-kicker">RUNTIME</div><h3>{{ selectedRuntimeDescriptor?.label ?? runtimeType }}</h3><p>{{ selectedRuntimeDescriptor?.description ?? '选择新建会话默认使用的 Runtime。' }}</p><label for="runtime-default">默认运行时</label><select id="runtime-default" v-model="runtimeType" class="input"><option v-for="option in runtimeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></article>
             <article class="settings-card"><div class="settings-card-head"><div><div class="card-kicker">HEALTH</div><h3>进程诊断</h3></div><span class="runtime-mini-state">PID {{ runtimeDiagnostics?.pid ?? '—' }}</span></div><div v-if="runtimeDiagnostics" class="runtime-facts"><div><span>生命周期</span><strong>{{ runtimeDiagnostics.lifecycle }}</strong></div><div><span>启动次数</span><strong>{{ runtimeDiagnostics.startCount }}</strong></div><div><span>RPC 成功</span><strong>{{ runtimeDiagnostics.completedClientRequestCount }}</strong></div><div><span>RPC 失败</span><strong>{{ runtimeDiagnostics.failedClientRequestCount }}</strong></div></div><p v-else class="settings-note">Runtime 尚未产生诊断快照。</p><p v-if="runtimeDiagnostics?.unavailableReason" class="runtime-warning">{{ runtimeDiagnostics.unavailableReason }}</p></article>
@@ -157,7 +179,7 @@
             </div>
             <button v-if="conversationScrollState?.isAtBottom === false" class="chat-scroll-bottom" type="button" aria-label="回到最新消息" @click="scrollToBottom(true)">↓</button>
             <div :class="['composer', { 'composer--compact': composerCollapsed, 'composer--without-reasoning': composerReasoningOptions.length === 0, 'composer--settings-open': mobileComposerSettingsOpen }]">
-              <div v-if="!composerCollapsed" class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div></div><CodyComposer variant="embedded" collapsible :compact="composerCollapsed" @update:compact="setComposerCollapsed" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :attachments="composerImages" :file-upload-enabled="true" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerCollapsed ? '输入消息…' : composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = $event" @attach-files="uploadImages" @remove-attachment="removeComposerImage" @send="sendMessage" @stop="interrupt"><template #controls><ConversationFastToggle v-if="selectedConversation && activeRuntimeType === 'codex' && selectedModelSupportsFast" :conversation-id="selectedConversation.id" /><button type="button" class="mobile-composer-settings-toggle" :aria-expanded="mobileComposerSettingsOpen" @click="mobileComposerSettingsOpen = !mobileComposerSettingsOpen">{{ mobileComposerSettingsOpen ? '收起设置' : '设置' }} · {{ composerPermissionOptions.find(option => option.value === permission)?.label || permission }}</button></template></CodyComposer>
+              <div v-if="!composerCollapsed" class="composer-head"><div class="composer-hint">{{ composerRuntimeHint }}</div></div><CodyComposer variant="embedded" collapsible :compact="composerCollapsed" @update:compact="setComposerCollapsed" :draft="draft" :disabled="sending" :is-running="isRunning" :collaboration-modes="composerCollaborationModes" :selected-collaboration-mode="selectedCollaborationMode" :submit-modes="composerSubmitModes" :selected-submit-mode="selectedSubmitMode" :models="composerModels" :selected-model="selectedModel" :reasoning-options="composerReasoningOptions" :selected-reasoning="selectedReasoning" :permission-options="composerPermissionOptions" :selected-permission="permission" :skills="composerSkills" :selected-skills="selectedSkillsForTurn" :attachments="composerImages" :file-upload-enabled="true" :image-upload-enabled="runtimeCapabilities.imageInput" :is-uploading-images="uploadingImages" :image-error="composerImageError" :placeholder="composerCollapsed ? '输入消息…' : composerPlaceholder" @update:draft="updateDraft" @update:collaboration-mode="selectCollaborationMode" @update:submit-mode="selectSubmitMode" @update:model="selectModel" @update:reasoning="selectReasoning" @update:permission="selectPermission" @update:selected-skills="selectedSkillsForTurn = activeRuntimeType === 'gemini' ? $event.slice(-1) : $event" @attach-files="uploadImages" @remove-attachment="removeComposerImage" @send="sendMessage" @stop="interrupt"><template #controls><ConversationFastToggle v-if="selectedConversation && activeRuntimeType === 'codex' && selectedModelSupportsFast" :conversation-id="selectedConversation.id" /><button type="button" class="mobile-composer-settings-toggle" :aria-expanded="mobileComposerSettingsOpen" @click="mobileComposerSettingsOpen = !mobileComposerSettingsOpen">{{ mobileComposerSettingsOpen ? '收起设置' : '设置' }} · {{ composerPermissionOptions.find(option => option.value === permission)?.label || permission }}</button></template></CodyComposer>
               <div v-if="!composerCollapsed && selectedModelDetails" class="composer-model-detail" :title="selectedModelDetails" role="status">当前模型 · {{ selectedModelDetails }}</div>
             </div>
           </section>
@@ -933,6 +955,54 @@ async function requestDashboardRefresh(): Promise<void> {
 }
 async function loadKnowledge(): Promise<void> { if (workspace.value) knowledge.value = await api.listKnowledge(workspace.value.id) }
 async function openKnowledge(document: KnowledgeDocument): Promise<void> { if (workspace.value) selectedKnowledge.value = await api.getKnowledge(workspace.value.id, document.id) }
+const sharingGeminiSkill = ref(false)
+const skillSharingMessage = ref('')
+const geminiCommandInput = ref('')
+const savingGeminiCommand = ref(false)
+const geminiCommandMessage = ref('')
+async function saveGeminiCommand(): Promise<void> {
+  savingGeminiCommand.value = true
+  geminiCommandMessage.value = ''
+  try {
+    runtime.value = await api.updateRuntimeSettings({ commands: { gemini: geminiCommandInput.value.trim() } })
+    geminiCheck.value = null
+    geminiCommandMessage.value = '已保存启动命令。重启 CodyWork 服务后生效。'
+  } catch (cause) {
+    geminiCommandMessage.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    savingGeminiCommand.value = false
+  }
+}
+const checkingGemini = ref(false)
+const geminiCheck = ref<Awaited<ReturnType<typeof api.checkGeminiRuntime>> | null>(null)
+async function checkGeminiConnection(): Promise<void> {
+  checkingGemini.value = true
+  try {
+    geminiCheck.value = await api.checkGeminiRuntime()
+  } catch (cause) {
+    geminiCheck.value = { installed: false, connected: false, modelReady: false, message: cause instanceof Error ? cause.message : String(cause) }
+  } finally {
+    checkingGemini.value = false
+  }
+}
+async function shareSelectedSkillWithGemini(): Promise<void> {
+  const workspaceId = workspace.value?.id
+  const skill = selectedSkill.value
+  if (!workspaceId || !skill || sharingGeminiSkill.value) return
+  sharingGeminiSkill.value = true
+  skillSharingMessage.value = ''
+  try {
+    await api.shareGeminiSkill(workspaceId, skill.id)
+    if (workspace.value?.id === workspaceId) {
+      await loadSkills(true)
+      skillSharingMessage.value = '已共享。新建 Gemini 会话可刷新 Skill 列表。'
+    }
+  } catch (cause) {
+    skillSharingMessage.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sharingGeminiSkill.value = false
+  }
+}
 async function loadSkills(forceReload = false): Promise<void> {
   if (!workspace.value) return
   const nextSkills = await api.listSkills(workspace.value.id, forceReload)
@@ -985,7 +1055,7 @@ async function deleteQuickAction(id: string): Promise<void> {
     savingQuickAction.value = false
   }
 }
-function openSkill(skill: WorkspaceSkill): void { selectedSkill.value = skill }
+function openSkill(skill: WorkspaceSkill): void { skillSharingMessage.value = ''; selectedSkill.value = skill }
 async function installSkill(): Promise<void> {
   const source = skillSource.value.trim()
   if (!source) return
@@ -1036,6 +1106,7 @@ async function loadRuntime(): Promise<void> {
   runtime.value = await api.runtimeSettings()
   runtimeType.value = runtime.value.runtimeType
   runtimeCommand.value = runtime.value.command
+  geminiCommandInput.value = runtime.value.commands.gemini ?? ''
   selectedCreateRuntime.value = runtimeOptions.value.some(option => option.value === runtime.value!.runtimeType)
     ? runtime.value.runtimeType
     : runtimeOptions.value[0]?.value ?? runtime.value.runtimeType
@@ -1896,7 +1967,8 @@ async function submitConversationMessage(
   if (!composerHasContent({ text: optimisticText, skills: turnSkills, images })) return false
   sending.value = true
   try {
-    const submitMode = modeOverride ?? resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value)
+    const requestedMode = modeOverride ?? resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value)
+    const submitMode = activeRuntimeType.value === 'gemini' && turnSkills.length ? 'queue' : requestedMode
     await submitUserMessage(
       { text: materializeAttachmentText(optimisticText, images.filter(file => !isImageAttachment(file))), ...(images.length ? { images: images.filter(isImageAttachment).map(image => image.url) } : {}), ...(skillReferences.length ? { skills: skillReferences } : {}) },
       {
@@ -1986,7 +2058,7 @@ async function retryFailedMessage(message: CodyMessage): Promise<void> {
   sending.value = true
   try {
     await retryFailedUserMessage(message.id, {
-      mode: resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
+      mode: conversation.runtimeType === 'gemini' && turnSkills.length ? 'queue' : resolveComposerSubmitMode(isRunning.value, selectedSubmitMode.value),
       input: {
         content: message.text,
         ...(imageIds.length ? { imageIds } : {}),
@@ -2148,7 +2220,42 @@ async function uploadImages(files: File[]): Promise<void> {
 }
 function removeComposerImage(imageId: string): void { composerImageError.value = ''; persistComposerImages(composerImages.value.filter(image => image.id !== imageId)) }
 async function savePermission(): Promise<void> { if (!workspace.value || !selectedConversation.value) return; try { const updated = await api.setConversationPermission(workspace.value.id, selectedConversation.value.id, permission.value); selectedConversation.value = updated; conversations.value = conversations.value.map((item) => item.id === updated.id ? updated : item); if (updated.scope === 'workspace') workspaceConversations.value = workspaceConversations.value.map(item => item.id === updated.id ? updated : item) } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) } }
-async function loadComposerOptions(conversation?: Conversation, demandId?: string): Promise<void> { if (!workspace.value) return; try { const options = conversation?.scope === 'demand' && conversation.demandId ? await api.composerOptions(workspace.value.id, conversation.demandId, conversation.id) : conversation?.scope === 'workspace' ? await api.workspaceComposerOptions(workspace.value.id, conversation.id) : demandId ? await api.composerOptions(workspace.value.id, demandId) : await api.workspaceComposerOptions(workspace.value.id); runtimeModels.value = options.models; runtimeSkills.value = options.skills; runtimeCollaborationModes.value = options.collaborationModes; runtimeCapabilities.value = options.capabilities; selectedSkillsForTurn.value = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id)); if (!options.models.some(model => model.id === selectedModel.value)) selectedModel.value = initialModelId(options.models); selectedReasoning.value = options.capabilities.reasoning ? reconcileReasoningEffort(options.models, selectedModel.value, selectedReasoning.value) : ''; if (options.capabilities.append && !options.capabilities.steer) selectedSubmitMode.value = 'append'; else if (!options.capabilities.steer) selectedSubmitMode.value = 'queue' } catch { runtimeModels.value = []; runtimeSkills.value = []; runtimeCollaborationModes.value = []; runtimeCapabilities.value = { modelSelection: false, reasoning: false, structuredSkills: false, imageInput: false, nativeSessionList: false, planMode: false, steer: false, append: false, questions: false, aiCodeReports: false }; selectedSkillsForTurn.value = []; selectedReasoning.value = ''; selectedSubmitMode.value = 'queue' } }
+let composerOptionsRequest = 0
+async function loadComposerOptions(conversation?: Conversation, demandId?: string): Promise<void> {
+  const workspaceId = workspace.value?.id
+  if (!workspaceId) return
+  const request = ++composerOptionsRequest
+  const isCurrent = () => request === composerOptionsRequest && workspace.value?.id === workspaceId
+  runtimeSkills.value = []
+  try {
+    const options = conversation?.scope === 'demand' && conversation.demandId
+      ? await api.composerOptions(workspaceId, conversation.demandId, conversation.id)
+      : conversation?.scope === 'workspace'
+        ? await api.workspaceComposerOptions(workspaceId, conversation.id)
+        : demandId ? await api.composerOptions(workspaceId, demandId) : await api.workspaceComposerOptions(workspaceId)
+    if (!isCurrent()) return
+    runtimeModels.value = options.models
+    runtimeSkills.value = options.skills
+    runtimeCollaborationModes.value = options.collaborationModes
+    runtimeCapabilities.value = options.capabilities
+    const selected = selectedSkillsForTurn.value.filter(id => options.skills.some(skill => skill.id === id && skill.enabled))
+    selectedSkillsForTurn.value = options.provider.type === 'gemini' ? selected.slice(-1) : selected
+    if (!options.models.some(model => model.id === selectedModel.value)) selectedModel.value = initialModelId(options.models)
+    selectedReasoning.value = options.capabilities.reasoning ? reconcileReasoningEffort(options.models, selectedModel.value, selectedReasoning.value) : ''
+    if (options.capabilities.append && !options.capabilities.steer) selectedSubmitMode.value = 'append'
+    else if (!options.capabilities.steer) selectedSubmitMode.value = 'queue'
+  } catch {
+    if (!isCurrent()) return
+    runtimeModels.value = []
+    runtimeSkills.value = []
+    runtimeCollaborationModes.value = []
+    runtimeCapabilities.value = { modelSelection: false, reasoning: false, structuredSkills: false, imageInput: false, nativeSessionList: false, planMode: false, steer: false, append: false, questions: false, aiCodeReports: false }
+    selectedSkillsForTurn.value = []
+    selectedReasoning.value = ''
+    selectedSubmitMode.value = 'queue'
+  }
+}
+
 function selectCollaborationMode(name: string): void {
   const next = coreCollaborationModes.value.find(mode => mode.name === name) ?? coreCollaborationModes.value[0]
   if (!next) return

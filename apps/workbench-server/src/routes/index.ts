@@ -17,7 +17,7 @@ import { runtimeSettings, updateRuntimeSettings } from '../runtime/settings.js'
 import type { RuntimeSettingsPatch } from '../runtime/settings.js'
 import { createCodyWorkRuntimeRegistry, type CodyWorkRuntimeRegistry } from '../runtime/registry.js'
 import { ConversationService } from '../services/conversations.js'
-import { getSkill, listSkills } from '../services/skills.js'
+import { getSkill, listManagedSkills, listSkills, shareGeminiSkill } from '../services/skills.js'
 import { getKnowledgeDocument, listKnowledgeDocuments } from '../services/knowledge.js'
 import { getWorkspaceFilePreview } from '../services/workspaceFilePreview.js'
 import { listBrowsableDirectories } from '../services/directories.js'
@@ -231,7 +231,7 @@ function conversationService(ctx: AppContext): ConversationService {
 }
 
 function workspaceSkillCatalog(ctx: AppContext, workspace: WorkspaceRow, forceReload = false) {
-  return listSkills(conversationService(ctx).getRuntime(), workspace, forceReload)
+  return listManagedSkills(conversationService(ctx).getRuntime('codex'), workspace, forceReload)
 }
 
 function imageUploads(ctx: AppContext): ConversationImageUploads {
@@ -427,6 +427,11 @@ function buildRoutes(ctx: AppContext) {
     const runtime = conversationService(ctx).getRuntime()
     return runtime.checkConnection?.() ?? runtime.getInfo()
   })
+  add('POST', '/api/runtime/test/gemini', () => {
+    const runtime = conversationService(ctx).getRuntime('gemini')
+    if (!(runtime instanceof CodyWorkGeminiRuntime)) throw new Error('Gemini Runtime 不可用')
+    return runtime.checkModelAccess()
+  })
 
   add('GET', '/api/settings/runtime', () => ({ ...runtimeSettings(ctx.db), runtimes: conversationService(ctx).runtimeDescriptors() }))
 
@@ -609,7 +614,14 @@ function buildRoutes(ctx: AppContext) {
 
   add('GET', '/api/workspaces/:id/skills/:skillId', async (c) => {
     const row = getWorkspace(ctx, requiredParam(c, 'id'))
-    return getSkill(conversationService(ctx).getRuntime(), row, requiredParam(c, 'skillId'))
+    return getSkill(conversationService(ctx).getRuntime('codex'), row, requiredParam(c, 'skillId'))
+  })
+
+  add('POST', '/api/workspaces/:id/skills/share-gemini', async (c) => {
+    const row = getWorkspace(ctx, requiredParam(c, 'id'))
+    const id = typeof c.body.skillId === 'string' ? c.body.skillId : ''
+    await shareGeminiSkill(conversationService(ctx).getRuntime('codex'), row, id)
+    return { shared: true }
   })
 
   add('POST', '/api/workspaces/:id/skills', (c) => {

@@ -86,6 +86,15 @@ export interface WorkspaceSkill {
   modelInvocable: boolean
   content: string
   updatedAt: string
+  geminiSharing?: 'shared' | 'link' | 'import'
+}
+
+export interface GeminiRuntimeCheck {
+  installed: boolean
+  connected: boolean
+  modelReady: boolean
+  message?: string
+  code?: string
 }
 
 export type QuickActionScene = 'demand-development'
@@ -660,6 +669,7 @@ export const api = {
   listDemandChannelBindings: (workspaceId: string, demandId: string) => request<FeishuChannelBinding[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/demands/${encodeURIComponent(demandId)}/channel-bindings`),
   unbindFeishuConversation: (accountId: string, bindingId: string) => request<{ unbound: boolean }>('DELETE', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/bindings/${encodeURIComponent(bindingId)}`),
   retryFeishuOutbox: (accountId: string, outboxId: string) => request<{ retried: true }>('POST', `/api/channels/feishu/accounts/${encodeURIComponent(accountId)}/outbox/${encodeURIComponent(outboxId)}/retry`),
+  checkGeminiRuntime: () => request<GeminiRuntimeCheck>('POST', '/api/runtime/test/gemini'),
   testRuntime: () => request<{ runtimeVersion: string; protocolVersion: string }>('POST', '/api/runtime/test'),
   runtimeDiagnostics: () => request<RuntimeDiagnostics | null>('GET', '/api/runtime/diagnostics'),
   runtimeFailureReport: () => request<RuntimeFailureReport | null>('GET', '/api/runtime/failure-report'),
@@ -680,6 +690,7 @@ export const api = {
   deleteWorkspace: (id: string) => request<{ deleted: true }>('DELETE', `/api/workspaces/${id}`),
   dashboard: (id: string) => request<DashboardSnapshot>('GET', `/api/workspaces/${id}/dashboard`),
   refreshDashboard: (id: string) => request<DashboardSnapshot>('POST', `/api/workspaces/${id}/dashboard/refresh`),
+  shareGeminiSkill: (id: string, skillId: string) => request<{ shared: boolean }>('POST', `/api/workspaces/${id}/skills/share-gemini`, { skillId }),
   listSkills: (id: string, forceReload = false) => request<WorkspaceSkill[]>('GET', `/api/workspaces/${id}/skills${forceReload ? '?force=1' : ''}`),
   getSkill: (id: string, skillId: string) => request<WorkspaceSkill>('GET', `/api/workspaces/${id}/skills/${encodeURIComponent(skillId)}`),
   installSkill: (id: string, source: string) => request<SkillInstallStatus>('POST', `/api/workspaces/${id}/skills`, { source }),
