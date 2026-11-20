@@ -156,6 +156,16 @@ export class WorkbenchDb {
         revision INTEGER NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS workspace_skill_syncs (
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        skill_id TEXT NOT NULL,
+        runtime_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        installed_path TEXT NOT NULL,
+        installed_real_path TEXT NOT NULL,
+        discovered INTEGER NOT NULL,
+        PRIMARY KEY(workspace_id, skill_id, runtime_id)
+      );
       CREATE TABLE IF NOT EXISTS repositories (
         id TEXT PRIMARY KEY,
         workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
