@@ -1,0 +1,13 @@
+{
+  "identifier": "settings",
+  "description": "Server preferences are available only to the bundled settings WebView.",
+  "webviews": ["settings"],
+  "permissions": [
+    "allow-desktop-settings",
+    "allow-check-server",
+    "allow-save-server",
+    "allow-connect-server",
+    "allow-remove-server",
+    "allow-set-default-server"
+  ]
+}

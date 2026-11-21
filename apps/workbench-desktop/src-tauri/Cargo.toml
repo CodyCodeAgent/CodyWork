@@ -1,0 +1,18 @@
+[package]
+name = "codywork-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "CodyWork macOS client"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tauri = { version = "2.11.1", features = [] }
+tempfile = "3"
+url = "2"
