@@ -24,3 +24,9 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 应用输出为 `src-tauri/target/release/bundle/macos/CodyWork.app`。默认构建当前 Mac 的架构，并使用临时签名供本机试用。对外分发时通过 Tauri 的 macOS 签名、公证流程构建。
 
 桌面端嵌入的 HTML 只负责本机服务器设置。远程工作台窗口使用配置的服务地址加载现有 Vue 页面。原生设置命令仅对本机设置窗口可用。
+
+## GitHub Actions 试用包
+
+每次 `main` 收到代码，`Package CodyWork for macOS` 都会构建兼容 Apple Silicon 和 Intel 的通用版。打开 [Actions](https://github.com/CodyCodeAgent/CodyWork/actions/workflows/desktop-macos.yml)，选择成功的运行，在 `Artifacts` 下载 `CodyWork-macos-universal-*.zip`。产物保留 30 天，也可以在 Actions 里用 `Run workflow` 重新打包。
+
+ZIP 内是使用临时签名的 `CodyWork.app`。需要向其他 Mac 正式分发时，使用 Apple Developer ID 签名并提交公证。
