@@ -72,6 +72,8 @@ export interface TraeCacheView extends Omit<TraeConversationCacheInfo, 'nativeEv
 
 type Listener = (event: ConversationEvent) => void
 
+const DEMAND_ONBOARDING_PROMPT = '了解需求背景（CodyWork 自动发起）\n\n只读查看 Worktree 顶层结构、`docs/context.md` 和适用的 `AGENTS.md`。仅执行必要的读取和目录查看，不修改文件、不调用外部服务、不执行需求本身。用两三句话概括需求目标、已知进展和缺失信息。只报告实际读到的内容。'
+
 type ConversationSendSettings = ConversationCommandSettings
 
 type RuntimeTurnSettings = {
@@ -117,6 +119,7 @@ export class ConversationService implements ConversationCommandGateway {
   private readonly followupBridges = new Set<() => void>()
   private readonly handles = new Map<string, ConversationHandle>()
   private readonly runtimeSubscriptions = new Map<string, () => void>()
+  private readonly onboardingConversations = new Set<string>()
   private readonly repository: ConversationRepository
   /** Product storage port used by Core's provider-neutral replay semantics. */
   private readonly traeJournal: ConversationEventJournalCoordinator<RuntimeEvent>
@@ -334,7 +337,7 @@ export class ConversationService implements ConversationCommandGateway {
     return this.events.subscribe({ conversationId }, event => listener(this.withPublicImageUrls(event)))
   }
 
-  async create(workspaceId: string, demandId: string, title?: string, createdVia: ConversationCreatedVia = 'browser', requestedRuntimeType?: ConversationRuntimeType): Promise<ConversationView> {
+  async create(workspaceId: string, demandId: string, title?: string, createdVia: ConversationCreatedVia = 'browser', requestedRuntimeType?: ConversationRuntimeType, options?: { learnContext?: boolean }): Promise<ConversationView> {
     const demand = this.requireDemand(workspaceId, demandId)
     const context = this.contexts.demandContext(demand, 'workspace-write')
     const id = makeId('conversation')
@@ -360,7 +363,30 @@ export class ConversationService implements ConversationCommandGateway {
     this.repository.insert(row)
     this.handles.set(id, handle)
     this.attachRuntimeStream(handle)
+    if (createdVia === 'browser' && options?.learnContext) await this.startDemandOnboarding(row)
     return this.get(workspaceId, id)
+  }
+
+  private async startDemandOnboarding(row: ConversationRow): Promise<void> {
+    const conversationId = row.id
+    this.onboardingConversations.add(conversationId)
+    const finish = () => { this.onboardingConversations.delete(conversationId) }
+    try {
+      const submission = await this.admitCommand({
+        workspaceId: row.workspace_id,
+        conversationId,
+        origin: { kind: 'demand-onboarding' },
+        prompt: DEMAND_ONBOARDING_PROMPT,
+        submitMode: 'queue',
+        executionProfile: { permissionMode: 'read-only', approvalPolicy: 'never' },
+      })
+      void submission.completed.then(finish, finish)
+    } catch (error) {
+      finish()
+      const message = error instanceof Error ? error.message : String(error)
+      this.repository.updateStatus(conversationId, 'failed')
+      this.audit(conversationId, 'conversation.onboarding_failed', { error: message })
+    }
   }
 
   async createWorkspace(workspaceId: string, title?: string, createdVia: ConversationCreatedVia = 'browser', requestedRuntimeType?: ConversationRuntimeType): Promise<ConversationView> {
@@ -604,6 +630,7 @@ export class ConversationService implements ConversationCommandGateway {
     if (!composerHasContent({ text, skills: requestedSkills, images: localImages })) throw new Error('消息不能为空')
     const commandId = command.id?.trim().slice(0, 200) || makeId('command')
     const permissionMode = command.executionProfile?.permissionMode ?? row.permission_mode
+    const approvalPolicy = command.executionProfile?.approvalPolicy
     const context = this.contexts.forRow(row)
     const runtime = this.runtimeFor(row)
     const useFollowupSkill = row.runtime_type === 'codex' && (requestedSkills.includes(FOLLOWUP_SKILL_PATH) || /\$codywork-followup(?![a-zA-Z0-9_-])/u.test(text))
@@ -635,9 +662,9 @@ export class ConversationService implements ConversationCommandGateway {
       conversation: this.handleFor(row),
       prompt: text,
       ...(localImages.length ? { localImages } : {}),
-      mode: command.submitMode ?? 'queue',
+      mode: this.onboardingConversations.has(conversationId) ? 'queue' : command.submitMode ?? 'queue',
       clientCommandId: commandId,
-      executionProfile: { permissionMode },
+      executionProfile: { permissionMode, ...(approvalPolicy ? { approvalPolicy } : {}) },
       ...(Object.keys(runtimeSettings).length ? { settings: runtimeSettings } : {}),
       ...(!this.runtimeSubscriptions.has(conversationId) ? { onEvent: (event: RuntimeEvent) => this.appendRuntimeEvent(event) } : {}),
     }) } catch (error) { closeBridge(); throw error }

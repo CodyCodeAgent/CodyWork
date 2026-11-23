@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CodyWorkGeminiRuntime, DEFAULT_ANTIGRAVITY_CLI_COMMAND, presentGeminiFailure } from '../src/runtime/gemini.js'
+import { CodyWorkTraeRuntime } from '../src/runtime/trae.js'
 import { createCodyWorkRuntimeRegistry, runtimeDescriptorViews } from '../src/runtime/registry.js'
 import { resolveEffectivePolicy, resolveInstructionBundle } from '../src/runtime/policy.js'
 import type { RuntimeContext } from '../src/runtime/protocol.js'
@@ -136,5 +137,22 @@ describe('CodyWorkGeminiRuntime (Antigravity CLI ACP)', () => {
     expect(await runtime.checkModelAccess()).toMatchObject({
       installed: true, connected: true, modelReady: false, code: 'gemini_location_ineligible',
     })
+  })
+
+  it.each([
+    ['Gemini', CodyWorkGeminiRuntime],
+    ['Trae', CodyWorkTraeRuntime],
+  ] as const)('rejects %s approvals for a read-only onboarding turn without changing the session default', async (_name, Runtime) => {
+    const fixture = fileURLToPath(new URL('./fixtures/trae-acp-runtime.mjs', import.meta.url))
+    const runtime = new Runtime({ command: `${process.execPath} ${fixture}` })
+    try {
+      const conversation = await runtime.createConversation({ context: makeWorkspace() })
+      const onboarding = await runtime.sendTurn({ conversation, prompt: 'APPROVAL', executionProfile: { permissionMode: 'read-only', approvalPolicy: 'never' } })
+      expect(onboarding.finalText).toBe('TRAE_REJECTED')
+      expect(onboarding.events.some(event => event.type === 'approval.requested')).toBe(false)
+      expect((await runtime.sendTurn({ conversation, prompt: 'APPROVAL' })).finalText).toBe('TRAE_APPROVED')
+    } finally {
+      await runtime.close()
+    }
   })
 })

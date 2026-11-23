@@ -12,7 +12,7 @@
     <div v-if="!selected && !refreshing" class="parallel-panel-empty"><p>这个需求还没有可用会话。</p><button class="btn" @click="openCreate">新建会话</button></div>
     <DemandConversationSession v-for="item in visitedConversations" v-show="selected?.id === item.id" :key="item.id" :workspace-id="workspaceId" :demand-id="demand.id" :conversation="item" :active="active && selected?.id === item.id" @status="statuses[item.id] = $event" @open-file="emit('open-file', item.id, $event)" />
     <dialog ref="createDialog" class="parallel-dialog" :aria-labelledby="createTitleId" @close="createError = ''" @cancel="creating && $event.preventDefault()">
-      <form @submit.prevent="createConversation"><div class="parallel-dialog-head"><h2 :id="createTitleId">新建需求会话</h2><button class="icon-button" type="button" aria-label="关闭新建会话" :disabled="creating" @click="createDialog?.close()">×</button></div><p>{{ demand.name }} · 新会话仍属于这个需求。</p><label>会话名称<input v-model="createTitle" maxlength="120" placeholder="例如：接口联调" :disabled="creating" autofocus /></label><label>Runtime<select v-model="createRuntime" :disabled="creating"><option v-for="runtime in availableRuntimes" :key="runtime.id" :value="runtime.id">{{ runtime.label }}</option></select></label><p v-if="createError" class="form-error" role="alert">{{ createError }}</p><div class="parallel-dialog-actions"><button class="btn" type="button" :disabled="creating" @click="createDialog?.close()">取消</button><button class="btn primary" :disabled="creating || !createRuntime">{{ creating ? '创建中…' : '创建会话' }}</button></div></form>
+      <form @submit.prevent="createConversation"><div class="parallel-dialog-head"><h2 :id="createTitleId">新建需求会话</h2><button class="icon-button" type="button" aria-label="关闭新建会话" :disabled="creating" @click="createDialog?.close()">×</button></div><p>{{ demand.name }} · 新会话会先了解需求背景，期间可以继续发消息。</p><label>会话名称<input v-model="createTitle" maxlength="120" placeholder="例如：接口联调" :disabled="creating" autofocus /></label><label>Runtime<select v-model="createRuntime" :disabled="creating"><option v-for="runtime in availableRuntimes" :key="runtime.id" :value="runtime.id">{{ runtime.label }}</option></select></label><p v-if="createError" class="form-error" role="alert">{{ createError }}</p><div class="parallel-dialog-actions"><button class="btn" type="button" :disabled="creating" @click="createDialog?.close()">取消</button><button class="btn primary" :disabled="creating || !createRuntime">{{ creating ? '创建中…' : '创建会话' }}</button></div></form>
     </dialog>
   </article>
 </template>
@@ -66,7 +66,7 @@ async function createConversation() {
   if (creating.value || !createRuntime.value) return
   creating.value = true; createError.value = ''
   try {
-    const created = await api.createConversation(props.workspaceId, props.demand.id, createTitle.value.trim() || undefined, createRuntime.value)
+    const created = await api.createConversation(props.workspaceId, props.demand.id, createTitle.value.trim() || undefined, createRuntime.value, { learnContext: true })
     if (!alive) return
     listGeneration += 1
     conversations.value = [created, ...conversations.value.filter(item => item.id !== created.id)]

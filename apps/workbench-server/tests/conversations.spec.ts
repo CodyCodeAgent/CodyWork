@@ -449,6 +449,48 @@ describe('conversation websocket control plane', () => {
     rmSync(test.root, { recursive: true, force: true })
   })
 
+  it('starts learning once for an explicitly created Demand session and queues user commands behind it', async () => {
+    const test = await fixture()
+    let finishOnboarding!: () => void
+    const onboardingPending = new Promise<void>(resolve => { finishOnboarding = resolve })
+    class OnboardingRuntime extends TestRuntimeAdapter {
+      readonly requests: Array<Parameters<TestRuntimeAdapter['submitTurn']>[0]> = []
+      override submitTurn(request: Parameters<TestRuntimeAdapter['submitTurn']>[0]) {
+        this.requests.push(request)
+        const result = super.submitTurn(request)
+        return request.prompt.startsWith('了解需求背景')
+          ? { ...result, completed: onboardingPending.then(() => result.completed) }
+          : result
+      }
+    }
+    const runtime = new OnboardingRuntime()
+    const conversations = new ConversationService(test.db, runtime)
+    try {
+      const learned = await conversations.create(test.workspaceId, test.demandId, 'Review', 'browser', 'codex', { learnContext: true })
+      expect(runtime.requests.map(request => request.prompt)).toEqual([expect.stringContaining('docs/context.md')])
+      expect(runtime.requests[0]).toMatchObject({ mode: 'queue', executionProfile: { permissionMode: 'read-only', approvalPolicy: 'never' } })
+      await conversations.history(test.workspaceId, learned.id)
+      await conversations.history(test.workspaceId, learned.id)
+      await conversations.create(test.workspaceId, test.demandId, 'Default session')
+      await conversations.create(test.workspaceId, test.demandId, 'Channel session', 'feishu', 'codex', { learnContext: true })
+      await conversations.createWorkspace(test.workspaceId)
+      expect(runtime.requests).toHaveLength(1)
+
+      await conversations.send(test.workspaceId, learned.id, 'during onboarding', 'steer')
+      expect(runtime.requests[1]).toMatchObject({ mode: 'queue', executionProfile: { permissionMode: 'workspace-write' } })
+      finishOnboarding()
+      await new Promise(resolve => setImmediate(resolve))
+      await conversations.send(test.workspaceId, learned.id, 'after onboarding', 'steer')
+      expect(runtime.requests[2]?.mode).toBe('steer')
+      expect(conversations.get(test.workspaceId, learned.id).permissionMode).toBe('workspace-write')
+    } finally {
+      finishOnboarding()
+      await conversations.closeRuntimes()
+      test.db.close()
+      rmSync(test.root, { recursive: true, force: true })
+    }
+  })
+
   it('routes channel stop, approval and question actions through one origin-aware gateway', async () => {
     class ActionRuntime extends TestRuntimeAdapter {
       readonly actions: Array<{ kind: string; requestId?: string; value?: unknown }> = []

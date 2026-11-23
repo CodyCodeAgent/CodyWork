@@ -53,6 +53,7 @@ type ProductSession = {
   appendRuns: Set<Promise<unknown>>
   /** The CodyWork command id currently owned by this single-session ACP process. */
   activeTurnId?: string
+  suppressTurnApprovals?: boolean
   /** Turns terminally interrupted after ACP failed to settle cancellation. */
   forcedInterruptedTurns: Set<string>
   /** Wakes an in-flight adapter turn when its ACP transport is force-closed. */
@@ -425,6 +426,7 @@ export class CodyWorkTraeRuntime implements CodyWorkRuntime {
     const turnId = request.clientCommandId ?? randomUUID()
     let started = false
     session.activeTurnId = turnId
+    session.suppressTurnApprovals = request.executionProfile?.approvalPolicy === 'never' && request.executionProfile.permissionMode === 'read-only'
     try {
       if (request.localImages?.length && !supportsImage(session)) throw new Error('当前 Trae ACP 未声明图片 Prompt 能力')
       if (request.settings?.skills?.length) throw new Error('当前 Trae ACP 未提供结构化 Skill 输入能力')
@@ -472,12 +474,16 @@ export class CodyWorkTraeRuntime implements CodyWorkRuntime {
       throw new Error(failure.message)
     } finally {
       session.forcedInterruptionResolvers.delete(turnId)
-      if (session.activeTurnId === turnId) session.activeTurnId = undefined
+      if (session.activeTurnId === turnId) {
+        session.activeTurnId = undefined
+        session.suppressTurnApprovals = undefined
+      }
     }
   }
   /** Product policy over Core's ACP permission transport. Core routes the
    * native request exactly once; CodyWork decides its approval experience. */
   private async requestPermission(session: ProductSession, options: AcpPermissionOption[], toolCall: unknown): Promise<string | null> {
+    if (session.suppressTurnApprovals) return options.find(option => option.kind === 'reject_once')?.optionId ?? null
     if (session.mode === 'yolo') return options.find(option => option.kind === 'allow_once' || option.kind === 'allow_always')?.optionId ?? null
     if (session.mode === 'read-only') return options.find(option => option.kind === 'reject_once' || option.kind === 'reject_always')?.optionId ?? null
     const approvalId = randomUUID()

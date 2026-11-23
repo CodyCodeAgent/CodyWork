@@ -765,8 +765,8 @@ export const api = {
   },
   workspaceComposerOptions: (workspaceId: string, conversationId?: string) =>
     request<ComposerOptions>('GET', `/api/workspaces/${workspaceId}/composer-options${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ''}`),
-  createConversation: (workspaceId: string, demandId: string, title?: string, runtimeType?: string) =>
-    request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, { ...(title ? { title } : {}), ...(runtimeType ? { runtimeType } : {}) }),
+  createConversation: (workspaceId: string, demandId: string, title?: string, runtimeType?: string, options?: { learnContext?: boolean }) =>
+    request<Conversation>('POST', `/api/workspaces/${workspaceId}/demands/${demandId}/conversations`, { ...(title ? { title } : {}), ...(runtimeType ? { runtimeType } : {}), ...options }),
   createWorkspaceConversation: (workspaceId: string, title?: string, runtimeType?: string) =>
     request<Conversation>('POST', `/api/workspaces/${workspaceId}/conversations`, { ...(title ? { title } : {}), ...(runtimeType ? { runtimeType } : {}) }),
   bindConversation: (workspaceId: string, demandId: string, input: { nativeId: string; title?: string; runtimeType?: string }) =>
