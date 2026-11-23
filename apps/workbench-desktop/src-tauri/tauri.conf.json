@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CodyWork",
+  "version": "0.2.0",
+  "identifier": "com.codycodeagent.codywork",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "settings",
+        "updates"
+      ],
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ipc: http://ipc.localhost; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/CodyCodeAgent/CodyWork/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

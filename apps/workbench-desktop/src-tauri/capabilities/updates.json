@@ -1,0 +1,12 @@
+{
+  "identifier": "updates",
+  "description": "Signed desktop updates can only be installed from the bundled update window.",
+  "webviews": ["updates"],
+  "permissions": [
+    "allow-desktop-update-status",
+    "allow-desktop-check-updates",
+    "allow-desktop-install-update",
+    "core:event:allow-listen",
+    "core:window:allow-close"
+  ]
+}

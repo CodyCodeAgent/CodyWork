@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CodyWork · 关于与更新</title>
+  <link rel="stylesheet" href="settings.css">
+  <script type="module" src="updates.js"></script>
+</head>
+<body>
+  <main>
+    <header class="intro">
+      <img src="codywork.svg" width="44" height="44" alt="">
+      <div>
+        <h1>关于与更新</h1>
+        <p id="current-version">CodyWork</p>
+      </div>
+    </header>
+    <section class="panel" aria-label="软件更新">
+      <h2 id="update-heading">软件更新</h2>
+      <p id="update-status" class="feedback" role="status" aria-live="polite">正在读取版本…</p>
+      <progress id="update-progress" class="update-progress" aria-label="更新下载进度" hidden></progress>
+      <p id="update-notes" class="update-notes" hidden></p>
+      <div class="actions update-actions">
+        <button id="check-updates" type="button" disabled>检查更新</button>
+        <button id="dismiss-update" type="button" hidden>稍后</button>
+        <button id="install-update" class="primary" type="button" hidden>下载并更新</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

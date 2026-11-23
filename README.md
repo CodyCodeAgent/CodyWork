@@ -23,6 +23,10 @@ Every functional iteration must also complete the natural-language browser
 regression flow in [`docs/e2e/README.md`](docs/e2e/README.md). The cases are
 written so an AI test executor can run and report them end to end.
 
+## macOS Desktop
+
+The desktop client connects to an existing CodyWork server. See the [macOS setup and build instructions](apps/workbench-desktop/README.md).
+
 ## Production
 
 ```bash
