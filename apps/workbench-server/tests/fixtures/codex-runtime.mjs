@@ -316,7 +316,8 @@ rl.on('line', line => {
       }
     }
     const policy = message.params?.sandboxPolicy
-    const expectedPolicy = prompt.includes('EXPECT_READ_ONLY') || prompt.includes('CODYWORK_FOLLOWUP_CHECK')
+    const onboarding = prompt.startsWith('了解需求背景（CodyWork 自动发起）')
+    const expectedPolicy = onboarding || prompt.includes('EXPECT_READ_ONLY') || prompt.includes('CODYWORK_FOLLOWUP_CHECK')
       ? 'readOnly'
       : prompt.includes('EXPECT_YOLO') || prompt.includes('SOURCE_SCOPED_DEFAULT_REMAINS_WRITE')
         ? 'dangerFullAccess'
@@ -329,7 +330,7 @@ rl.on('line', line => {
       || message.params.runtimeWorkspaceRoots.length !== 1
       || invalidSkillInstallApproval
     )
-    const invalidReadPolicy = expectedPolicy === 'readOnly' && (policy?.type !== 'readOnly' || policy?.networkAccess !== true)
+    const invalidReadPolicy = expectedPolicy === 'readOnly' && (policy?.type !== 'readOnly' || policy?.networkAccess !== true || (onboarding && message.params?.approvalPolicy !== 'never'))
     const invalidCollaborationMode = prompt.includes('REAL') && message.params?.collaborationMode?.mode !== 'plan'
     if (invalidWritePolicy || invalidReadPolicy || invalidCollaborationMode) {
       write({ id: message.id, error: { code: -32602, message: 'invalid current Codex sandbox policy' } })
@@ -344,7 +345,7 @@ rl.on('line', line => {
     else if (prompt.includes('APPROVAL')) setTimeout(() => emitTurn(threadId, prompt, turnCwd, [], sequence), 5)
     else setTimeout(
       () => emitTurn(threadId, prompt, turnCwd, input.filter(item => item?.type === 'skill'), sequence),
-      prompt.includes('LONG_INSTALL_E2E') ? 121_000 : prompt.includes('QUEUE_E2E') ? 10_000 : prompt.includes('SLOW_E2E') ? 4_000 : 5,
+      prompt.includes('LONG_INSTALL_E2E') ? 121_000 : prompt.includes('QUEUE_E2E') ? 10_000 : onboarding || prompt.includes('SLOW_E2E') ? 4_000 : 5,
     )
   } else if (message.method === 'turn/interrupt') {
     write({ id: message.id, result: {} })

@@ -65,6 +65,7 @@ type ProductSession = {
   running: Promise<unknown> | null
   appendRuns: Set<Promise<unknown>>
   activeTurnId?: string
+  suppressTurnApprovals?: boolean
   forcedInterruptedTurns: Set<string>
   forcedInterruptionResolvers: Map<string, () => void>
   closed: boolean
@@ -595,6 +596,7 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
     const turnId = request.clientCommandId ?? randomUUID()
     let started = false
     session.activeTurnId = turnId
+    session.suppressTurnApprovals = request.executionProfile?.approvalPolicy === 'never' && request.executionProfile.permissionMode === 'read-only'
     try {
       if (request.localImages?.length && !supportsImage(session)) throw new Error('当前 Gemini CLI ACP 未声明图片 Prompt 能力')
       const selected = request.settings?.skills ?? []
@@ -660,11 +662,15 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
       throw new Error(failure.message)
     } finally {
       session.forcedInterruptionResolvers.delete(turnId)
-      if (session.activeTurnId === turnId) session.activeTurnId = undefined
+      if (session.activeTurnId === turnId) {
+        session.activeTurnId = undefined
+        session.suppressTurnApprovals = undefined
+      }
     }
   }
 
   private async requestPermission(session: ProductSession, options: AcpPermissionOption[], toolCall: unknown): Promise<string | null> {
+    if (session.suppressTurnApprovals) return options.find(option => option.kind === 'reject_once')?.optionId ?? null
     if (session.mode === 'yolo') return options.find(option => option.kind === 'allow_once' || option.kind === 'allow_always')?.optionId ?? null
     if (session.mode === 'read-only') return options.find(option => option.kind === 'reject_once' || option.kind === 'reject_always')?.optionId ?? null
     const approvalId = randomUUID()

@@ -850,7 +850,7 @@ function buildRoutes(ctx: AppContext) {
   add('POST', '/api/workspaces/:id/demands/:demandId/conversations', async (c) => {
     const workspace = getWorkspace(ctx, requiredParam(c, 'id'))
     const title = typeof c.body.title === 'string' ? c.body.title : undefined
-    return conversationService(ctx).create(workspace.id, requiredParam(c, 'demandId'), title, 'browser', optionalRuntimeType(c.body.runtimeType))
+    return conversationService(ctx).create(workspace.id, requiredParam(c, 'demandId'), title, 'browser', optionalRuntimeType(c.body.runtimeType), { learnContext: c.body.learnContext === true })
   })
 
   add('POST', '/api/workspaces/:id/demands/:demandId/conversations/bind', async (c) => {

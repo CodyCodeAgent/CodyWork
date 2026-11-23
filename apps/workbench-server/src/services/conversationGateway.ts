@@ -4,6 +4,7 @@ import type { RuntimeSubmitMode } from '../runtime/protocol.js'
 /** The source that admitted a command into the shared native Codex Thread. */
 export type ConversationCommandOrigin =
   | { kind: 'browser' }
+  | { kind: 'demand-onboarding' }
   | { kind: 'schedule'; taskId: string; runId: string }
   | {
       kind: 'channel'
@@ -20,6 +21,7 @@ export type ConversationCommandOrigin =
  */
 export type ConversationExecutionProfile = {
   permissionMode: ConversationPermissionMode
+  approvalPolicy?: 'never' | 'untrusted'
 }
 
 export type ConversationCommandSettings = {
