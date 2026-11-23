@@ -1,6 +1,6 @@
 import type { ConversationRow, ConversationRuntimeType } from '../db/index.js'
 import { nowIso, type WorkbenchDb } from '../db/index.js'
-import type { RuntimeEvent } from '../runtime/protocol.js'
+import type { ConversationHandle, RuntimeEvent } from '../runtime/protocol.js'
 
 export interface TraeConversationCacheInfo {
   eventCount: number
@@ -70,6 +70,20 @@ export class ConversationRepository {
   updateContext(conversationId: string, policyHash: string, instructionHash: string, updatedAt = nowIso()): void {
     this.database.db.prepare('UPDATE conversations SET policy_hash = ?, instruction_hash = ?, updated_at = ? WHERE id = ?')
       .run(policyHash, instructionHash, updatedAt, conversationId)
+  }
+
+  hasGeminiInitialContext({ id, nativeId }: ConversationHandle): boolean {
+    return Boolean(this.database.db.prepare(`
+      SELECT 1 FROM conversations WHERE id = ? AND runtime_type = 'gemini'
+        AND native_id = ? AND gemini_initial_context_native_id = native_id
+    `).get(id, nativeId))
+  }
+
+  markGeminiInitialContext({ id, nativeId }: ConversationHandle): void {
+    this.database.db.prepare(`
+      UPDATE conversations SET gemini_initial_context_native_id = native_id
+      WHERE id = ? AND runtime_type = 'gemini' AND native_id = ?
+    `).run(id, nativeId)
   }
 
   touch(conversationId: string, updatedAt = nowIso()): void {
