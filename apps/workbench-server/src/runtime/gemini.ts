@@ -45,6 +45,10 @@ export const DEFAULT_GEMINI_CLI_COMMAND = DEFAULT_ANTIGRAVITY_CLI_COMMAND
 export type GeminiOptions = {
   command?: string
   env?: NodeJS.ProcessEnv
+  initialContext?: {
+    isSent(conversation: ConversationHandle): boolean
+    markSent(conversation: ConversationHandle): void
+  }
 }
 
 type PendingApproval = { options: AcpPermissionOption[]; resolve: (optionId: string | null) => void }
@@ -53,6 +57,7 @@ type ProductSession = {
   context: RuntimeContext
   mode: RuntimePermissionMode
   acp: AcpSession
+  initialContextSent: boolean
   listeners: Set<(event: RuntimeEvent) => void>
   events: RuntimeEvent[]
   watermark: number
@@ -518,6 +523,7 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
       context,
       mode: this.modeFromContext(context),
       acp,
+      initialContextSent: Boolean(nativeId && this.options.initialContext?.isSent(handle)),
       listeners: new Set(),
       events: [],
       watermark: 0,
@@ -601,7 +607,10 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
       if (request.settings?.collaborationMode === 'plan') throw new Error('当前 Gemini CLI ACP 未提供 Plan 模式配置')
       if (request.mode === 'steer') throw new Error('当前 Gemini CLI ACP 未提供引导当前 Turn 的能力；请使用“追加到当前任务”')
       if (request.settings?.model?.trim()) await this.setModel(session, request.settings.model.trim())
-      const promptText = this.promptWithInstructions(session.context, request.prompt)
+      const instructions = session.initialContextSent ? '' : session.context.instructionBundle.systemInstructions
+      const promptText = instructions
+        ? `${request.prompt}\n\n---\n\n首次会话背景与阅读指引（请先了解必要背景，再处理上面的用户消息）\n\n${instructions}`
+        : request.prompt
       const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
         { type: 'text', text: skill ? `/${skill.name} ${promptText}` : promptText },
       ]
@@ -628,6 +637,14 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
       const finalText = this.finalText(events)
       if (outcome.kind === 'interrupted') return { conversation: session.handle, finalText, events: [...events] }
       if (!session.forcedInterruptedTurns.has(turnId)) {
+        if (instructions && outcome.response.stopReason === 'end_turn' && !session.closed) {
+          session.initialContextSent = true
+          try {
+            this.options.initialContext?.markSent(session.handle)
+          } catch (error) {
+            console.error('[codywork] failed to persist Gemini session initialization:', error)
+          }
+        }
         if (finalText) this.emit(session, runtimeEvent(session, 'assistant.completed', { text: finalText }, turnId, `assistant:${turnId}`))
         this.emit(session, runtimeEvent(session, outcome.response.stopReason === 'cancelled' ? 'turn.interrupted' : 'turn.completed', { stopReason: outcome.response.stopReason }, turnId))
       }
@@ -674,7 +691,7 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
       this.emit(session, runtimeEvent(session, 'turn.activity', { label: 'Gemini CLI 正在生成回复…', details: ['正在接收模型输出'] }, turnId))
       this.emit(session, runtimeEvent(session, 'assistant.delta', { text }, turnId, turnId ? `assistant:${turnId}` : undefined))
     } else if (update.sessionUpdate === 'user_message_chunk' && !turnId) {
-      // Live prompt echoes include provider instructions and the native slash
+      // The first live prompt echo can include onboarding and the native slash
       // command. The Work event already records the original user message.
       this.emit(session, runtimeEvent(session, 'user.completed', { text }, turnId, turnId))
     } else if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -711,10 +728,6 @@ export class CodyWorkGeminiRuntime implements CodyWorkRuntime {
 
   private finalText(events: RuntimeEvent[]): string {
     return events.filter(event => event.type === 'assistant.delta').map(event => String(event.data.text ?? '')).join('')
-  }
-
-  private promptWithInstructions(context: RuntimeContext, prompt: string): string {
-    return context.instructionBundle.systemInstructions ? `${context.instructionBundle.systemInstructions}\n\n---\n\n${prompt}` : prompt
   }
 
   private require(conversation: ConversationHandle): ProductSession {

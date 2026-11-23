@@ -61,26 +61,25 @@ describe('generic runtime protocol', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('loads current Demand docs for a new conversation and excludes archived documents', () => {
+  it('guides a new Demand conversation to read current docs without inlining them', () => {
     const root = mkdtempSync(join(tmpdir(), 'cody-demand-docs-'))
     const demand = join(root, 'worktrees', 'checkout')
     mkdirSync(join(demand, 'docs', 'history'), { recursive: true })
+    mkdirSync(join(demand, 'docs', 'evidence'), { recursive: true })
     mkdirSync(join(root, 'docs', 'guides'), { recursive: true })
     writeFileSync(join(demand, 'docs', 'context.md'), '# Current demand context')
     writeFileSync(join(demand, 'docs', 'progress.md'), '# Current progress')
     writeFileSync(join(demand, 'docs', 'decisions.yaml'), 'decision: keep-current-contract')
+    writeFileSync(join(demand, 'docs', 'evidence', 'project-target-samples.json'), JSON.stringify({ samples: 'private-sample'.repeat(18_000) }))
     writeFileSync(join(demand, 'docs', 'history', 'previous.md'), '# Stale archived progress')
     writeFileSync(join(root, 'docs', 'guides', 'evaluation.md'), '# 评估单排查\n\n只在需要排查评估单时读取完整文档。')
     const bundle = resolveInstructionBundle({ workspacePath: root, demandPath: demand })
-    expect(bundle.sources.filter(source => source.kind === 'demand').map(source => source.label)).toEqual([
-      'demand document: context.md',
-      'demand document: decisions.yaml',
-      'demand document: progress.md',
-    ])
-    expect(bundle.systemInstructions).toContain('# Current demand context')
-    expect(bundle.systemInstructions).toContain('# Current progress')
-    expect(bundle.systemInstructions).toContain('keep-current-contract')
-    expect(bundle.systemInstructions).not.toContain('Stale archived progress')
+    expect(bundle.sources.filter(source => source.kind === 'demand').map(source => source.label)).toEqual(['demand document catalog'])
+    expect(bundle.systemInstructions).toContain('docs/context.md')
+    expect(bundle.systemInstructions).toContain('docs/progress.md')
+    expect(bundle.systemInstructions).toContain('docs/decisions.yaml')
+    expect(bundle.systemInstructions).toContain('docs/evidence/project-target-samples.json')
+    expect(bundle.systemInstructions).not.toMatch(/Current demand context|Current progress|keep-current-contract|private-sample|history\/previous.md/)
     expect(bundle.sources.find(source => source.kind === 'knowledge')).toMatchObject({ label: 'workspace knowledge catalog' })
     expect(bundle.systemInstructions).toContain('docs/guides/evaluation.md')
     expect(bundle.systemInstructions).toContain('CodyWork demand startup')

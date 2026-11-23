@@ -39,6 +39,7 @@ import { AiCodeReportService } from '../services/aiCodeReports.js'
 import { FollowupService } from '../services/followupService.js'
 import { AgentFollowupTools, FOLLOWUP_TOOL_NAMESPACE } from '../services/agentFollowups.js'
 import { getParallelView, saveParallelView } from '../services/parallelView.js'
+import { ConversationRepository } from '../services/conversationRepository.js'
 
 export const CONVERSATION_WEBSOCKET_MAX_BUFFERED_BYTES = 4 * 1024 * 1024
 
@@ -342,9 +343,16 @@ function createRuntimeRegistry(ctx: AppContext): CodyWorkRuntimeRegistry {
     || process.env.CODY_GEMINI_COMMAND?.trim()
     || DEFAULT_GEMINI_CLI_COMMAND
   const traeCommand = saved.commands.trae?.trim() || process.env.CODY_TRAE_COMMAND?.trim() || 'traex acp serve'
+  const conversations = new ConversationRepository(db)
   return createCodyWorkRuntimeRegistry(saved.runtimeType, {
     codex: runtime,
-    gemini: new CodyWorkGeminiRuntime({ command: geminiCommand }),
+    gemini: new CodyWorkGeminiRuntime({
+      command: geminiCommand,
+      initialContext: {
+        isSent: conversation => conversations.hasGeminiInitialContext(conversation),
+        markSent: conversation => conversations.markGeminiInitialContext(conversation),
+      },
+    }),
     trae: new CodyWorkTraeRuntime({ command: traeCommand }),
   })
 }

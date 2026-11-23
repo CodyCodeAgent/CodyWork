@@ -89,6 +89,44 @@ describe('CodyWorkGeminiRuntime (Antigravity CLI ACP)', () => {
     await expect(missing.createConversation({ context })).rejects.toThrow('未找到 Antigravity CLI 可执行文件')
   })
 
+  it('delivers initial context once per native session and keeps it pending after a failed prompt', async () => {
+    const fixture = fileURLToPath(new URL('./fixtures/trae-acp-runtime.mjs', import.meta.url))
+    const initialized = new Set<string>()
+    const options = {
+      command: `${process.execPath} ${fixture}`,
+      env: { CODY_FIXTURE_ACP_ECHO_PROMPT: '1' },
+      initialContext: {
+        isSent: ({ nativeId }: { nativeId: string }) => initialized.has(nativeId),
+        markSent: ({ nativeId }: { nativeId: string }) => { initialized.add(nativeId) },
+      },
+    }
+    const runtime = new CodyWorkGeminiRuntime(options)
+    const restored = new CodyWorkGeminiRuntime(options)
+    const context = makeWorkspace()
+    writeFileSync(join(context.workspacePath, 'AGENTS.md'), 'Synthetic initialization instruction.')
+    context.instructionBundle = resolveInstructionBundle({ workspacePath: context.workspacePath, workspaceSession: true })
+    try {
+      const conversation = await runtime.createConversation({ context })
+      await expect(runtime.sendTurn({ conversation, prompt: 'NETWORK_REQUEST_FAILURE' })).rejects.toThrow('Internal error')
+      expect(initialized.has(conversation.nativeId)).toBe(false)
+
+      const first = await runtime.sendTurn({ conversation, prompt: 'First user message' })
+      expect(first.finalText).toMatch(/^First user message[\s\S]*Synthetic initialization instruction\./)
+      expect(first.events.find(event => event.type === 'user.completed')?.data.text).toBe('First user message')
+      expect((await runtime.sendTurn({ conversation, prompt: 'Second user message' })).finalText).toBe('Second user message')
+      await runtime.close()
+
+      const resumed = await restored.resumeConversation({ context, conversationId: conversation.id, nativeId: conversation.nativeId })
+      expect((await restored.sendTurn({ conversation: resumed, prompt: 'After resume' })).finalText).toBe('After resume')
+      restored.releaseConversation(resumed)
+      const replacement = await restored.createConversation({ context, conversationId: conversation.id })
+      expect(replacement.nativeId).not.toBe(resumed.nativeId)
+      expect((await restored.sendTurn({ conversation: replacement, prompt: 'New native session' })).finalText).toContain('Synthetic initialization instruction.')
+    } finally {
+      await Promise.all([runtime.close(), restored.close()])
+    }
+  })
+
   it('does not report a model as ready when ACP streams an eligibility error as text', async () => {
     const fixture = fileURLToPath(new URL('./fixtures/trae-acp-runtime.mjs', import.meta.url))
     const runtime = new CodyWorkGeminiRuntime({

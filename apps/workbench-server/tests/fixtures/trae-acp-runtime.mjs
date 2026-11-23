@@ -79,6 +79,8 @@ const app = acp.agent({ name: 'trae-acp-fixture' })
       // Simulate an ACP agent that accepts the cancellation notification but
       // never settles the in-flight prompt. CodyWork must force-release it.
       await new Promise(() => {})
+    } else if (process.env.CODY_FIXTURE_ACP_ECHO_PROMPT === '1') {
+      await update(client, params.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
     } else {
       await update(client, params.sessionId, { sessionUpdate: 'tool_call', toolCallId: 'fixture-read', title: 'Read fixture', kind: 'read', status: 'in_progress' })
       await update(client, params.sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'TRAE_FIXTURE_OK' } })

@@ -924,6 +924,10 @@ export class WorkbenchDb {
       const violations = this.db.prepare('PRAGMA foreign_key_check').all()
       if (violations.length) throw new Error('Conversation runtime migration left invalid foreign keys')
     }
+    const currentConversationColumns = this.db.prepare('PRAGMA table_info(conversations)').all() as { name: string }[]
+    if (!currentConversationColumns.some(column => column.name === 'gemini_initial_context_native_id')) {
+      this.db.exec('ALTER TABLE conversations ADD COLUMN gemini_initial_context_native_id TEXT')
+    }
     const runtimeColumns = this.db.prepare('PRAGMA table_info(runtime_settings)').all() as { name?: string }[]
     if (!runtimeColumns.some(column => column.name === 'commands_json')) {
       const legacy = this.db.prepare('SELECT * FROM runtime_settings WHERE id = 1').get() as {
