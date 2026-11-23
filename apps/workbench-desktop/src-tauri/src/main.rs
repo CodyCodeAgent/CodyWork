@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod connections;
+mod updates;
 
 use connections::{check, client, http_url, server_url, ConnectionCheck, Connections, Server};
 use reqwest::Client;
@@ -212,9 +213,11 @@ fn show_workbench(app: &AppHandle, server: &Server, url: Url) -> Result<(), Stri
 
 fn menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let settings = MenuItem::with_id(app, SETTINGS, "服务器连接…", true, Some("CmdOrCtrl+,"))?;
+    let check_updates = MenuItem::with_id(app, updates::WINDOW, "检查更新…", true, None::<&str>)?;
     let reload = MenuItem::with_id(app, "reload", "刷新工作台", true, Some("CmdOrCtrl+R"))?;
     let app_menu = SubmenuBuilder::new(app, "CodyWork")
         .item(&settings)
+        .item(&check_updates)
         .separator()
         .quit()
         .build()?;
@@ -251,16 +254,23 @@ fn restore(app: AppHandle, server: Server) {
                     Some(format!("无法恢复「{}」的连接。{error}", server.name));
                 let _ = show_settings(&handle);
             }
+            updates::check(handle, true);
         });
     });
 }
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             SETTINGS => {
                 let _ = show_settings(app);
+            }
+            updates::WINDOW => {
+                if updates::show(app).is_ok() {
+                    updates::check(app.clone(), false);
+                }
             }
             "reload" => {
                 if let Some(window) = app
@@ -290,10 +300,12 @@ fn main() {
                 connections: Mutex::new(connections),
                 startup_error: Mutex::new(startup_error),
             });
+            app.manage(updates::DesktopUpdates::new(app.handle()));
             if let Some(server) = default {
                 restore(app.handle().clone(), server);
             } else {
                 show_settings(app.handle())?;
+                updates::check(app.handle().clone(), true);
             }
             Ok(())
         })
@@ -303,7 +315,11 @@ fn main() {
             save_server,
             connect_server,
             remove_server,
-            set_default_server
+            set_default_server,
+            updates::open_update_settings,
+            updates::desktop_update_status,
+            updates::desktop_check_updates,
+            updates::desktop_install_update
         ])
         .build(tauri::generate_context!())
         .expect("failed to initialize CodyWork Desktop")

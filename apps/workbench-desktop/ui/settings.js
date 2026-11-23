@@ -117,6 +117,9 @@ async function load() {
   if (settings.startupError) feedback(status, settings.startupError, true)
 }
 
+byId('about-updates').addEventListener('click', () => {
+  invoke('open_update_settings').catch(() => feedback(status, '无法打开更新窗口。', true))
+})
 byId('add-server').addEventListener('click', () => showEditor())
 byId('cancel-edit').addEventListener('click', () => {
   editor.hidden = true

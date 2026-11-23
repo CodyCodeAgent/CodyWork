@@ -7,6 +7,10 @@ fn main() {
             "connect_server",
             "remove_server",
             "set_default_server",
+            "open_update_settings",
+            "desktop_update_status",
+            "desktop_check_updates",
+            "desktop_install_update",
         ]),
     ))
     .expect("could not build CodyWork Desktop")

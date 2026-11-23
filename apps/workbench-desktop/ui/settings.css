@@ -97,3 +97,13 @@ form > .actions, .feedback { margin-top: 14px; }
   li { grid-template-columns: 1fr; }
   .panel { padding: 15px; }
 }
+
+.about-updates { margin-inline-start: auto; flex-shrink: 0; }
+.update-notes { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.update-progress { display: block; width: 100%; margin: 12px 0; accent-color: var(--accent); }
+.update-actions { margin-top: 16px; }
+
+@media (max-width: 470px) {
+  .intro:has(.about-updates) { flex-wrap: wrap; }
+  .about-updates { margin-inline-start: 58px; }
+}
